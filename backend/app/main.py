@@ -1,11 +1,21 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.stocks import router as stocks_router
 from app.api.analysis import router as analysis_router
 from app.api.favorites import router as favorites_router
+from app.database import engine
 
-app = FastAPI(title="StockInsight API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await engine.dispose()
+
+
+app = FastAPI(title="StockInsight API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,5 +31,5 @@ app.include_router(favorites_router)
 
 
 @app.get("/api/health")
-def health_check():
+async def health_check():
     return {"status": "ok"}
