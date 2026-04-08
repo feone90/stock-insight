@@ -1,10 +1,30 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin123!
+      POSTGRES_DB: stockinsight
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql+asyncpg://postgres:admin123!@db:5432/stockinsight
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build: ./frontend
@@ -14,3 +34,6 @@ services:
       - NEXT_PUBLIC_API_URL=http://backend:8000
     depends_on:
       - backend
+
+volumes:
+  pgdata:
