@@ -51,3 +51,15 @@ class StatsInfo(BaseModel):
     dividend_yield: float
     high_52w: float
     low_52w: float
+
+
+class StockDetailResponse(BaseModel):
+    ticker: str
+    name: str
+    market: str
+    sector: str
+    current_price: float
+    change: float
+    change_percent: float
+    is_favorite: bool
+    stats: StatsInfo | None
