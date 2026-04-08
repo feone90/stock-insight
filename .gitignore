@@ -2,3 +2,6 @@
 backend/venv/
 __pycache__/
 *.pyc
+.env.local
+node_modules/
+.next/
