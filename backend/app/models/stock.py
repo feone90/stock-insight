@@ -19,4 +19,5 @@ class Stock(Base):
     current_price: Mapped[float] = mapped_column(Float, default=0)
     change: Mapped[float] = mapped_column(Float, default=0)
     change_percent: Mapped[float] = mapped_column(Float, default=0)
+    dart_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
