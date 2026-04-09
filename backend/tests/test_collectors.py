@@ -18,6 +18,7 @@ from app.collectors.stock_price import sync_prices
 from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
+from app.collectors.exchange_rate import sync_exchange_rates
 from app.models import Stock
 
 
@@ -168,4 +169,23 @@ async def test_sync_disclosures_us_stock_skip(db):
 
     result = await sync_disclosures(db, stock)
     assert result["disclosures_synced"] == 0
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_exchange_rates(db):
+    """환율 동기화 — ExchangeRate API mock"""
+    mock_response = {
+        "result": "success",
+        "rates": {
+            "KRW": 1350.25,
+            "EUR": 0.92,
+            "JPY": 154.30,
+        },
+    }
+
+    with patch("app.collectors.exchange_rate.fetch_exchange_rates", return_value=mock_response):
+        result = await sync_exchange_rates(db)
+
+    assert result["exchange_rates_synced"] >= 0
     assert "error" not in result
