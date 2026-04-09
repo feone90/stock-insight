@@ -13,6 +13,9 @@ def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:
     """yfinance로 US 주가 조회 (동기 함수)."""
     import yfinance as yf
     df = yf.download(ticker, start=start, progress=False, auto_adjust=True)
+    # yfinance returns MultiIndex columns (Price, Ticker) — flatten
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel("Ticker")
     return df
 
 
