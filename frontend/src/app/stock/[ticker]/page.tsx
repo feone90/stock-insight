@@ -33,13 +33,23 @@ export default function StockDashboard() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedKeyword, setSelectedKeyword] = useState<KeywordDetail | null>(null);
 
+  const periodToDays: Record<string, number> = {
+    daily: 30,
+    weekly: 90,
+    monthly: 365,
+    quarterly: 365,
+    semi_annual: 730,
+    annual: 1095,
+  };
+
   useEffect(() => {
     setLoading(true);
     setSelectedKeyword(null);
     setSelectedDate(null);
+    const days = periodToDays[period] ?? 90;
     Promise.all([
       getStock(ticker),
-      getStockPrices(ticker),
+      getStockPrices(ticker, days),
       getAnalysis(ticker, period).catch(() => null),
     ])
       .then(([s, p, a]) => {

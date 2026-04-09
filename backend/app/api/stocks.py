@@ -100,11 +100,31 @@ async def stock_prices(ticker: str, days: int = 30, db: AsyncSession = Depends(g
     if not stock:
         raise HTTPException(status_code=404, detail=STOCK_NOT_FOUND)
 
+    from datetime import date as date_type, timedelta
+    from sqlalchemy import func as sql_func
+
+    # 요청 기간의 시작일
+    requested_start = date_type.today() - timedelta(days=days)
+
+    # DB에서 가장 오래된 데이터 확인
+    oldest_result = await db.execute(
+        select(sql_func.min(PriceHistory.date))
+        .where(PriceHistory.stock_id == stock.id)
+    )
+    oldest_date = oldest_result.scalar()
+
+    # 데이터가 없거나, 요청 기간보다 데이터가 부족하면 자동 수집
+    if oldest_date is None or oldest_date > requested_start:
+        from app.collectors.stock_price import sync_prices
+        await sync_prices(db, stock, days=days)
+
     prices_result = await db.execute(
         select(PriceHistory)
-        .where(PriceHistory.stock_id == stock.id)
-        .order_by(PriceHistory.date.desc())
-        .limit(days)
+        .where(
+            PriceHistory.stock_id == stock.id,
+            PriceHistory.date >= requested_start,
+        )
+        .order_by(PriceHistory.date.asc())
     )
     prices = prices_result.scalars().all()
 
@@ -117,7 +137,7 @@ async def stock_prices(ticker: str, days: int = 30, db: AsyncSession = Depends(g
             "close": p.close,
             "volume": p.volume,
         }
-        for p in reversed(prices)
+        for p in prices
     ]
 
 

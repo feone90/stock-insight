@@ -26,9 +26,9 @@ def fetch_kr_prices(ticker: str, start: str) -> pd.DataFrame:
     return df
 
 
-async def sync_prices(db: AsyncSession, stock: Stock) -> dict:
-    """종목의 최근 1년 주가를 동기화한다."""
-    start = (date.today() - timedelta(days=365)).isoformat()
+async def sync_prices(db: AsyncSession, stock: Stock, days: int = 365) -> dict:
+    """종목의 주가를 동기화한다. days로 기간 지정 가능."""
+    start = (date.today() - timedelta(days=days)).isoformat()
 
     try:
         if stock.market in ("NYSE", "NASDAQ"):
