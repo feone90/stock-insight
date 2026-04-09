@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
-app = FastAPI(title="StockInsight API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="StockInsight API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
