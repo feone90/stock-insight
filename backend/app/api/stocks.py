@@ -8,6 +8,8 @@ from app.models.financial import Financial
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
+STOCK_NOT_FOUND = "종목을 찾을 수 없습니다"
+
 
 @router.get("/search")
 async def search(q: str = "", db: AsyncSession = Depends(get_db)):
@@ -37,7 +39,7 @@ async def stock_detail(ticker: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Stock).where(Stock.ticker == ticker))
     stock = result.scalar_one_or_none()
     if not stock:
-        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=STOCK_NOT_FOUND)
 
     fav_result = await db.execute(
         select(Favorite).where(Favorite.stock_id == stock.id)
@@ -96,7 +98,7 @@ async def stock_prices(ticker: str, days: int = 30, db: AsyncSession = Depends(g
     result = await db.execute(select(Stock).where(Stock.ticker == ticker))
     stock = result.scalar_one_or_none()
     if not stock:
-        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
+        raise HTTPException(status_code=404, detail=STOCK_NOT_FOUND)
 
     prices_result = await db.execute(
         select(PriceHistory)
@@ -116,4 +118,57 @@ async def stock_prices(ticker: str, days: int = 30, db: AsyncSession = Depends(g
             "volume": p.volume,
         }
         for p in reversed(prices)
+    ]
+
+
+@router.get("/{ticker}/news")
+async def stock_news(ticker: str, limit: int = 50, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Stock).where(Stock.ticker == ticker))
+    stock = result.scalar_one_or_none()
+    if not stock:
+        raise HTTPException(status_code=404, detail=STOCK_NOT_FOUND)
+
+    from app.models.news import News
+    news_result = await db.execute(
+        select(News)
+        .where(News.stock_id == stock.id)
+        .order_by(News.published_at.desc())
+        .limit(limit)
+    )
+    news_list = news_result.scalars().all()
+
+    return [
+        {
+            "title": n.title,
+            "source": n.source,
+            "url": n.url,
+            "published_at": n.published_at.isoformat(),
+        }
+        for n in news_list
+    ]
+
+
+@router.get("/{ticker}/disclosures")
+async def stock_disclosures(ticker: str, limit: int = 30, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Stock).where(Stock.ticker == ticker))
+    stock = result.scalar_one_or_none()
+    if not stock:
+        raise HTTPException(status_code=404, detail=STOCK_NOT_FOUND)
+
+    from app.models.disclosure import Disclosure
+    disc_result = await db.execute(
+        select(Disclosure)
+        .where(Disclosure.stock_id == stock.id)
+        .order_by(Disclosure.disclosed_at.desc())
+        .limit(limit)
+    )
+    disc_list = disc_result.scalars().all()
+
+    return [
+        {
+            "title": d.title,
+            "disclosure_type": d.disclosure_type,
+            "disclosed_at": d.disclosed_at.isoformat(),
+        }
+        for d in disc_list
     ]

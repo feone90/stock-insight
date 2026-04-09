@@ -7,6 +7,7 @@ from app.api.stocks import router as stocks_router
 from app.api.analysis import router as analysis_router
 from app.api.favorites import router as favorites_router
 from app.api.admin import router as admin_router
+from app.api.exchange_rates import router as exchange_rates_router
 from app.database import engine
 
 
@@ -30,6 +31,7 @@ app.include_router(stocks_router)
 app.include_router(analysis_router)
 app.include_router(favorites_router)
 app.include_router(admin_router)
+app.include_router(exchange_rates_router)
 
 
 @app.get("/api/health")
