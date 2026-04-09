@@ -1,7 +1,10 @@
 .superpowers/
+.claude/
 backend/venv/
+backend/.coverage
 __pycache__/
 *.pyc
+*.swp
 .env
 .env.local
 node_modules/
