@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CommandDialog,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-} from "@/components/ui/command";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { searchStocks } from "@/services/api";
 import type { Stock } from "@/types/stock";
 
@@ -17,6 +16,8 @@ export function StockSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Stock[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -31,6 +32,16 @@ export function StockSearch() {
   }, []);
 
   useEffect(() => {
+    if (open) {
+      setTimeout(() => inputRef.current?.focus(), 100);
+    } else {
+      setQuery("");
+      setResults([]);
+      setSelectedIndex(0);
+    }
+  }, [open]);
+
+  useEffect(() => {
     if (query.length < 1) {
       setResults([]);
       return;
@@ -38,6 +49,7 @@ export function StockSearch() {
     const timer = setTimeout(async () => {
       const data = await searchStocks(query);
       setResults(data);
+      setSelectedIndex(0);
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
@@ -46,6 +58,18 @@ export function StockSearch() {
     setOpen(false);
     setQuery("");
     router.push(`/stock/${ticker}`);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSelectedIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === "Enter" && results[selectedIndex]) {
+      handleSelect(results[selectedIndex].ticker);
+    }
   };
 
   return (
@@ -60,34 +84,54 @@ export function StockSearch() {
           ⌘K
         </kbd>
       </button>
-      <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput
-          placeholder="종목명 또는 티커를 입력하세요..."
-          value={query}
-          onValueChange={setQuery}
-        />
-        <CommandList>
-          <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
-          <CommandGroup heading="종목">
-            {results.map((stock) => (
-              <CommandItem
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          className="top-1/3 translate-y-0 overflow-hidden rounded-xl p-0 sm:max-w-md"
+          showCloseButton={false}
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>종목 검색</DialogTitle>
+            <DialogDescription>종목명 또는 티커를 입력하세요</DialogDescription>
+          </DialogHeader>
+          <div className="p-3 pb-0">
+            <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2">
+              <span className="text-slate-500">🔍</span>
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="종목명 또는 티커를 입력하세요..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="w-full bg-transparent text-sm text-slate-50 outline-none placeholder:text-slate-500"
+              />
+            </div>
+          </div>
+          <div className="max-h-72 overflow-y-auto p-2">
+            {query.length > 0 && results.length === 0 && (
+              <p className="py-6 text-center text-sm text-slate-500">
+                검색 결과가 없습니다.
+              </p>
+            )}
+            {results.map((stock, index) => (
+              <button
                 key={stock.ticker}
-                value={stock.ticker}
-                onSelect={() => handleSelect(stock.ticker)}
+                onClick={() => handleSelect(stock.ticker)}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                  index === selectedIndex
+                    ? "bg-slate-800 text-slate-50"
+                    : "text-slate-300 hover:bg-slate-800/50"
+                }`}
               >
-                <div className="flex items-center gap-3">
-                  <span className="font-medium text-slate-50">
-                    {stock.name}
-                  </span>
-                  <span className="text-sm text-slate-500">
-                    {stock.ticker} · {stock.market}
-                  </span>
-                </div>
-              </CommandItem>
+                <span className="font-medium">{stock.name}</span>
+                <span className="text-sm text-slate-500">
+                  {stock.ticker} · {stock.market}
+                </span>
+              </button>
             ))}
-          </CommandGroup>
-        </CommandList>
-      </CommandDialog>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
