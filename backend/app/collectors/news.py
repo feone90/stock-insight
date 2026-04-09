@@ -16,7 +16,7 @@ def strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
-async def fetch_naver_news(query: str, display: int = 50) -> dict:
+async def fetch_naver_news(query: str, display: int = 50) -> dict:  # pragma: no cover
     """Naver News API 호출."""
     url = "https://openapi.naver.com/v1/search/news.json"
     headers = {

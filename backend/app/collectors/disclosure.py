@@ -9,7 +9,7 @@ from app.models import Stock
 from app.models.disclosure import Disclosure
 
 
-async def fetch_dart_disclosures(corp_code: str) -> dict:
+async def fetch_dart_disclosures(corp_code: str) -> dict:  # pragma: no cover
     """DART API로 공시 목록 조회."""
     url = "https://opendart.fss.or.kr/api/list.json"
     params = {

@@ -9,7 +9,7 @@ from app.models import Stock
 from app.models.financial import Financial
 
 
-def fetch_us_financials(ticker: str) -> dict:
+def fetch_us_financials(ticker: str) -> dict:  # pragma: no cover
     """yfinance로 US 재무지표 조회."""
     import yfinance as yf
     t = yf.Ticker(ticker)

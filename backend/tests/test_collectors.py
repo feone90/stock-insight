@@ -1,5 +1,20 @@
-from app.config import Settings
+import pytest
+from datetime import date, timedelta
+from unittest.mock import patch, MagicMock, AsyncMock
 
+import pandas as pd
+from sqlalchemy import select
+
+from app.collectors.stock_price import sync_prices
+from app.collectors.financials import sync_financials
+from app.collectors.news import sync_news, strip_html
+from app.collectors.disclosure import sync_disclosures
+from app.collectors.exchange_rate import sync_exchange_rates
+from app.config import Settings
+from app.models import Stock
+
+
+# ==================== Config ====================
 
 def test_settings_defaults():
     s = Settings(database_url="postgresql+asyncpg://test:test@localhost/test")
@@ -8,39 +23,28 @@ def test_settings_defaults():
     assert s.naver_client_secret == ""
 
 
-import pytest
-import pytest_asyncio
-from datetime import date, timedelta
-from unittest.mock import patch, MagicMock
-import pandas as pd
+# ==================== stock_price ====================
 
-from app.collectors.stock_price import sync_prices
-from app.collectors.financials import sync_financials
-from app.collectors.news import sync_news
-from app.collectors.disclosure import sync_disclosures
-from app.collectors.exchange_rate import sync_exchange_rates
-from app.models import Stock
+def _make_mock_df(days=3):
+    today = date.today()
+    dates = pd.date_range(end=today, periods=days, freq="B")
+    return pd.DataFrame({
+        "Open": [150.0 + i for i in range(days)],
+        "High": [155.0 + i for i in range(days)],
+        "Low": [149.0 + i for i in range(days)],
+        "Close": [153.0 + i for i in range(days)],
+        "Volume": [1000000 + i * 100000 for i in range(days)],
+    }, index=dates)
 
 
 @pytest.mark.asyncio
 async def test_sync_prices_us_stock(db):
-    """US 종목 주가 동기화 — yfinance mock 사용"""
-    from sqlalchemy import select
+    """US 종목 주가 동기화"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalars().first()
-    assert stock is not None, "No US stock found in DB"
+    assert stock is not None
 
-    today = date.today()
-    dates = pd.date_range(end=today, periods=3, freq="B")
-    mock_df = pd.DataFrame({
-        "Open": [150.0, 151.0, 152.0],
-        "High": [155.0, 156.0, 157.0],
-        "Low": [149.0, 150.0, 151.0],
-        "Close": [153.0, 154.0, 155.0],
-        "Volume": [1000000, 1100000, 1200000],
-    }, index=dates)
-
-    with patch("app.collectors.stock_price.fetch_us_prices", return_value=mock_df):
+    with patch("app.collectors.stock_price.fetch_us_prices", return_value=_make_mock_df()):
         result = await sync_prices(db, stock)
 
     assert result["prices_synced"] >= 0
@@ -49,20 +53,12 @@ async def test_sync_prices_us_stock(db):
 
 @pytest.mark.asyncio
 async def test_sync_prices_kr_stock(db):
-    """KR 종목 주가 동기화 — FDR mock 사용"""
-    from sqlalchemy import select
+    """KR 종목 주가 동기화"""
     result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
     stock = result.scalar_one()
 
-    today = date.today()
-    dates = pd.date_range(end=today, periods=3, freq="B")
-    mock_df = pd.DataFrame({
-        "Open": [71000, 71500, 72000],
-        "High": [72000, 72500, 73000],
-        "Low": [70500, 71000, 71500],
-        "Close": [71500, 72000, 72500],
-        "Volume": [5000000, 5500000, 6000000],
-    }, index=dates)
+    mock_df = _make_mock_df()
+    mock_df["Close"] = [71500, 72000, 72500]
 
     with patch("app.collectors.stock_price.fetch_kr_prices", return_value=mock_df):
         result = await sync_prices(db, stock)
@@ -72,9 +68,85 @@ async def test_sync_prices_kr_stock(db):
 
 
 @pytest.mark.asyncio
+async def test_sync_prices_custom_days(db):
+    """days 파라미터로 기간 지정"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.stock_price.fetch_kr_prices", return_value=_make_mock_df(5)):
+        result = await sync_prices(db, stock, days=730)
+
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_prices_empty_df(db):
+    """빈 DataFrame 반환 시"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.stock_price.fetch_kr_prices", return_value=pd.DataFrame()):
+        result = await sync_prices(db, stock)
+
+    assert result["prices_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_prices_none_df(db):
+    """None 반환 시"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.stock_price.fetch_kr_prices", return_value=None):
+        result = await sync_prices(db, stock)
+
+    assert result["prices_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_prices_exception(db):
+    """외부 API 예외 처리"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.stock_price.fetch_kr_prices", side_effect=Exception("Network error")):
+        result = await sync_prices(db, stock)
+
+    assert result["prices_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_prices_single_row(db):
+    """데이터 1행 — prev == latest 분기"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.stock_price.fetch_kr_prices", return_value=_make_mock_df(1)):
+        result = await sync_prices(db, stock)
+
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_prices_updates_stock(db):
+    """동기화 후 stock.current_price 업데이트 확인"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    mock_df = _make_mock_df(3)
+    with patch("app.collectors.stock_price.fetch_kr_prices", return_value=mock_df):
+        await sync_prices(db, stock)
+
+    assert stock.current_price == float(mock_df.iloc[-1]["Close"])
+
+
+# ==================== financials ====================
+
+@pytest.mark.asyncio
 async def test_sync_financials_us_stock(db):
-    """US 종목 재무지표 동기화 — yfinance mock"""
-    from sqlalchemy import select
+    """US 종목 재무지표 동기화"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalar_one()
 
@@ -92,14 +164,105 @@ async def test_sync_financials_us_stock(db):
     with patch("app.collectors.financials.fetch_us_financials", return_value=mock_info):
         result = await sync_financials(db, stock)
 
-    assert result["financials_synced"] >= 0
+    assert result["financials_synced"] == 1
     assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_empty_info(db):
+    """빈 info dict 반환 시"""
+    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.financials.fetch_us_financials", return_value={}):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_none_info(db):
+    """None 반환 시"""
+    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.financials.fetch_us_financials", return_value=None):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_kr_no_dart(db):
+    """KR 종목 — DART 코드/키 없음"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = None
+
+    result = await sync_financials(db, stock)
+    assert result["financials_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_kr_with_dart(db):
+    """KR 종목 — DART 있지만 미구현"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = "00126380"
+
+    with patch("app.collectors.financials.settings") as mock_settings:
+        mock_settings.dart_api_key = "test_key"
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 0
+    assert "미구현" in result.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_exception(db):
+    """yfinance 예외 시"""
+    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.financials.fetch_us_financials", side_effect=Exception("API error")):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_partial_data(db):
+    """일부 필드만 있는 경우"""
+    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
+    stock = result.scalar_one()
+
+    mock_info = {
+        "trailingPE": 15.0,
+        "marketCap": 100000000,
+        # 나머지 필드 없음
+    }
+
+    with patch("app.collectors.financials.fetch_us_financials", return_value=mock_info):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 1
+
+
+# ==================== news ====================
+
+def test_strip_html():
+    assert strip_html("<b>테스트</b>") == "테스트"
+    assert strip_html("plain text") == "plain text"
+    assert strip_html("<a href='x'>링크</a> 텍스트") == "링크 텍스트"
 
 
 @pytest.mark.asyncio
 async def test_sync_news(db):
     """뉴스 동기화 — Naver API mock"""
-    from sqlalchemy import select
     result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
     stock = result.scalar_one()
 
@@ -119,7 +282,7 @@ async def test_sync_news(db):
     }
 
     with patch("app.collectors.news.settings") as mock_settings, \
-         patch("app.collectors.news.fetch_naver_news", return_value=mock_response):
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
         mock_settings.naver_client_id = "test_id"
         mock_settings.naver_client_secret = "test_secret"
         result = await sync_news(db, stock)
@@ -129,9 +292,82 @@ async def test_sync_news(db):
 
 
 @pytest.mark.asyncio
+async def test_sync_news_no_api_key(db):
+    """API 키 미설정 시"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.news.settings") as mock_settings:
+        mock_settings.naver_client_id = ""
+        mock_settings.naver_client_secret = ""
+        result = await sync_news(db, stock)
+
+    assert result["news_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_news_exception(db):
+    """API 호출 실패"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.news.settings") as mock_settings, \
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, side_effect=Exception("timeout")):
+        mock_settings.naver_client_id = "test_id"
+        mock_settings.naver_client_secret = "test_secret"
+        result = await sync_news(db, stock)
+
+    assert result["news_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_news_bad_date(db):
+    """잘못된 pubDate 형식 — fallback to datetime.now"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    mock_response = {
+        "items": [
+            {
+                "title": "뉴스 제목",
+                "link": "https://news.example.com/bad-date",
+                "pubDate": "invalid-date-format",
+            },
+        ]
+    }
+
+    with patch("app.collectors.news.settings") as mock_settings, \
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+        mock_settings.naver_client_id = "test_id"
+        mock_settings.naver_client_secret = "test_secret"
+        result = await sync_news(db, stock)
+
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_news_empty_items(db):
+    """items 비어있을 때"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.news.settings") as mock_settings, \
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value={"items": []}):
+        mock_settings.naver_client_id = "test_id"
+        mock_settings.naver_client_secret = "test_secret"
+        result = await sync_news(db, stock)
+
+    assert result["news_synced"] == 0
+    assert "error" not in result
+
+
+# ==================== disclosure ====================
+
+@pytest.mark.asyncio
 async def test_sync_disclosures_kr_stock(db):
-    """KR 종목 공시 동기화 — DART API mock"""
-    from sqlalchemy import select
+    """KR 종목 공시 동기화"""
     result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
     stock = result.scalar_one()
     stock.dart_code = "00126380"
@@ -144,15 +380,10 @@ async def test_sync_disclosures_kr_stock(db):
                 "rcept_dt": "20260401",
                 "flr_nm": "삼성전자",
             },
-            {
-                "report_nm": "주요사항보고서(자기주식취득결정)",
-                "rcept_dt": "20260325",
-                "flr_nm": "삼성전자",
-            },
         ],
     }
 
-    with patch("app.collectors.disclosure.fetch_dart_disclosures", return_value=mock_response), \
+    with patch("app.collectors.disclosure.fetch_dart_disclosures", new_callable=AsyncMock, return_value=mock_response), \
          patch("app.collectors.disclosure.settings", dart_api_key="test_key"):
         result = await sync_disclosures(db, stock)
 
@@ -163,7 +394,6 @@ async def test_sync_disclosures_kr_stock(db):
 @pytest.mark.asyncio
 async def test_sync_disclosures_us_stock_skip(db):
     """US 종목은 공시 수집 스킵"""
-    from sqlalchemy import select
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalar_one()
 
@@ -173,19 +403,186 @@ async def test_sync_disclosures_us_stock_skip(db):
 
 
 @pytest.mark.asyncio
-async def test_sync_exchange_rates(db):
-    """환율 동기화 — ExchangeRate API mock"""
+async def test_sync_disclosures_no_dart_key(db):
+    """DART API 키 미설정"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    with patch("app.collectors.disclosure.settings", dart_api_key=""):
+        result = await sync_disclosures(db, stock)
+
+    assert result["disclosures_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_disclosures_no_dart_code(db):
+    """DART 기업코드 미설정"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = None
+
+    with patch("app.collectors.disclosure.settings", dart_api_key="test_key"):
+        result = await sync_disclosures(db, stock)
+
+    assert result["disclosures_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_disclosures_api_error(db):
+    """DART API 오류 응답"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = "00126380"
+
+    mock_response = {"status": "013", "message": "인증키 오류"}
+
+    with patch("app.collectors.disclosure.fetch_dart_disclosures", new_callable=AsyncMock, return_value=mock_response), \
+         patch("app.collectors.disclosure.settings", dart_api_key="test_key"):
+        result = await sync_disclosures(db, stock)
+
+    assert result["disclosures_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_disclosures_exception(db):
+    """DART API 호출 예외"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = "00126380"
+
+    with patch("app.collectors.disclosure.fetch_dart_disclosures", new_callable=AsyncMock, side_effect=Exception("timeout")), \
+         patch("app.collectors.disclosure.settings", dart_api_key="test_key"):
+        result = await sync_disclosures(db, stock)
+
+    assert result["disclosures_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_disclosures_bad_date(db):
+    """잘못된 날짜 형식 → fallback to datetime.now"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = "00126380"
+
     mock_response = {
-        "result": "success",
-        "rates": {
-            "KRW": 1350.25,
-            "EUR": 0.92,
-            "JPY": 154.30,
-        },
+        "status": "000",
+        "list": [{"report_nm": "보고서", "rcept_dt": "bad-date", "flr_nm": "삼성전자"}],
     }
 
-    with patch("app.collectors.exchange_rate.fetch_exchange_rates", return_value=mock_response):
+    with patch("app.collectors.disclosure.fetch_dart_disclosures", new_callable=AsyncMock, return_value=mock_response), \
+         patch("app.collectors.disclosure.settings", dart_api_key="test_key"):
+        result = await sync_disclosures(db, stock)
+
+    assert "error" not in result
+
+
+# ==================== exchange_rate ====================
+
+@pytest.mark.asyncio
+async def test_sync_exchange_rates(db):
+    """환율 동기화"""
+    mock_response = {
+        "result": "success",
+        "rates": {"KRW": 1350.25, "EUR": 0.92, "JPY": 154.30},
+    }
+
+    with patch("app.collectors.exchange_rate.fetch_exchange_rates", new_callable=AsyncMock, return_value=mock_response):
         result = await sync_exchange_rates(db)
 
-    assert result["exchange_rates_synced"] >= 0
+    assert result["exchange_rates_synced"] == 3
     assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_exchange_rates_api_error(db):
+    """API 응답 오류"""
+    mock_response = {"result": "error"}
+
+    with patch("app.collectors.exchange_rate.fetch_exchange_rates", new_callable=AsyncMock, return_value=mock_response):
+        result = await sync_exchange_rates(db)
+
+    assert result["exchange_rates_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_exchange_rates_exception(db):
+    """API 호출 예외"""
+    with patch("app.collectors.exchange_rate.fetch_exchange_rates", new_callable=AsyncMock, side_effect=Exception("timeout")):
+        result = await sync_exchange_rates(db)
+
+    assert result["exchange_rates_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_exchange_rates_missing_currency(db):
+    """일부 통화 누락"""
+    mock_response = {
+        "result": "success",
+        "rates": {"KRW": 1350.25},  # EUR, JPY 누락
+    }
+
+    with patch("app.collectors.exchange_rate.fetch_exchange_rates", new_callable=AsyncMock, return_value=mock_response):
+        result = await sync_exchange_rates(db)
+
+    assert result["exchange_rates_synced"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_prices_zero_prev_close(db):
+    """prev Close가 0인 경우 change_percent 계산 스킵"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    today = date.today()
+    dates = pd.date_range(end=today, periods=2, freq="B")
+    mock_df = pd.DataFrame({
+        "Open": [0, 100],
+        "High": [0, 105],
+        "Low": [0, 95],
+        "Close": [0, 100],
+        "Volume": [0, 1000000],
+    }, index=dates)
+
+    with patch("app.collectors.stock_price.fetch_kr_prices", return_value=mock_df):
+        result = await sync_prices(db, stock)
+
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_news_duplicate(db):
+    """동일 URL 뉴스 중복 삽입 시 count 증가 안 함"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+
+    mock_response = {
+        "items": [
+            {
+                "title": "중복 뉴스",
+                "link": "https://news.example.com/dup-test-unique",
+                "pubDate": "Wed, 09 Apr 2026 10:00:00 +0900",
+            },
+        ]
+    }
+
+    with patch("app.collectors.news.settings") as mock_settings, \
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+        mock_settings.naver_client_id = "test_id"
+        mock_settings.naver_client_secret = "test_secret"
+        await sync_news(db, stock)
+
+    # 동일 뉴스 다시 삽입
+    with patch("app.collectors.news.settings") as mock_settings, \
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+        mock_settings.naver_client_id = "test_id"
+        mock_settings.naver_client_secret = "test_secret"
+        result2 = await sync_news(db, stock)
+
+    # 두 번째는 0이어야 함 (중복)
+    assert result2["news_synced"] == 0

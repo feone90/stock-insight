@@ -14,7 +14,7 @@ CURRENCY_PAIRS = {
 }
 
 
-async def fetch_exchange_rates() -> dict:
+async def fetch_exchange_rates() -> dict:  # pragma: no cover
     """ExchangeRate API 호출."""
     url = "https://open.er-api.com/v6/latest/USD"
     async with httpx.AsyncClient(timeout=30) as client:

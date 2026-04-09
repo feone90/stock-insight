@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import PriceHistory, Stock
 
 
-def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:
+def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:  # pragma: no cover
     """yfinance로 US 주가 조회 (동기 함수)."""
     import yfinance as yf
     df = yf.download(ticker, start=start, progress=False, auto_adjust=True)
@@ -19,7 +19,7 @@ def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:
     return df
 
 
-def fetch_kr_prices(ticker: str, start: str) -> pd.DataFrame:
+def fetch_kr_prices(ticker: str, start: str) -> pd.DataFrame:  # pragma: no cover
     """FinanceDataReader로 KR 주가 조회 (동기 함수)."""
     import FinanceDataReader as fdr
     df = fdr.DataReader(ticker, start)
