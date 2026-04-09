@@ -1,0 +1,63 @@
+# CLAUDE.md
+
+## Project Overview
+
+StockInsight — 주식 분석 대시보드 (Next.js 15 + FastAPI + PostgreSQL)
+
+## Quick Start
+
+```bash
+docker-compose up -d                    # PostgreSQL
+cd backend && source venv/bin/activate
+alembic upgrade head && python -m scripts.seed
+uvicorn app.main:app --reload --port 8000
+# 별도 터미널
+cd frontend && npm run dev
+```
+
+## Architecture
+
+- 구조 문서: `docs/ARCHITECTURE.md`
+- 업무 목록: `docs/tasks.md`
+
+## Backend (FastAPI)
+
+- Python 3.12, async SQLAlchemy + asyncpg
+- 엔트리포인트: `backend/app/main.py`
+- API 라우터: `backend/app/api/`
+- DB 모델: `backend/app/models/`
+- 데이터 수집: `backend/app/collectors/` (외부 API 호출은 항상 mock 테스트)
+- 설정: `backend/app/config.py` (pydantic-settings, `.env` 파일 참조)
+
+### 테스트
+
+```bash
+cd backend && source venv/bin/activate
+python -m pytest tests/ -v --cov=app    # 69 tests, 98.5% coverage
+```
+
+- 외부 API 호출 함수(fetch_*)는 항상 mock 처리
+- `conftest.py`에서 테스트 DB 세션 + httpx AsyncClient 제공
+- greenlet concurrency 설정 필수 (`pyproject.toml`)
+
+### DB 마이그레이션
+
+```bash
+cd backend && source venv/bin/activate
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
+
+## Frontend (Next.js 15)
+
+- `frontend/AGENTS.md` 참조: Next.js 15는 breaking change가 있으므로 `node_modules/next/dist/docs/` 확인 필수
+- shadcn/ui + Tailwind CSS (다크 테마 고정)
+- API 클라이언트: `frontend/src/services/api.ts`
+- 타입 정의: `frontend/src/types/stock.ts`
+
+## Coding Conventions
+
+- 한국어 UI 텍스트, 코드/커밋 메시지는 영어
+- Collector 패턴: 외부 API 실패 시 `{"xxx_synced": 0, "error": "..."}` 반환 (예외 던지지 않음)
+- DB upsert: `on_conflict_do_nothing` 또는 `on_conflict_do_update` 사용
+- 가격 데이터 on-demand: GET /prices 요청 시 DB에 부족하면 자동 수집
