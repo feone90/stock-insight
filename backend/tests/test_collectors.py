@@ -15,6 +15,7 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 
 from app.collectors.stock_price import sync_prices
+from app.collectors.financials import sync_financials
 from app.models import Stock
 
 
@@ -64,4 +65,29 @@ async def test_sync_prices_kr_stock(db):
         result = await sync_prices(db, stock)
 
     assert result["prices_synced"] >= 0
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_us_stock(db):
+    """US 종목 재무지표 동기화 — yfinance mock"""
+    from sqlalchemy import select
+    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
+    stock = result.scalar_one()
+
+    mock_info = {
+        "trailingPE": 28.5,
+        "priceToBook": 45.2,
+        "returnOnEquity": 0.152,
+        "dividendYield": 0.006,
+        "marketCap": 3000000000000,
+        "totalRevenue": 390000000000,
+        "operatingIncome": 120000000000,
+        "netIncome": 95000000000,
+    }
+
+    with patch("app.collectors.financials.fetch_us_financials", return_value=mock_info):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] >= 0
     assert "error" not in result
