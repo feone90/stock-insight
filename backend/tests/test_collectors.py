@@ -17,6 +17,7 @@ import pandas as pd
 from app.collectors.stock_price import sync_prices
 from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
+from app.collectors.disclosure import sync_disclosures
 from app.models import Stock
 
 
@@ -123,4 +124,48 @@ async def test_sync_news(db):
         result = await sync_news(db, stock)
 
     assert result["news_synced"] >= 0
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_disclosures_kr_stock(db):
+    """KR 종목 공시 동기화 — DART API mock"""
+    from sqlalchemy import select
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.dart_code = "00126380"
+
+    mock_response = {
+        "status": "000",
+        "list": [
+            {
+                "report_nm": "분기보고서 (2026.03)",
+                "rcept_dt": "20260401",
+                "flr_nm": "삼성전자",
+            },
+            {
+                "report_nm": "주요사항보고서(자기주식취득결정)",
+                "rcept_dt": "20260325",
+                "flr_nm": "삼성전자",
+            },
+        ],
+    }
+
+    with patch("app.collectors.disclosure.fetch_dart_disclosures", return_value=mock_response), \
+         patch("app.collectors.disclosure.settings", dart_api_key="test_key"):
+        result = await sync_disclosures(db, stock)
+
+    assert result["disclosures_synced"] >= 0
+    assert "error" not in result
+
+
+@pytest.mark.asyncio
+async def test_sync_disclosures_us_stock_skip(db):
+    """US 종목은 공시 수집 스킵"""
+    from sqlalchemy import select
+    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
+    stock = result.scalar_one()
+
+    result = await sync_disclosures(db, stock)
+    assert result["disclosures_synced"] == 0
     assert "error" not in result
