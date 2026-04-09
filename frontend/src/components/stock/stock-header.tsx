@@ -1,15 +1,17 @@
 "use client";
 
 import type { Stock } from "@/types/stock";
-import { addFavorite, removeFavorite } from "@/services/api";
+import { addFavorite, removeFavorite, syncStock } from "@/services/api";
 import { useState } from "react";
 
 interface Props {
-  stock: Stock;
+  readonly stock: Stock;
+  readonly onSyncComplete?: () => void;
 }
 
-export function StockHeader({ stock }: Props) {
+export function StockHeader({ stock, onSyncComplete }: Props) {
   const [isFav, setIsFav] = useState(stock.is_favorite ?? false);
+  const [syncing, setSyncing] = useState(false);
 
   const toggleFavorite = async () => {
     if (isFav) {
@@ -18,6 +20,28 @@ export function StockHeader({ stock }: Props) {
       await addFavorite(stock.ticker);
     }
     setIsFav(!isFav);
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const result = await syncStock(stock.ticker);
+      const { synced, errors } = result;
+      const summary = Object.entries(synced)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => `${k} ${v}건`)
+        .join(", ");
+      alert(
+        `동기화 완료: ${summary || "변경 없음"}${
+          errors.length > 0 ? `\n⚠️ ${errors.join("\n")}` : ""
+        }`
+      );
+      onSyncComplete?.();
+    } catch {
+      alert("동기화 실패");
+    } finally {
+      setSyncing(false);
+    }
   };
 
   return (
@@ -32,6 +56,13 @@ export function StockHeader({ stock }: Props) {
           className="text-lg transition-transform hover:scale-110"
         >
           {isFav ? "⭐" : "☆"}
+        </button>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="ml-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
+        >
+          {syncing ? "동기화 중..." : "동기화"}
         </button>
       </div>
       <div className="text-right">
