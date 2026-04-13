@@ -21,7 +21,7 @@ export default function StockDashboard() {
   const [stock, setStock] = useState<Stock | null>(null);
   const [prices, setPrices] = useState<PriceRecord[]>([]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [period, setPeriod] = useState("weekly");
+  const [period, setPeriod] = useState("daily");
   const [loading, setLoading] = useState(true);
 
   const [overlays, setOverlays] = useState<Record<string, boolean>>({

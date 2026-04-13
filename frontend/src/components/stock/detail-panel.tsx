@@ -13,6 +13,22 @@ interface Props {
   keyword: KeywordDetail | null;
 }
 
+function SourceLink({ source }: { source: string }) {
+  if (source.startsWith("http")) {
+    return (
+      <a
+        href={source}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-400 hover:text-blue-300 underline break-all"
+      >
+        원본 기사 보기 ↗
+      </a>
+    );
+  }
+  return <span>{source}</span>;
+}
+
 export function DetailPanel({ keyword }: Props) {
   if (!keyword) {
     return (
@@ -41,7 +57,9 @@ export function DetailPanel({ keyword }: Props) {
           {keyword.detail}
         </p>
         <div className="space-y-2 text-xs text-slate-500">
-          <div>📰 출처: {keyword.source}</div>
+          <div>
+            📰 출처: <SourceLink source={keyword.source} />
+          </div>
           <div className="flex gap-4">
             <span>
               📊 영향도:{" "}

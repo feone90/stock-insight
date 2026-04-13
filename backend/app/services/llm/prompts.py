@@ -3,10 +3,10 @@
 ANALYSIS_JSON_SCHEMA = """{
   "keywords": [
     {
-      "keyword": "키워드 이름",
+      "keyword": "핵심 키워드 (4-8글자)",
       "type": "bullish | bearish | neutral",
-      "detail": "상세 설명 (1-2문장)",
-      "source": "출처 (뉴스 제목 또는 공시명)",
+      "detail": "구체적인 분석 내용. 수치와 맥락을 포함하여 3-4문장으로 작성.",
+      "source": "출처 뉴스 기사의 URL (http로 시작). URL이 없으면 기사 제목.",
       "impact_level": "high | mid | low",
       "duration": "short | mid | long"
     }
@@ -14,12 +14,12 @@ ANALYSIS_JSON_SCHEMA = """{
   "daily_keywords": [
     {
       "date": "YYYY-MM-DD",
-      "keyword": "키워드 이름",
+      "keyword": "그날의 핵심 키워드",
       "type": "bullish | bearish | neutral"
     }
   ],
-  "summary": "종합 요약 (2-3문장)",
-  "feedback": "중장기 투자자를 위한 피드백/전략 (2-3문장)"
+  "summary": "이번 주 종합 요약. 주가 흐름과 핵심 이벤트를 3-4문장으로.",
+  "feedback": "중장기 투자자를 위한 구체적 전략. 매수/매도/관망 판단 근거와 주의할 리스크를 3-4문장으로."
 }"""
 
 MAX_NEWS_ITEMS = 20
@@ -35,10 +35,9 @@ def build_analysis_prompt(
     disclosure_list: list[dict],
 ) -> str:
     """뉴스/공시 데이터로 분석 프롬프트를 생성한다."""
-    # 뉴스 truncate
     truncated_news = news_list[:MAX_NEWS_ITEMS]
     news_text = "\n".join(
-        f"- [{n.get('published_at', '')}] {n.get('title', '')} (출처: {n.get('source', '')})"
+        f"- [{n.get('published_at', '')}] {n.get('title', '')} (출처: {n.get('source', '')}) URL: {n.get('url', '')}"
         for n in truncated_news
     )
     if not news_text:
@@ -57,7 +56,7 @@ def build_analysis_prompt(
         if change_percent is not None:
             price_info += f" ({change_percent:+.2f}%)"
 
-    return f"""당신은 주식 분석 전문가입니다. 아래 데이터를 분석해서 JSON 형식으로만 응답하세요.
+    return f"""당신은 한국의 주식 전문 애널리스트입니다. 아래 뉴스/공시 데이터를 심층 분석하여 JSON으로 응답하세요.
 
 ## 종목 정보
 - 종목: {stock_name} ({ticker})
@@ -70,17 +69,32 @@ def build_analysis_prompt(
 ## 최근 공시 ({len(disclosure_list)}건)
 {disc_text}
 
-## 요청
-1. 상승/하락/보합 요인을 키워드로 추출하세요 (각 최대 5개)
-2. 각 키워드에 상세설명, 출처, 영향도(high/mid/low), 지속성(short/mid/long)을 포함하세요
-3. 일별 대표 키워드를 매핑하세요 (뉴스 날짜 기준, 최근 7일)
-4. 종합 요약을 작성하세요 (2-3문장)
-5. 중장기 투자자를 위한 피드백/전략을 작성하세요 (2-3문장)
+## 분석 지침
 
-type은 반드시 "bullish", "bearish", "neutral" 중 하나를 사용하세요.
-impact_level은 "high", "mid", "low" 중 하나를 사용하세요.
-duration은 "short", "mid", "long" 중 하나를 사용하세요.
+### keywords (상승/하락/보합 요인)
+- 뉴스를 종합하여 주가에 영향을 미치는 핵심 요인을 추출하세요
+- 각 요인별로 최대 5개씩 (bullish/bearish/neutral)
+- **keyword**: 투자자가 한눈에 이해할 수 있는 4-8글자 키워드 (예: "HBM 수주 확대", "환율 급등 부담")
+- **detail**: 해당 요인이 주가에 미치는 영향을 구체적 수치와 맥락을 포함하여 3-4문장으로 설명
+- **source**: 근거가 된 뉴스의 URL을 그대로 넣으세요 (http로 시작하는 전체 URL). URL이 없으면 기사 제목
+- **impact_level**: 주가 영향도 (high: 5%+ 변동 가능, mid: 1-5%, low: 1% 미만)
+- **duration**: 영향 지속 기간 (short: 1주 이내, mid: 1-3개월, long: 3개월 이상)
 
-반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
+### daily_keywords (일별 대표 키워드)
+- 뉴스 날짜 기준으로 최근 7일간 각 날짜의 대표 키워드 1개씩 매핑
+
+### summary (종합 요약)
+- 이번 주 해당 종목의 주가 흐름과 핵심 이벤트를 3-4문장으로 요약
+
+### feedback (투자 전략)
+- 중장기 투자자(6개월-1년 관점) 기준 구체적 전략 제시
+- 매수/매도/관망 중 하나를 명확히 권고하고 근거 제시
+- 주의해야 할 리스크 요인도 언급
+
+## 출력 규칙
+- type: "bullish", "bearish", "neutral" 중 하나만 사용
+- impact_level: "high", "mid", "low" 중 하나만 사용
+- duration: "short", "mid", "long" 중 하나만 사용
+- 반드시 JSON만 출력. 다른 텍스트 없이.
 
 {ANALYSIS_JSON_SCHEMA}"""
