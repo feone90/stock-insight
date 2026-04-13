@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     dart_api_key: str = ""
     naver_client_id: str = ""
     naver_client_secret: str = ""
+    newsapi_key: str = ""
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]

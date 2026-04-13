@@ -138,11 +138,82 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
     return {"news_synced": count}
 
 
+# --- NewsAPI (US 보조) ---
+
+
+async def fetch_newsapi(query: str, page_size: int = 30) -> dict:  # pragma: no cover
+    """NewsAPI.org에서 뉴스를 검색한다."""
+    url = "https://newsapi.org/v2/everything"
+    params = {
+        "q": query,
+        "pageSize": page_size,
+        "sortBy": "publishedAt",
+        "language": "en",
+        "apiKey": settings.newsapi_key,
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
+    """NewsAPI.org로 US 종목 뉴스를 보조 수집한다."""
+    if not settings.newsapi_key:
+        return {"news_synced": 0}
+
+    try:
+        data = await fetch_newsapi(stock.name)
+    except Exception as e:
+        return {"news_synced": 0, "error": f"NewsAPI 조회 실패: {e}"}
+
+    articles = data.get("articles", [])
+    count = 0
+    for article in articles:
+        title = article.get("title", "")
+        url = article.get("url", "")
+        source_name = article.get("source", {}).get("name", "NewsAPI")
+
+        pub_str = article.get("publishedAt", "")
+        try:
+            pub_date = datetime.fromisoformat(pub_str.replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            pub_date = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if not title or not url or title == "[Removed]":
+            continue
+
+        stmt = insert(News).values(
+            stock_id=stock.id,
+            title=title[:500],
+            source=source_name,
+            url=url[:1000],
+            published_at=pub_date,
+        ).on_conflict_do_nothing(constraint="uq_news_stock_url")
+        result = await db.execute(stmt)
+        if result.rowcount > 0:
+            count += 1
+
+    await db.commit()
+    return {"news_synced": count}
+
+
 # --- 통합 ---
 
 
 async def sync_news(db: AsyncSession, stock: Stock) -> dict:
     """종목 시장에 따라 적절한 뉴스 소스로 동기화한다."""
     if stock.market in ("NYSE", "NASDAQ"):
-        return await _sync_yfinance_news(db, stock)
+        # yfinance(10건) + NewsAPI(30건) 합산
+        yf_result = await _sync_yfinance_news(db, stock)
+        api_result = await _sync_newsapi(db, stock)
+        total = yf_result.get("news_synced", 0) + api_result.get("news_synced", 0)
+        errors = []
+        for r in [yf_result, api_result]:
+            if "error" in r:
+                errors.append(r["error"])
+        result = {"news_synced": total}
+        if errors:
+            result["error"] = "; ".join(errors)
+        return result
     return await _sync_naver_news(db, stock)
