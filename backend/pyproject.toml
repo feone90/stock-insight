@@ -17,6 +17,7 @@ dependencies = [
     "yfinance",
     "finance-datareader",
     "python-jose[cryptography]>=3.5.0",
+    "apscheduler>=3.11.2",
 ]
 
 [dependency-groups]

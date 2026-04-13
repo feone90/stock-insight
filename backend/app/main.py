@@ -11,15 +11,18 @@ from app.api.favorites import router as favorites_router
 from app.api.admin import router as admin_router
 from app.api.exchange_rates import router as exchange_rates_router
 from app.database import engine
+from app.scheduler import init_scheduler, scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_scheduler()
     yield
+    scheduler.shutdown(wait=False)
     await engine.dispose()
 
 
-app = FastAPI(title="StockInsight API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="StockInsight API", version="0.4.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

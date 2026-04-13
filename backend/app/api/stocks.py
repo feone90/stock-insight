@@ -88,18 +88,6 @@ async def stock_detail(stock: Stock = Depends(get_stock_or_404), user_id: str = 
 async def stock_prices(days: int = 30, stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
     requested_start = date_type.today() - timedelta(days=days)
 
-    # DB에서 가장 오래된 데이터 확인
-    oldest_result = await db.execute(
-        select(sql_func.min(PriceHistory.date))
-        .where(PriceHistory.stock_id == stock.id)
-    )
-    oldest_date = oldest_result.scalar()
-
-    # 데이터가 없거나, 요청 기간보다 데이터가 부족하면 자동 수집
-    if oldest_date is None or oldest_date > requested_start:
-        from app.collectors.stock_price import sync_prices
-        await sync_prices(db, stock, days=days)
-
     prices_result = await db.execute(
         select(PriceHistory)
         .where(PriceHistory.stock_id == stock.id, PriceHistory.date >= requested_start)

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     llm_deployment: str = ""  # Azure OpenAI deployment name
     llm_model: str = ""  # model name (OpenAI용)
 
+    # Scheduler
+    scheduler_enabled: bool = True
+    scheduler_morning: str = "08:00"
+    scheduler_evening: str = "18:00"
+    scheduler_timezone: str = "Asia/Seoul"
+
     # Auth
     jwt_secret: str = "change-me-in-production"
     jwt_expire_hours: int = 24
