@@ -11,21 +11,42 @@ from app.models import Stock
 def _lookup_yfinance(query: str) -> list[dict]:  # pragma: no cover
     """yfinance로 종목을 검색한다 (동기 호출)."""
     import yfinance as yf
-    results = []
-    # 직접 ticker로 시도
-    t = yf.Ticker(query.upper())
-    info = t.info or {}
-    if info.get("symbol") and info.get("shortName"):
-        exchange = info.get("exchange", "")
-        market = "NASDAQ" if "NAS" in exchange.upper() else "NYSE" if "NYS" in exchange.upper() else exchange
-        results.append({
-            "ticker": info["symbol"],
-            "name": info.get("shortName", info["symbol"]),
-            "market": market,
-            "sector": info.get("sector", ""),
-            "current_price": info.get("currentPrice") or info.get("regularMarketPrice") or 0,
-        })
-    return results
+    q = query.upper().strip()
+
+    # 시도할 ticker 목록: 원본 + 한국 거래소 접미사
+    candidates = [q]
+    if q.isdigit():
+        candidates.extend([f"{q}.KS", f"{q}.KQ"])
+
+    for candidate in candidates:
+        try:
+            t = yf.Ticker(candidate)
+            info = t.info or {}
+            if not info.get("symbol") or not info.get("shortName"):
+                continue
+            exchange = info.get("exchange", "")
+            if "KSC" in exchange.upper() or "KOE" in exchange.upper() or ".KS" in candidate or ".KQ" in candidate:
+                market = "KRX"
+                ticker_clean = q  # DB에는 숫자만 저장 (035720, not 035720.KS)
+            elif "NAS" in exchange.upper():
+                market = "NASDAQ"
+                ticker_clean = info["symbol"]
+            elif "NYS" in exchange.upper():
+                market = "NYSE"
+                ticker_clean = info["symbol"]
+            else:
+                market = exchange
+                ticker_clean = info["symbol"]
+            return [{
+                "ticker": ticker_clean,
+                "name": info.get("shortName", info["symbol"]),
+                "market": market,
+                "sector": info.get("sector", ""),
+                "current_price": info.get("currentPrice") or info.get("regularMarketPrice") or 0,
+            }]
+        except Exception:
+            continue
+    return []
 
 
 def _lookup_fdr(query: str) -> list[dict]:  # pragma: no cover

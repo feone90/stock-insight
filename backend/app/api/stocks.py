@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.favorites import _get_user_id
 from app.collectors.stock_lookup import register_stock, search_external
 from app.database import get_db
-from app.dependencies import get_stock_or_404
 from app.models import Favorite, PriceHistory, Stock
 from app.models.disclosure import Disclosure
 from app.models.financial import Financial
@@ -56,25 +55,31 @@ async def search(q: str = "", db: AsyncSession = Depends(get_db)):
                     ))
                     db_tickers.add(ext["ticker"])
         except Exception:
-            pass  # 외부 검색 실패해도 DB 결과는 반환
+            pass
 
     return responses
 
 
-@router.post("/register/{ticker}", response_model=StockResponse)
-async def register(ticker: str, db: AsyncSession = Depends(get_db)):
-    """외부 API에서 종목 정보를 조회하여 DB에 등록한다."""
-    stock = await register_stock(db, ticker)
+async def _get_or_register_stock(ticker: str, db: AsyncSession) -> Stock:
+    """DB에서 종목을 찾고, 없으면 외부 API로 자동 등록한다."""
+    result = await db.execute(select(Stock).where(Stock.ticker == ticker))
+    stock = result.scalar_one_or_none()
+    if stock:
+        return stock
+
+    try:
+        stock = await register_stock(db, ticker)
+    except Exception:
+        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
     if not stock:
         raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
-    return StockResponse(
-        ticker=stock.ticker, name=stock.name, market=stock.market, sector=stock.sector,
-        current_price=stock.current_price, change=stock.change, change_percent=stock.change_percent,
-    )
+    return stock
 
 
 @router.get("/{ticker}", response_model=StockDetailResponse)
-async def stock_detail(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
+async def stock_detail(ticker: str, user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
+    stock = await _get_or_register_stock(ticker, db)
+
     fav_result = await db.execute(
         select(Favorite).where(Favorite.user_id == user_id, Favorite.stock_id == stock.id)
     )
@@ -118,7 +123,8 @@ async def stock_detail(stock: Stock = Depends(get_stock_or_404), user_id: str = 
 
 
 @router.get("/{ticker}/prices", response_model=list[PriceResponse])
-async def stock_prices(days: int = 30, stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def stock_prices(ticker: str, days: int = 30, db: AsyncSession = Depends(get_db)):
+    stock = await _get_or_register_stock(ticker, db)
     requested_start = date_type.today() - timedelta(days=days)
 
     prices_result = await db.execute(
@@ -138,7 +144,8 @@ async def stock_prices(days: int = 30, stock: Stock = Depends(get_stock_or_404),
 
 
 @router.get("/{ticker}/news", response_model=list[NewsResponse])
-async def stock_news(limit: int = 50, stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def stock_news(ticker: str, limit: int = 50, db: AsyncSession = Depends(get_db)):
+    stock = await _get_or_register_stock(ticker, db)
     news_result = await db.execute(
         select(News)
         .where(News.stock_id == stock.id)
@@ -157,7 +164,8 @@ async def stock_news(limit: int = 50, stock: Stock = Depends(get_stock_or_404), 
 
 
 @router.get("/{ticker}/disclosures", response_model=list[DisclosureResponse])
-async def stock_disclosures(limit: int = 30, stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def stock_disclosures(ticker: str, limit: int = 30, db: AsyncSession = Depends(get_db)):
+    stock = await _get_or_register_stock(ticker, db)
     disc_result = await db.execute(
         select(Disclosure)
         .where(Disclosure.stock_id == stock.id)

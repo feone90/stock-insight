@@ -31,6 +31,19 @@ async def _get_user_id(
 
 @router.get("", response_model=list[StockResponse])
 async def list_favorites(user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
+    # 로그인 사용자의 즐겨찾기가 비어있으면 default 즐겨찾기를 복사
+    if user_id != DEFAULT_USER:
+        count_result = await db.execute(
+            select(Favorite).where(Favorite.user_id == user_id).limit(1)
+        )
+        if not count_result.scalar_one_or_none():
+            default_favs = await db.execute(
+                select(Favorite).where(Favorite.user_id == DEFAULT_USER)
+            )
+            for fav in default_favs.scalars().all():
+                db.add(Favorite(user_id=user_id, stock_id=fav.stock_id))
+            await db.commit()
+
     result = await db.execute(
         select(Stock)
         .join(Favorite, Favorite.stock_id == Stock.id)

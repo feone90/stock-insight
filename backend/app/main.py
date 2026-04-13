@@ -18,7 +18,8 @@ from app.scheduler import init_scheduler, scheduler
 async def lifespan(app: FastAPI):
     init_scheduler()
     yield
-    scheduler.shutdown(wait=False)
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     await engine.dispose()
 
 
