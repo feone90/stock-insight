@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.api.auth import router as auth_router
 from app.api.stocks import router as stocks_router
 from app.api.analysis import router as analysis_router
 from app.api.favorites import router as favorites_router
@@ -28,6 +29,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(stocks_router)
 app.include_router(analysis_router)
 app.include_router(favorites_router)

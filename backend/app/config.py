@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     llm_deployment: str = ""  # Azure OpenAI deployment name
     llm_model: str = ""  # model name (OpenAI용)
 
+    # Auth
+    jwt_secret: str = "change-me-in-production"
+    jwt_expire_hours: int = 24
+    admin_email: str = ""
+    admin_password: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

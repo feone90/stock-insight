@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import UserInfo, require_admin
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_stock_or_404
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 @router.post("/sync/stock/{ticker}", response_model=SyncResult)
-async def sync_stock(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def sync_stock(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db), _admin: UserInfo = Depends(require_admin)):
 
     prices_result = await sync_prices(db, stock)
     financials_result = await sync_financials(db, stock)
@@ -52,7 +53,7 @@ async def sync_stock(stock: Stock = Depends(get_stock_or_404), db: AsyncSession 
 
 
 @router.post("/sync/global", response_model=SyncGlobalResult)
-async def sync_global(db: AsyncSession = Depends(get_db)):
+async def sync_global(db: AsyncSession = Depends(get_db), _admin: UserInfo = Depends(require_admin)):
     rates_result = await sync_exchange_rates(db)
 
     errors = []
@@ -69,7 +70,7 @@ async def sync_global(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/sync/all", response_model=SyncAllResult)
-async def sync_all(db: AsyncSession = Depends(get_db)):
+async def sync_all(db: AsyncSession = Depends(get_db), _admin: UserInfo = Depends(require_admin)):
     fav_result = await db.execute(
         select(Stock).join(Favorite, Favorite.stock_id == Stock.id)
     )

@@ -16,6 +16,7 @@ dependencies = [
     "openai>=1.0.0",
     "yfinance",
     "finance-datareader",
+    "python-jose[cryptography]>=3.5.0",
 ]
 
 [dependency-groups]
