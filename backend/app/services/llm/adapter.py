@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
-from openai import AsyncAzureOpenAI, AsyncOpenAI
+import httpx
+from openai import AsyncOpenAI
 
 from app.config import settings
 
@@ -18,36 +19,51 @@ class LLMAdapter(ABC):
 
 
 class AzureOpenAIAdapter(LLMAdapter):
+    """Azure AI Foundry Responses API 어댑터."""
+
     def __init__(
         self,
         endpoint: str | None = None,
         api_key: str | None = None,
         deployment: str | None = None,
-        api_version: str = "2024-12-01-preview",
     ):
+        self.endpoint = endpoint or settings.llm_endpoint
+        self.api_key = api_key or settings.llm_api_key
         self.deployment = deployment or settings.llm_deployment
-        self.client = AsyncAzureOpenAI(
-            azure_endpoint=endpoint or settings.llm_endpoint,
-            api_key=api_key or settings.llm_api_key,
-            api_version=api_version,
-        )
+
+    async def _call(self, prompt: str, json_mode: bool = False) -> str:
+        body: dict = {
+            "model": self.deployment,
+            "input": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+        }
+        if json_mode:
+            body["text"] = {"format": {"type": "json_object"}}
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                self.endpoint,
+                json=body,
+                headers={
+                    "api-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+
+        data = resp.json()
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for content in item.get("content", []):
+                    if content.get("type") == "output_text":
+                        return content.get("text", "")
+        return ""
 
     async def generate(self, prompt: str) -> str:
-        resp = await self.client.chat.completions.create(
-            model=self.deployment,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-        )
-        return resp.choices[0].message.content or ""
+        return await self._call(prompt)
 
     async def generate_json(self, prompt: str) -> str:
-        resp = await self.client.chat.completions.create(
-            model=self.deployment,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            response_format={"type": "json_object"},
-        )
-        return resp.choices[0].message.content or ""
+        return await self._call(prompt, json_mode=True)
 
 
 class OpenAIAdapter(LLMAdapter):
