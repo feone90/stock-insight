@@ -8,9 +8,10 @@ StockInsight — 주식 분석 대시보드 (Next.js 15 + FastAPI + PostgreSQL)
 
 ```bash
 docker-compose up -d                    # PostgreSQL
-cd backend && source venv/bin/activate
-alembic upgrade head && python -m scripts.seed
-uvicorn app.main:app --reload --port 8000
+cd backend
+uv sync --dev                           # 의존성 설치
+uv run alembic upgrade head && uv run python -m scripts.seed
+uv run uvicorn app.main:app --reload --port 8000
 # 별도 터미널
 cd frontend && npm run dev
 ```
@@ -29,11 +30,16 @@ cd frontend && npm run dev
 - 데이터 수집: `backend/app/collectors/` (외부 API 호출은 항상 mock 테스트)
 - 설정: `backend/app/config.py` (pydantic-settings, `.env` 파일 참조)
 
+### 패키지 관리
+
+- uv (`pyproject.toml` + `uv.lock`)
+- 의존성 추가: `cd backend && uv add <package>`
+- dev 의존성 추가: `cd backend && uv add --group dev <package>`
+
 ### 테스트
 
 ```bash
-cd backend && source venv/bin/activate
-python -m pytest tests/ -v --cov=app    # 69 tests, 98.5% coverage
+cd backend && uv run python -m pytest tests/ -v --cov=app
 ```
 
 - 외부 API 호출 함수(fetch_*)는 항상 mock 처리
@@ -43,9 +49,9 @@ python -m pytest tests/ -v --cov=app    # 69 tests, 98.5% coverage
 ### DB 마이그레이션
 
 ```bash
-cd backend && source venv/bin/activate
-alembic revision --autogenerate -m "description"
-alembic upgrade head
+cd backend
+uv run alembic revision --autogenerate -m "description"
+uv run alembic upgrade head
 ```
 
 ## Frontend (Next.js 15)

@@ -1,3 +1,30 @@
+[project]
+name = "stockinsight-backend"
+version = "0.4.0"
+description = "StockInsight 주식 분석 대시보드 백엔드"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+    "pydantic==2.11.1",
+    "pydantic-settings==2.9.1",
+    "sqlalchemy[asyncio]==2.0.40",
+    "asyncpg==0.30.0",
+    "alembic==1.15.2",
+    "python-dotenv==1.1.0",
+    "httpx==0.28.1",
+    "openai>=1.0.0",
+    "yfinance",
+    "finance-datareader",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 

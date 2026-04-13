@@ -1,6 +1,7 @@
 .superpowers/
 .claude/
 backend/venv/
+backend/.venv/
 backend/.coverage
 __pycache__/
 *.pyc
