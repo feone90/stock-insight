@@ -5,6 +5,7 @@ from sqlalchemy import func as sql_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.favorites import _get_user_id
+from app.collectors.stock_lookup import register_stock, search_external
 from app.database import get_db
 from app.dependencies import get_stock_or_404
 from app.models import Favorite, PriceHistory, Stock
@@ -26,18 +27,50 @@ router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 async def search(q: str = "", db: AsyncSession = Depends(get_db)):
     if not q:
         return []
+
+    # 1. DB에서 먼저 검색
     query = select(Stock).where(
         Stock.name.ilike(f"%{q}%") | Stock.ticker.ilike(f"%{q}%")
     )
     result = await db.execute(query)
-    stocks = result.scalars().all()
-    return [
+    db_stocks = result.scalars().all()
+    db_tickers = {s.ticker for s in db_stocks}
+
+    responses = [
         StockResponse(
             ticker=s.ticker, name=s.name, market=s.market, sector=s.sector,
             current_price=s.current_price, change=s.change, change_percent=s.change_percent,
         )
-        for s in stocks
+        for s in db_stocks
     ]
+
+    # 2. DB 결과가 적으면 외부 API에서 추가 검색
+    if len(responses) < 5:
+        try:
+            external = await search_external(q)
+            for ext in external:
+                if ext["ticker"] not in db_tickers:
+                    responses.append(StockResponse(
+                        ticker=ext["ticker"], name=ext["name"], market=ext["market"],
+                        sector=ext.get("sector"), current_price=ext.get("current_price"),
+                    ))
+                    db_tickers.add(ext["ticker"])
+        except Exception:
+            pass  # 외부 검색 실패해도 DB 결과는 반환
+
+    return responses
+
+
+@router.post("/register/{ticker}", response_model=StockResponse)
+async def register(ticker: str, db: AsyncSession = Depends(get_db)):
+    """외부 API에서 종목 정보를 조회하여 DB에 등록한다."""
+    stock = await register_stock(db, ticker)
+    if not stock:
+        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
+    return StockResponse(
+        ticker=stock.ticker, name=stock.name, market=stock.market, sector=stock.sector,
+        current_price=stock.current_price, change=stock.change, change_percent=stock.change_percent,
+    )
 
 
 @router.get("/{ticker}", response_model=StockDetailResponse)

@@ -80,6 +80,15 @@ export interface SyncAllResult {
   errors: string[];
 }
 
+export async function registerStock(ticker: string): Promise<Stock> {
+  const res = await fetch(`${API_BASE}/api/stocks/register/${ticker}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Register failed: ${res.status}`);
+  return res.json();
+}
+
 export async function syncStock(ticker: string): Promise<SyncResult> {
   return postJson(`/api/admin/sync/stock/${ticker}`);
 }

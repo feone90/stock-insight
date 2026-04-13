@@ -9,7 +9,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { searchStocks } from "@/services/api";
+import { searchStocks, registerStock } from "@/services/api";
 import type { Stock } from "@/types/stock";
 
 export function StockSearch() {
@@ -54,9 +54,15 @@ export function StockSearch() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const handleSelect = (ticker: string) => {
+  const handleSelect = async (ticker: string) => {
     setOpen(false);
     setQuery("");
+    // DB에 없는 종목이면 자동 등록
+    try {
+      await registerStock(ticker);
+    } catch {
+      // 이미 등록되어 있거나 실패해도 페이지 이동은 시도
+    }
     router.push(`/stock/${ticker}`);
   };
 
