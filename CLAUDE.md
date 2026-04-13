@@ -6,15 +6,46 @@ StockInsight — 주식 분석 대시보드 (Next.js 15 + FastAPI + PostgreSQL)
 
 ## Quick Start
 
+### 1. PostgreSQL 실행
+
+Docker가 있으면:
 ```bash
-docker-compose up -d                    # PostgreSQL
-cd backend
-uv sync --dev                           # 의존성 설치
-uv run alembic upgrade head && uv run python -m scripts.seed
-uv run uvicorn app.main:app --reload --port 8000
-# 별도 터미널
-cd frontend && npm run dev
+docker-compose up -d
 ```
+
+Docker 없이 직접 설치한 경우 (Windows):
+```bash
+# PostgreSQL 17이 설치되어 있으면 서비스가 자동 실행됨
+# 확인: pg_isready -h localhost
+# DB 생성 (최초 1회):
+psql -U postgres -h localhost -c "CREATE DATABASE stockinsight;"
+```
+
+### 2. 백엔드
+
+```bash
+cd backend
+cp .env.example .env                    # .env 없으면 복사 후 수정
+uv sync --dev                           # 의존성 설치
+uv run alembic upgrade head             # DB 마이그레이션
+uv run python -m scripts.seed           # 시드 데이터 (최초 1회)
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+### 3. 프론트엔드 (별도 터미널)
+
+```bash
+cd frontend
+npm install                             # 최초 1회
+npm run dev
+```
+
+### 4. 접속
+
+- 대시보드: http://localhost:3000
+- API 문서: http://localhost:8000/docs
+- 로그인: `.env`의 ADMIN_EMAIL / ADMIN_PASSWORD
+- 종목 검색: `Cmd+K` (또는 `Ctrl+K`)
 
 ## Architecture
 
