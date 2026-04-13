@@ -19,7 +19,7 @@ async def stock_analysis(ticker: str, period: str = "weekly", db: AsyncSession =
     analysis_result = await db.execute(
         select(Analysis)
         .options(selectinload(Analysis.keywords), selectinload(Analysis.daily_keywords))
-        .where(Analysis.stock_id == stock.id)
+        .where(Analysis.stock_id == stock.id, Analysis.period_type == period)
         .order_by(Analysis.date.desc())
         .limit(1)
     )

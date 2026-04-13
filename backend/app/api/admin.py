@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import Favorite, Stock
 from app.collectors.stock_price import sync_prices
@@ -9,6 +10,8 @@ from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
 from app.collectors.exchange_rate import sync_exchange_rates
+from app.services.llm.adapter import get_adapter
+from app.services.llm.analyzer import analyze_stock
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -25,8 +28,14 @@ async def sync_stock(ticker: str, db: AsyncSession = Depends(get_db)):
     news_result = await sync_news(db, stock)
     disclosures_result = await sync_disclosures(db, stock)
 
+    # LLM 분석 (API 키가 설정된 경우만)
+    analysis_result = {"analysis_created": False}
+    if settings.llm_api_key:
+        adapter = get_adapter()
+        analysis_result = await analyze_stock(db, stock, adapter)
+
     errors = []
-    for r in [prices_result, financials_result, news_result, disclosures_result]:
+    for r in [prices_result, financials_result, news_result, disclosures_result, analysis_result]:
         if "error" in r:
             errors.append(r["error"])
 
@@ -38,6 +47,7 @@ async def sync_stock(ticker: str, db: AsyncSession = Depends(get_db)):
             "financials": financials_result.get("financials_synced", 0),
             "news": news_result.get("news_synced", 0),
             "disclosures": disclosures_result.get("disclosures_synced", 0),
+            "analysis": analysis_result.get("analysis_created", False),
         },
         "errors": errors,
     }
@@ -67,9 +77,12 @@ async def sync_all(db: AsyncSession = Depends(get_db)):
     )
     stocks = fav_result.scalars().all()
 
-    total = {"prices": 0, "financials": 0, "news": 0, "disclosures": 0, "exchange_rates": 0}
+    total = {"prices": 0, "financials": 0, "news": 0, "disclosures": 0, "exchange_rates": 0, "analyses": 0}
     errors = []
     tickers_synced = []
+
+    # LLM 어댑터 (키 설정 시 한 번만 생성)
+    adapter = get_adapter() if settings.llm_api_key else None
 
     for stock in stocks:
         tickers_synced.append(stock.ticker)
@@ -79,12 +92,19 @@ async def sync_all(db: AsyncSession = Depends(get_db)):
         news_result = await sync_news(db, stock)
         disclosures_result = await sync_disclosures(db, stock)
 
+        # LLM 분석
+        analysis_result = {"analysis_created": False}
+        if adapter:
+            analysis_result = await analyze_stock(db, stock, adapter)
+
         total["prices"] += prices_result.get("prices_synced", 0)
         total["financials"] += financials_result.get("financials_synced", 0)
         total["news"] += news_result.get("news_synced", 0)
         total["disclosures"] += disclosures_result.get("disclosures_synced", 0)
+        if analysis_result.get("analysis_created"):
+            total["analyses"] += 1
 
-        for r in [prices_result, financials_result, news_result, disclosures_result]:
+        for r in [prices_result, financials_result, news_result, disclosures_result, analysis_result]:
             if "error" in r:
                 errors.append(f"[{stock.ticker}] {r['error']}")
 
