@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     naver_client_id: str = ""
     naver_client_secret: str = ""
 
+    # CORS
+    cors_origins: list[str] = ["http://localhost:3000"]
+
     # LLM 설정
     llm_provider: str = "azure_openai"  # azure_openai | openai
     llm_endpoint: str = ""  # Azure OpenAI endpoint URL

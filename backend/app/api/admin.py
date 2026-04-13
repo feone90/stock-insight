@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.dependencies import get_stock_or_404
 from app.models import Favorite, Stock
+from app.schemas.stock import SyncAllResult, SyncGlobalResult, SyncResult
 from app.collectors.stock_price import sync_prices
 from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
@@ -16,12 +18,8 @@ from app.services.llm.analyzer import analyze_stock
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
-@router.post("/sync/stock/{ticker}")
-async def sync_stock(ticker: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Stock).where(Stock.ticker == ticker))
-    stock = result.scalar_one_or_none()
-    if not stock:
-        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
+@router.post("/sync/stock/{ticker}", response_model=SyncResult)
+async def sync_stock(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
 
     prices_result = await sync_prices(db, stock)
     financials_result = await sync_financials(db, stock)
@@ -41,7 +39,7 @@ async def sync_stock(ticker: str, db: AsyncSession = Depends(get_db)):
 
     return {
         "status": "ok",
-        "ticker": ticker,
+        "ticker": stock.ticker,
         "synced": {
             "prices": prices_result.get("prices_synced", 0),
             "financials": financials_result.get("financials_synced", 0),
@@ -53,7 +51,7 @@ async def sync_stock(ticker: str, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/sync/global")
+@router.post("/sync/global", response_model=SyncGlobalResult)
 async def sync_global(db: AsyncSession = Depends(get_db)):
     rates_result = await sync_exchange_rates(db)
 
@@ -70,7 +68,7 @@ async def sync_global(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/sync/all")
+@router.post("/sync/all", response_model=SyncAllResult)
 async def sync_all(db: AsyncSession = Depends(get_db)):
     fav_result = await db.execute(
         select(Stock).join(Favorite, Favorite.stock_id == Stock.id)

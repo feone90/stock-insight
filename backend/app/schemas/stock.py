@@ -1,50 +1,19 @@
+"""API 응답 스키마."""
+
 from pydantic import BaseModel
 
 
-class Stock(BaseModel):
+class StockResponse(BaseModel):
     ticker: str
     name: str
     market: str
-    sector: str
-    current_price: float
-    change: float
-    change_percent: float
+    sector: str | None = None
+    current_price: float | None = None
+    change: float | None = None
+    change_percent: float | None = None
 
 
-class PriceRecord(BaseModel):
-    date: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
-
-
-class KeywordDetail(BaseModel):
-    keyword: str
-    type: str
-    detail: str
-    source: str
-    impact_level: str
-    duration: str
-
-
-class DailyKeyword(BaseModel):
-    date: str
-    keyword: str
-    type: str
-
-
-class Analysis(BaseModel):
-    date: str
-    period_type: str
-    keywords: list[KeywordDetail]
-    daily_keywords: list[DailyKeyword]
-    summary: str
-    feedback: str
-
-
-class StatsInfo(BaseModel):
+class StatsResponse(BaseModel):
     market_cap: str
     per: float
     pbr: float
@@ -53,13 +22,84 @@ class StatsInfo(BaseModel):
     low_52w: float
 
 
-class StockDetailResponse(BaseModel):
+class StockDetailResponse(StockResponse):
+    is_favorite: bool = False
+    stats: StatsResponse | None = None
+
+
+class PriceResponse(BaseModel):
+    date: str
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: int | None = None
+
+
+class NewsResponse(BaseModel):
+    title: str
+    source: str | None = None
+    url: str | None = None
+    published_at: str
+
+
+class DisclosureResponse(BaseModel):
+    title: str
+    disclosure_type: str | None = None
+    disclosed_at: str
+
+
+class KeywordResponse(BaseModel):
+    keyword: str
+    type: str
+    detail: str
+    source: str
+    impact_level: str
+    duration: str
+
+
+class DailyKeywordResponse(BaseModel):
+    date: str
+    keyword: str
+    type: str
+
+
+class AnalysisResponse(BaseModel):
+    date: str
+    period_type: str
+    keywords: list[KeywordResponse]
+    daily_keywords: list[DailyKeywordResponse]
+    summary: str
+    feedback: str
+
+
+class SyncResult(BaseModel):
+    status: str = "ok"
     ticker: str
-    name: str
-    market: str
-    sector: str
-    current_price: float
-    change: float
-    change_percent: float
-    is_favorite: bool
-    stats: StatsInfo | None
+    synced: dict
+    errors: list[str]
+
+
+class SyncAllResult(BaseModel):
+    status: str = "ok"
+    stocks_synced: list[str]
+    global_synced: bool = True
+    total_synced: dict
+    errors: list[str]
+
+
+class SyncGlobalResult(BaseModel):
+    status: str = "ok"
+    synced: dict
+    errors: list[str]
+
+
+class ExchangeRateResponse(BaseModel):
+    date: str
+    currency_pair: str
+    rate: float
+
+
+class FavoriteActionResponse(BaseModel):
+    status: str
+    ticker: str

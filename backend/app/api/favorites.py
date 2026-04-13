@@ -1,14 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.dependencies import get_stock_or_404
 from app.models import Favorite, Stock
+from app.schemas.stock import FavoriteActionResponse, StockResponse
 
 router = APIRouter(prefix="/api/favorites", tags=["favorites"])
 
 
-@router.get("")
+@router.get("", response_model=list[StockResponse])
 async def list_favorites(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Stock)
@@ -17,44 +19,29 @@ async def list_favorites(db: AsyncSession = Depends(get_db)):
     )
     stocks = result.scalars().all()
     return [
-        {
-            "ticker": s.ticker,
-            "name": s.name,
-            "market": s.market,
-            "sector": s.sector,
-            "current_price": s.current_price,
-            "change": s.change,
-            "change_percent": s.change_percent,
-        }
+        StockResponse(
+            ticker=s.ticker, name=s.name, market=s.market, sector=s.sector,
+            current_price=s.current_price, change=s.change, change_percent=s.change_percent,
+        )
         for s in stocks
     ]
 
 
-@router.post("/{ticker}")
-async def add(ticker: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Stock).where(Stock.ticker == ticker))
-    stock = result.scalar_one_or_none()
-    if not stock:
-        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
-
+@router.post("/{ticker}", response_model=FavoriteActionResponse)
+async def add(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
     existing = await db.execute(
         select(Favorite).where(Favorite.stock_id == stock.id)
     )
     if existing.scalar_one_or_none():
-        return {"status": "already_exists", "ticker": ticker}
+        return FavoriteActionResponse(status="already_exists", ticker=stock.ticker)
 
     db.add(Favorite(stock_id=stock.id))
     await db.commit()
-    return {"status": "added", "ticker": ticker}
+    return FavoriteActionResponse(status="added", ticker=stock.ticker)
 
 
-@router.delete("/{ticker}")
-async def remove(ticker: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Stock).where(Stock.ticker == ticker))
-    stock = result.scalar_one_or_none()
-    if not stock:
-        raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
-
+@router.delete("/{ticker}", response_model=FavoriteActionResponse)
+async def remove(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
     fav_result = await db.execute(
         select(Favorite).where(Favorite.stock_id == stock.id)
     )
@@ -63,4 +50,4 @@ async def remove(ticker: str, db: AsyncSession = Depends(get_db)):
         await db.delete(fav)
         await db.commit()
 
-    return {"status": "removed", "ticker": ticker}
+    return FavoriteActionResponse(status="removed", ticker=stock.ticker)
