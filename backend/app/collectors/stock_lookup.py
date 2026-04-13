@@ -8,6 +8,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Stock
 
 
+_NASDAQ_CODES = {"NMS", "NGM", "NCM", "NASDAQ", "NAS"}
+_NYSE_CODES = {"NYQ", "NYSE", "NYS", "PCX", "BTS", "ASE"}
+_KRX_CODES = {"KSC", "KOE", "KRX", "KOSPI", "KOSDAQ"}
+
+
+def _normalize_market(exchange: str, ticker_candidate: str = "") -> str:
+    """yfinance exchange 코드를 정규화된 market 값으로 변환한다."""
+    ex = exchange.upper()
+    if ex in _KRX_CODES or ".KS" in ticker_candidate or ".KQ" in ticker_candidate:
+        return "KRX"
+    if ex in _NASDAQ_CODES or "NAS" in ex:
+        return "NASDAQ"
+    if ex in _NYSE_CODES or "NYS" in ex:
+        return "NYSE"
+    return exchange or "OTHER"
+
+
 def _lookup_yfinance(query: str) -> list[dict]:  # pragma: no cover
     """yfinance로 종목을 검색한다 (동기 호출)."""
     import yfinance as yf
@@ -24,19 +41,9 @@ def _lookup_yfinance(query: str) -> list[dict]:  # pragma: no cover
             info = t.info or {}
             if not info.get("symbol") or not info.get("shortName"):
                 continue
-            exchange = info.get("exchange", "")
-            if "KSC" in exchange.upper() or "KOE" in exchange.upper() or ".KS" in candidate or ".KQ" in candidate:
-                market = "KRX"
-                ticker_clean = q  # DB에는 숫자만 저장 (035720, not 035720.KS)
-            elif "NAS" in exchange.upper():
-                market = "NASDAQ"
-                ticker_clean = info["symbol"]
-            elif "NYS" in exchange.upper():
-                market = "NYSE"
-                ticker_clean = info["symbol"]
-            else:
-                market = exchange
-                ticker_clean = info["symbol"]
+            exchange = (info.get("exchange") or "").upper()
+            market = _normalize_market(exchange, candidate)
+            ticker_clean = q if market == "KRX" else info["symbol"]
             return [{
                 "ticker": ticker_clean,
                 "name": info.get("shortName", info["symbol"]),
