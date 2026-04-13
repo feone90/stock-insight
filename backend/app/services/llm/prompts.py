@@ -5,8 +5,8 @@ ANALYSIS_JSON_SCHEMA = """{
     {
       "keyword": "핵심 키워드 (4-8글자)",
       "type": "bullish | bearish | neutral",
-      "detail": "구체적인 분석 내용. 수치와 맥락을 포함하여 3-4문장으로 작성.",
-      "source": "출처 뉴스 기사의 URL (http로 시작). URL이 없으면 기사 제목.",
+      "detail": "이 요인이 주가에 미치는 구체적 영향. 수치, 비교, 타임라인 포함. 3-5문장.",
+      "source": "근거 뉴스의 URL (http로 시작). 없으면 기사 제목.",
       "impact_level": "high | mid | low",
       "duration": "short | mid | long"
     }
@@ -18,8 +18,8 @@ ANALYSIS_JSON_SCHEMA = """{
       "type": "bullish | bearish | neutral"
     }
   ],
-  "summary": "이번 주 종합 요약. 주가 흐름과 핵심 이벤트를 3-4문장으로.",
-  "feedback": "중장기 투자자를 위한 구체적 전략. 매수/매도/관망 판단 근거와 주의할 리스크를 3-4문장으로."
+  "summary": "이번 주 종합 요약 (4-5문장)",
+  "feedback": "투자 전략 및 액션 플랜 (4-5문장)"
 }"""
 
 MAX_NEWS_ITEMS = 20
@@ -56,7 +56,9 @@ def build_analysis_prompt(
         if change_percent is not None:
             price_info += f" ({change_percent:+.2f}%)"
 
-    return f"""당신은 한국의 주식 전문 애널리스트입니다. 아래 뉴스/공시 데이터를 심층 분석하여 JSON으로 응답하세요.
+    return f"""당신은 증권사 리서치센터의 시니어 애널리스트입니다.
+개인 투자자의 실제 매매 판단에 직접 사용될 분석을 작성합니다.
+뻔한 일반론이 아닌, 이 종목에 특화된 구체적이고 날카로운 인사이트를 제공하세요.
 
 ## 종목 정보
 - 종목: {stock_name} ({ticker})
@@ -71,30 +73,39 @@ def build_analysis_prompt(
 
 ## 분석 지침
 
-### keywords (상승/하락/보합 요인)
-- 뉴스를 종합하여 주가에 영향을 미치는 핵심 요인을 추출하세요
-- 각 요인별로 최대 5개씩 (bullish/bearish/neutral)
-- **keyword**: 투자자가 한눈에 이해할 수 있는 4-8글자 키워드 (예: "HBM 수주 확대", "환율 급등 부담")
-- **detail**: 해당 요인이 주가에 미치는 영향을 구체적 수치와 맥락을 포함하여 3-4문장으로 설명
-- **source**: 근거가 된 뉴스의 URL을 그대로 넣으세요 (http로 시작하는 전체 URL). URL이 없으면 기사 제목
-- **impact_level**: 주가 영향도 (high: 5%+ 변동 가능, mid: 1-5%, low: 1% 미만)
-- **duration**: 영향 지속 기간 (short: 1주 이내, mid: 1-3개월, long: 3개월 이상)
+### keywords — 최소 8개, 최대 15개
+상승/하락/보합 각 카테고리에서 최소 2개 이상 추출하세요.
+같은 뉴스라도 다른 각도에서 여러 키워드를 뽑을 수 있습니다.
 
-### daily_keywords (일별 대표 키워드)
-- 뉴스 날짜 기준으로 최근 7일간 각 날짜의 대표 키워드 1개씩 매핑
+각 키워드에 대해:
+- **keyword**: 투자자가 3초 만에 이해하는 4-8글자 (예: "HBM3E 양산 본격화", "美 관세 리스크", "배당금 상향")
+- **detail**: 이 요인이 주가에 미치는 구체적 영향을 분석하세요.
+  - 반드시 수치를 포함 (매출 전망, 시장 점유율, 목표가 등)
+  - 경쟁사 대비 비교 (삼성 vs SK하이닉스, 테슬라 vs BYD 등)
+  - 시간축 명시 (단기 1-2주 vs 중기 1-3개월 vs 장기 효과)
+  - 3-5문장으로 작성
+- **source**: 근거가 된 뉴스의 URL을 그대로 넣으세요. URL 없으면 기사 제목.
+- **impact_level**: high(주가 5%+ 영향), mid(1-5%), low(1% 미만)
+- **duration**: short(1주 이내), mid(1-3개월), long(3개월+)
 
-### summary (종합 요약)
-- 이번 주 해당 종목의 주가 흐름과 핵심 이벤트를 3-4문장으로 요약
+### daily_keywords — 뉴스가 있는 각 날짜마다 1-2개
+뉴스 발행일 기준으로 각 날짜의 핵심 이벤트를 매핑하세요.
 
-### feedback (투자 전략)
-- 중장기 투자자(6개월-1년 관점) 기준 구체적 전략 제시
-- 매수/매도/관망 중 하나를 명확히 권고하고 근거 제시
-- 주의해야 할 리스크 요인도 언급
+### summary — 4-5문장
+- 이번 기간 주가 흐름의 핵심 드라이버
+- 가장 중요한 이벤트 2-3개를 구체적으로 언급
+- 시장 대비 상대적 강약 판단
+
+### feedback — 4-5문장, 실전 투자 전략
+- 매수/매도/관망 중 하나를 명확히 권고하고 이유 제시
+- 적정 매수 구간 또는 손절 기준을 수치로 제시
+- 향후 1-3개월 내 주의할 이벤트 (실적 발표, 배당, 정책 등)
+- 포트폴리오 내 비중 조절 가이드
 
 ## 출력 규칙
-- type: "bullish", "bearish", "neutral" 중 하나만 사용
-- impact_level: "high", "mid", "low" 중 하나만 사용
-- duration: "short", "mid", "long" 중 하나만 사용
+- type: "bullish", "bearish", "neutral" 중 하나만
+- impact_level: "high", "mid", "low" 중 하나만
+- duration: "short", "mid", "long" 중 하나만
 - 반드시 JSON만 출력. 다른 텍스트 없이.
 
 {ANALYSIS_JSON_SCHEMA}"""

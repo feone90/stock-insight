@@ -88,12 +88,34 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
 
     count = 0
     for article in articles:
-        title = article.get("title", "")
-        url = article.get("link", "") or article.get("url", "")
-        publisher = article.get("publisher", "yfinance")
+        # 새 형식: {"id", "content": {...}} / 구 형식: {"title", "link", ...}
+        content = article.get("content", article)
 
-        pub_ts = article.get("providerPublishTime") or article.get("publishedDate")
-        if pub_ts and isinstance(pub_ts, (int, float)):
+        title = content.get("title", "")
+        # URL: canonicalUrl.url > clickThroughUrl.url > link > url
+        url = ""
+        for url_field in ("canonicalUrl", "clickThroughUrl"):
+            url_obj = content.get(url_field)
+            if isinstance(url_obj, dict) and url_obj.get("url"):
+                url = url_obj["url"]
+                break
+        if not url:
+            url = content.get("link", "") or content.get("url", "")
+
+        # Publisher
+        provider = content.get("provider")
+        publisher = provider.get("displayName", "Yahoo Finance") if isinstance(provider, dict) else content.get("publisher", "Yahoo Finance")
+
+        # Date: pubDate (ISO string) > providerPublishTime (timestamp)
+        pub_date_str = content.get("pubDate")
+        pub_ts = content.get("providerPublishTime")
+        if pub_date_str and isinstance(pub_date_str, str):
+            try:
+                from datetime import datetime as dt_cls
+                pub_date = dt_cls.fromisoformat(pub_date_str.replace("Z", "+00:00")).replace(tzinfo=None)
+            except (ValueError, TypeError):
+                pub_date = datetime.now(timezone.utc).replace(tzinfo=None)
+        elif pub_ts and isinstance(pub_ts, (int, float)):
             pub_date = datetime.fromtimestamp(pub_ts, tz=timezone.utc).replace(tzinfo=None)
         else:
             pub_date = datetime.now(timezone.utc).replace(tzinfo=None)
