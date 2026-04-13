@@ -50,7 +50,7 @@ export default function StockDashboard() {
     Promise.all([
       getStock(ticker),
       getStockPrices(ticker, days),
-      getAnalysis(ticker, period).catch(() => null),
+      getAnalysis(ticker, "daily").catch(() => null),
     ])
       .then(([s, p, a]) => {
         setStock(s);
