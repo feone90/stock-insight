@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import decode_token
 from app.database import get_db
 from app.dependencies import get_stock_or_404
 from app.models import Favorite, Stock
@@ -9,12 +12,29 @@ from app.schemas.stock import FavoriteActionResponse, StockResponse
 
 router = APIRouter(prefix="/api/favorites", tags=["favorites"])
 
+_optional_bearer = HTTPBearer(auto_error=False)
+DEFAULT_USER = "default"
+
+
+async def _get_user_id(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+) -> str:
+    """인증된 경우 이메일, 아니면 'default' 반환."""
+    if not credentials:
+        return DEFAULT_USER
+    try:
+        payload = decode_token(credentials.credentials)
+        return payload.get("sub", DEFAULT_USER)
+    except JWTError:
+        return DEFAULT_USER
+
 
 @router.get("", response_model=list[StockResponse])
-async def list_favorites(db: AsyncSession = Depends(get_db)):
+async def list_favorites(user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Stock)
         .join(Favorite, Favorite.stock_id == Stock.id)
+        .where(Favorite.user_id == user_id)
         .order_by(Favorite.created_at.desc())
     )
     stocks = result.scalars().all()
@@ -28,22 +48,22 @@ async def list_favorites(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{ticker}", response_model=FavoriteActionResponse)
-async def add(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def add(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
     existing = await db.execute(
-        select(Favorite).where(Favorite.stock_id == stock.id)
+        select(Favorite).where(Favorite.user_id == user_id, Favorite.stock_id == stock.id)
     )
     if existing.scalar_one_or_none():
         return FavoriteActionResponse(status="already_exists", ticker=stock.ticker)
 
-    db.add(Favorite(stock_id=stock.id))
+    db.add(Favorite(user_id=user_id, stock_id=stock.id))
     await db.commit()
     return FavoriteActionResponse(status="added", ticker=stock.ticker)
 
 
 @router.delete("/{ticker}", response_model=FavoriteActionResponse)
-async def remove(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def remove(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
     fav_result = await db.execute(
-        select(Favorite).where(Favorite.stock_id == stock.id)
+        select(Favorite).where(Favorite.user_id == user_id, Favorite.stock_id == stock.id)
     )
     fav = fav_result.scalar_one_or_none()
     if fav:

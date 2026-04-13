@@ -128,7 +128,7 @@ async def seed():
                 print(f"  Skip favorite for {ticker} (already exists)")
                 continue
 
-            session.add(Favorite(stock_id=stock_id))
+            session.add(Favorite(user_id="default", stock_id=stock_id))
             print(f"  Added favorite: {ticker}")
 
         await session.commit()

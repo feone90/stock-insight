@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func as sql_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.favorites import _get_user_id
 from app.database import get_db
 from app.dependencies import get_stock_or_404
 from app.models import Favorite, PriceHistory, Stock
@@ -40,9 +41,9 @@ async def search(q: str = "", db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{ticker}", response_model=StockDetailResponse)
-async def stock_detail(stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def stock_detail(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
     fav_result = await db.execute(
-        select(Favorite).where(Favorite.stock_id == stock.id)
+        select(Favorite).where(Favorite.user_id == user_id, Favorite.stock_id == stock.id)
     )
     is_fav = fav_result.scalar_one_or_none() is not None
 

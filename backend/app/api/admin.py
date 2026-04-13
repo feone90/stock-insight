@@ -71,8 +71,9 @@ async def sync_global(db: AsyncSession = Depends(get_db), _admin: UserInfo = Dep
 
 @router.post("/sync/all", response_model=SyncAllResult)
 async def sync_all(db: AsyncSession = Depends(get_db), _admin: UserInfo = Depends(require_admin)):
+    # 모든 사용자의 즐겨찾기 종목 합집합 (중복 제거)
     fav_result = await db.execute(
-        select(Stock).join(Favorite, Favorite.stock_id == Stock.id)
+        select(Stock).join(Favorite, Favorite.stock_id == Stock.id).distinct()
     )
     stocks = fav_result.scalars().all()
 
