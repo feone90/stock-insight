@@ -83,7 +83,10 @@ async def analyze_stock(db: AsyncSession, stock: Stock, adapter: LLMAdapter) -> 
         # 5. JSON 파싱
         data = _parse_llm_response(raw)
 
-        # 6. DB 저장 (기존 분석 교체)
+        # 6. source에 뉴스 URL 매칭
+        _match_source_urls(data, news_list)
+
+        # 7. DB 저장 (기존 분석 교체)
         await _save_analysis(db, stock.id, data)
 
         return {"analysis_created": True}
@@ -136,6 +139,28 @@ def _parse_llm_response(raw: str) -> dict:
     return data
 
 
+def _match_source_urls(data: dict, news_list: list[dict]) -> None:
+    """LLM이 출력한 source(기사 제목)를 뉴스 URL로 교체한다."""
+    if not news_list:
+        return
+    for kw in data.get("keywords", []):
+        source = kw.get("source", "")
+        if source.startswith("http"):
+            continue  # 이미 URL이면 스킵
+        # 제목 부분 매칭으로 URL 찾기
+        for news in news_list:
+            title = news.get("title", "")
+            url = news.get("url", "")
+            if not url:
+                continue
+            # source 텍스트가 뉴스 제목에 포함되거나, 뉴스 제목이 source에 포함
+            if (title and source and
+                (title in source or source in title or
+                 title[:15] in source or source[:15] in title)):
+                kw["source"] = url
+                break
+
+
 async def _save_analysis(db: AsyncSession, stock_id: int, data: dict) -> None:
     """분석 결과를 DB에 저장한다. 동일 날짜 기존 분석은 교체."""
     today = date.today()
@@ -150,6 +175,7 @@ async def _save_analysis(db: AsyncSession, stock_id: int, data: dict) -> None:
     )
     for old in existing.scalars().all():
         await db.delete(old)
+    await db.flush()  # 삭제 반영 후 insert
 
     # 새 분석 생성
     analysis = Analysis(
