@@ -1,12 +1,29 @@
 import type { Stock, PriceRecord, Analysis } from "@/types/stock";
+import { getToken } from "@/services/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) {
     throw new Error(`API error: ${res.status}`);
   }
+  return res.json();
+}
+
+async function postJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
@@ -37,17 +54,21 @@ export async function getFavorites(): Promise<Stock[]> {
 }
 
 export async function addFavorite(ticker: string): Promise<void> {
-  await fetch(`${API_BASE}/api/favorites/${ticker}`, { method: "POST" });
+  await postJson(`/api/favorites/${ticker}`);
 }
 
 export async function removeFavorite(ticker: string): Promise<void> {
-  await fetch(`${API_BASE}/api/favorites/${ticker}`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE}/api/favorites/${ticker}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
 }
 
 export interface SyncResult {
   status: string;
   ticker?: string;
-  synced: Record<string, number>;
+  synced: Record<string, number | boolean>;
   errors: string[];
 }
 
@@ -60,17 +81,9 @@ export interface SyncAllResult {
 }
 
 export async function syncStock(ticker: string): Promise<SyncResult> {
-  const res = await fetch(`${API_BASE}/api/admin/sync/stock/${ticker}`, {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
-  return res.json();
+  return postJson(`/api/admin/sync/stock/${ticker}`);
 }
 
 export async function syncAll(): Promise<SyncAllResult> {
-  const res = await fetch(`${API_BASE}/api/admin/sync/all`, {
-    method: "POST",
-  });
-  if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
-  return res.json();
+  return postJson(`/api/admin/sync/all`);
 }

@@ -2,6 +2,8 @@
 
 import type { Stock } from "@/types/stock";
 import { addFavorite, removeFavorite, syncStock } from "@/services/api";
+import { isAdmin } from "@/services/auth";
+import { showToast } from "@/components/ui/toast";
 import { useState } from "react";
 
 interface Props {
@@ -14,12 +16,16 @@ export function StockHeader({ stock, onSyncComplete }: Props) {
   const [syncing, setSyncing] = useState(false);
 
   const toggleFavorite = async () => {
-    if (isFav) {
-      await removeFavorite(stock.ticker);
-    } else {
-      await addFavorite(stock.ticker);
+    try {
+      if (isFav) {
+        await removeFavorite(stock.ticker);
+      } else {
+        await addFavorite(stock.ticker);
+      }
+      setIsFav(!isFav);
+    } catch {
+      showToast("즐겨찾기 변경 실패", "error");
     }
-    setIsFav(!isFav);
   };
 
   const handleSync = async () => {
@@ -28,17 +34,19 @@ export function StockHeader({ stock, onSyncComplete }: Props) {
       const result = await syncStock(stock.ticker);
       const { synced, errors } = result;
       const summary = Object.entries(synced)
-        .filter(([, v]) => v > 0)
-        .map(([k, v]) => `${k} ${v}건`)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k} ${v}`)
         .join(", ");
-      alert(
-        `동기화 완료: ${summary || "변경 없음"}${
-          errors.length > 0 ? `\n⚠️ ${errors.join("\n")}` : ""
-        }`
+      showToast(
+        `동기화 완료: ${summary || "변경 없음"}`,
+        errors.length > 0 ? "info" : "success"
       );
+      if (errors.length > 0) {
+        showToast(`경고: ${errors[0]}`, "error");
+      }
       onSyncComplete?.();
     } catch {
-      alert("동기화 실패");
+      showToast("동기화 실패. 관리자 로그인이 필요합니다.", "error");
     } finally {
       setSyncing(false);
     }
@@ -57,17 +65,19 @@ export function StockHeader({ stock, onSyncComplete }: Props) {
         >
           {isFav ? "⭐" : "☆"}
         </button>
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          className="ml-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
-        >
-          {syncing ? "동기화 중..." : "동기화"}
-        </button>
+        {isAdmin() && (
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="ml-2 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
+          >
+            {syncing ? "동기화 중..." : "동기화"}
+          </button>
+        )}
       </div>
       <div className="text-right">
         <div className="text-2xl font-bold text-slate-50">
-          {stock.current_price.toLocaleString()}
+          {stock.current_price?.toLocaleString()}
           {stock.market === "KRX" ? "원" : "$"}
         </div>
         <div
