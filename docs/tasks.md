@@ -14,7 +14,7 @@
 ## Phase 0.5 — PostgreSQL 연동 (2026-04-09) ✅
 
 - [x] Docker Compose + PostgreSQL 서비스
-- [x] SQLAlchemy async 모델 10개 테이블 (stocks, price_history, analyses, keyword_details, daily_keywords, favorites, news, disclosures, financials, exchange_rates)
+- [x] SQLAlchemy async 모델 10개 테이블
 - [x] Alembic 마이그레이션 설정
 - [x] Mock → DB 전환 (API 라우터 리팩토링)
 - [x] Seed 스크립트 (초기 종목 + 목업 데이터)
@@ -38,30 +38,95 @@
 
 ---
 
-## Phase 2 — LLM 연동 + 분석 자동화
+## Phase 2 — LLM 연동 + 분석 자동화 (2026-04-13~14) ✅
 
-- [ ] LLM 어댑터 설계 (Claude/GPT/Azure 멀티 지원)
-- [ ] 뉴스/공시 → 키워드 자동 생성 파이프라인
-- [ ] AI 요약/피드백 자동 생성 (분석 테이블 연동)
+### LLM 파이프라인
+- [x] LLM 어댑터 인터페이스 (ABC) + Azure AI Foundry Responses API 구현
+- [x] OpenAI 어댑터 (직접 OpenAI API용, 추후 전환 대비)
+- [x] Analyzer: 뉴스/공시 → LLM → 키워드 자동 생성 파이프라인
+- [x] 프롬프트 설계: 시니어 애널리스트 역할, 최소 8개 키워드, 구체적 수치/비교 포함
+- [x] JSON 파싱 + 검증 (type/impact/duration 정규화)
+- [x] 뉴스 URL → 키워드 source 자동 매칭 (LLM 의존 없이 DB 매칭)
+- [x] Analysis UniqueConstraint (stock_id, date, period_type) 중복 방지
+- [x] analysis API period_type 필터링 버그 수정
+- [x] 동기화 시 LLM 분석 자동 실행 (llm_api_key 설정 시)
+
+### 뉴스 수집 확장
+- [x] US 종목 뉴스: yfinance news (10건) + NewsAPI.org (30건)
+- [x] yfinance news 신규 포맷 대응 (content.title, canonicalUrl.url)
+- [x] KR 종목 뉴스: Naver News API (50건)
+
+### 인증 시스템
+- [x] JWT 로그인 (POST /api/auth/login, GET /api/auth/me)
+- [x] admin/user 역할 분리
+- [x] Admin 엔드포인트 권한 체크 (require_admin)
+- [x] .env 기반 초기 사용자 (ADMIN_EMAIL, ADMIN_PASSWORD)
+- [x] 프론트엔드 로그인 UI + 토큰 관리 (localStorage)
+- [x] admin만 동기화 버튼 노출
+
+### 즐겨찾기 멀티유저
+- [x] favorites에 user_id 컬럼 추가 + 마이그레이션
+- [x] UniqueConstraint (stock_id) → (user_id, stock_id)
+- [x] 전체 API/seed/scheduler 수정 (6곳+)
+- [x] 첫 로그인 시 default 즐겨찾기 자동 복사
+
+### 스케줄러
+- [x] AsyncIOScheduler (8am/6pm KST)
+- [x] 병렬 sync: 종목별 별도 AsyncSession + Semaphore(3)
+- [x] FastAPI lifespan 연동 (시작/종료)
+- [x] GET /prices on-demand sync 제거 (스케줄러가 대체)
+- [ ] 실제 활성화 (.env SCHEDULER_ENABLED=true)
+
+### 종목 자동등록
+- [x] 검색 시 DB에 없으면 yfinance/FDR에서 외부 검색
+- [x] 종목 페이지 접속 시 자동 등록 (_get_or_register_stock)
+- [x] 한국 종목 .KS/.KQ 접미사 자동 시도
+- [x] market 정규화 (NMS→NASDAQ, KSC→KRX 등)
+
+### 코드 품질
+- [x] pip → uv 패키지 관리 전환 (pyproject.toml + uv.lock)
+- [x] get_stock_or_404 공유 의존성 추출 (DRY)
+- [x] Pydantic response_model 전체 엔드포인트 적용 (13개 모델)
+- [x] CORS origins config.py로 이동
+- [x] alert() → Toast 컴포넌트 교체
+- [x] 신규 테스트 51개 (adapter 12 + analyzer 12 + auth 15 + scheduler 6 + us_news 7)
+
+### 프론트엔드
+- [x] 로그인/로그아웃 UI (top-nav 드롭다운)
+- [x] Toast 알림 컴포넌트 (성공/에러/정보)
+- [x] 키워드 출처 URL 클릭 → 원본 기사 페이지 이동
+- [x] 기간 탭: 차트만 변경, 키워드/AI피드백은 항상 최신 daily 분석 표시
+
+### 문서
+- [x] Quick Start 가이드 업데이트 (CLAUDE.md)
+- [x] .env.example 생성
+- [x] Phase 2 세션 리포트 (docs/gstack/)
+
+---
+
+## Phase 2.5 — AI 대화형 (미착수)
+
 - [ ] 대화형 AI 질문 기능 (챗 인터페이스)
+- [ ] "삼성전자 지금 사도 될까?" 같은 질문에 데이터 기반 답변
 
-## Phase 3 — 데이터 확장
+## Phase 3 — 데이터 확장 (미착수)
 
 - [ ] KR 재무지표 DART 파싱 구현
+- [ ] KR 공시 수집 활성화 (DART API 키 발급 필요)
+- [ ] 기관/외국인 매매동향 (KRX 투자자별 매매)
 - [ ] CNN/매크로 뉴스 수집 + LLM 기반 종목 연관성 태깅
 - [ ] 유튜브 채널 의견 수집
 
-## 인프라 + 운영
+## 인프라 + 운영 (미착수)
 
-- [ ] 인증 시스템 (로그인/회원가입)
+- [ ] DB 기반 사용자 관리 (현재는 .env)
 - [ ] 실시간 데이터 (WebSocket)
-- [ ] 스케줄러 기반 자동 동기화 (현재는 수동 버튼)
 - [ ] K8s 컨테이너 기반 배포 (AWS/Azure)
 - [ ] CI/CD 파이프라인
 
 ## 개선사항
 
-- [ ] 실제 DART/Naver API 키 설정 후 전체 동기화 테스트
-- [ ] 프론트엔드 테스트 추가 (현재 백엔드만 있음)
-- [ ] 에러 처리 UX 개선 (동기화 실패 시 토스트 등)
+- [ ] 프론트엔드 테스트 추가 (Vitest + React Testing Library)
+- [ ] 테스트 DB 격리 (conftest.py 트랜잭션 롤백)
 - [ ] 모바일 반응형 레이아웃
+- [ ] 종목 검색: US 종목 이름 검색 지원 (현재 티커만)
