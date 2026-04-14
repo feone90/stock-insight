@@ -32,6 +32,7 @@ stock-insight/
 │   │   │   ├── stock_lookup.py     # 종목 검색 + 자동등록 (yfinance/FDR)
 │   │   │   ├── financials.py       # yfinance (US) / DART (KR, 미구현)
 │   │   │   ├── news.py             # Naver (KR) + yfinance + NewsAPI (US)
+│   │   │   ├── scraper.py          # trafilatura 기반 기사 본문 스크래핑
 │   │   │   ├── disclosure.py       # DART 공시 API
 │   │   │   └── exchange_rate.py    # open.er-api.com
 │   │   ├── services/llm/           # LLM 분석 파이프라인

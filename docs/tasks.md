@@ -104,6 +104,29 @@
 
 ---
 
+## Phase 2.1 — 뉴스 본문 스크래핑 (2026-04-14) ✅
+
+### 뉴스 본문 수집
+- [x] News 테이블에 `content` (Text, nullable) 컬럼 추가 + 마이그레이션
+- [x] `trafilatura` 기반 기사 본문 스크래퍼 (`collectors/scraper.py`)
+- [x] 병렬 스크래핑 (Semaphore(5), 기사당 10초 타임아웃)
+- [x] 스크래핑 실패 시 graceful fallback (뉴스 수집 결과 유지)
+
+### API description 활용
+- [x] Naver News API `description` → content 저장
+- [x] NewsAPI.org `description`/`content` → content 저장
+- [x] yfinance: 본문 없음 → 스크래핑으로 보완
+
+### LLM 분석 품질 개선
+- [x] LLM 프롬프트에 기사 본문 포함 (기사당 ~1000자 truncate)
+- [x] 본문 없는 기사는 `(본문 없음)` 표시, 추론 방지 지침 추가
+- [x] sync_news → scrape → analyze 파이프라인 통합
+
+### 테스트
+- [x] 신규 테스트 32개 (scraper 9 + us_news 10 + analyzer 13)
+
+---
+
 ## Phase 2.5 — AI 대화형 (미착수)
 
 - [ ] 대화형 AI 질문 기능 (챗 인터페이스)
