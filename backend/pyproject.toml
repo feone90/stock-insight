@@ -18,6 +18,8 @@ dependencies = [
     "finance-datareader",
     "python-jose[cryptography]>=3.5.0",
     "apscheduler>=3.11.2",
+    "psycopg2-binary>=2.9.11",
+    "trafilatura>=2.0.0",
 ]
 
 [dependency-groups]
