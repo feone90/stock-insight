@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.stock import Base
@@ -15,5 +15,6 @@ class News(Base):
     title: Mapped[str] = mapped_column(String(500))
     source: Mapped[str] = mapped_column(String(100))
     url: Mapped[str] = mapped_column(String(1000))
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

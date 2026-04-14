@@ -13,7 +13,13 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # asyncpg URL → psycopg2 sync URL (Alembic은 sync 드라이버 필요)
-sync_url = settings.database_url.replace("+asyncpg", "")
+# Also strip ?ssl=disable (asyncpg param) and replace with sslmode=disable for psycopg2
+_url = settings.database_url.replace("+asyncpg", "")
+if "?ssl=disable" in _url:
+    _url = _url.replace("?ssl=disable", "") + "?sslmode=disable"
+elif "&ssl=disable" in _url:
+    _url = _url.replace("&ssl=disable", "") + "&sslmode=disable"
+sync_url = _url
 
 
 def run_migrations_offline() -> None:
