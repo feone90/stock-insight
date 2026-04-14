@@ -55,6 +55,7 @@ async def analyze_stock(db: AsyncSession, stock: Stock, adapter: LLMAdapter) -> 
                 "published_at": n.published_at.strftime("%Y-%m-%d") if n.published_at else "",
                 "source": n.source or "",
                 "url": n.url or "",
+                "content": n.content or "",
             }
             for n in news_rows
         ]

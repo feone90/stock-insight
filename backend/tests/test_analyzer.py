@@ -102,11 +102,13 @@ def _make_stock(ticker="005930", name="삼성전자", market="KRX"):
     return stock
 
 
-def _make_news(title="테스트 뉴스", days_ago=0):
+def _make_news(title="테스트 뉴스", days_ago=0, content=None):
     n = MagicMock()
     n.title = title
     n.published_at = datetime.now() - timedelta(days=days_ago)
     n.source = "네이버뉴스"
+    n.url = "https://example.com/news"
+    n.content = content
     n.stock_id = 1
     return n
 
@@ -222,3 +224,30 @@ class TestAnalyzeStock:
 
         assert result["analysis_created"] is True
         db.delete.assert_called_once_with(old_analysis)
+
+    @pytest.mark.asyncio
+    async def test_content_included_in_prompt(self):
+        stock = _make_stock()
+        adapter = AsyncMock()
+        adapter.generate_json = AsyncMock(return_value=SAMPLE_LLM_RESPONSE)
+
+        news_with_content = _make_news(
+            title="HBM 수주 확대",
+            content="SK하이닉스가 엔비디아로부터 HBM3E 대규모 수주를 확보했다. 수주 금액은 약 2조원 규모로 추정된다.",
+        )
+
+        db = AsyncMock()
+        news_result = MagicMock()
+        news_result.scalars.return_value.all.return_value = [news_with_content]
+        disc_result = MagicMock()
+        disc_result.scalars.return_value.all.return_value = []
+        existing_result = MagicMock()
+        existing_result.scalars.return_value.all.return_value = []
+
+        db.execute = AsyncMock(side_effect=[news_result, disc_result, existing_result])
+
+        await analyze_stock(db, stock, adapter)
+
+        prompt = adapter.generate_json.call_args[0][0]
+        assert "HBM3E 대규모 수주" in prompt
+        assert "2조원" in prompt

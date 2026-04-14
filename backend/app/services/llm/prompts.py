@@ -23,6 +23,27 @@ ANALYSIS_JSON_SCHEMA = """{
 }"""
 
 MAX_NEWS_ITEMS = 20
+MAX_CONTENT_PER_ARTICLE = 1000
+
+
+def _format_news_item(n: dict) -> str:
+    """뉴스 항목을 프롬프트 텍스트로 포맷한다."""
+    date = n.get("published_at", "")
+    title = n.get("title", "")
+    source = n.get("source", "")
+    url = n.get("url", "")
+    content = n.get("content", "")
+
+    header = f"### [{date}] {title}"
+    meta = f"출처: {source} | URL: {url}"
+
+    if content:
+        truncated = content[:MAX_CONTENT_PER_ARTICLE]
+        if len(content) > MAX_CONTENT_PER_ARTICLE:
+            truncated += "..."
+        return f"{header}\n{meta}\n{truncated}"
+    else:
+        return f"{header}\n{meta}\n(본문 없음)"
 
 
 def build_analysis_prompt(
@@ -36,10 +57,7 @@ def build_analysis_prompt(
 ) -> str:
     """뉴스/공시 데이터로 분석 프롬프트를 생성한다."""
     truncated_news = news_list[:MAX_NEWS_ITEMS]
-    news_text = "\n".join(
-        f"- [{n.get('published_at', '')}] {n.get('title', '')} (출처: {n.get('source', '')}) URL: {n.get('url', '')}"
-        for n in truncated_news
-    )
+    news_text = "\n\n".join(_format_news_item(n) for n in truncated_news)
     if not news_text:
         news_text = "(뉴스 없음)"
 
@@ -72,6 +90,9 @@ def build_analysis_prompt(
 {disc_text}
 
 ## 분석 지침
+
+뉴스 본문이 제공된 경우, 본문의 구체적 수치와 맥락을 반드시 활용하세요.
+본문이 없는 뉴스는 제목만으로 판단하되, 확실하지 않은 내용은 추론하지 마세요.
 
 ### keywords — 최소 8개, 최대 15개
 상승/하락/보합 각 카테고리에서 최소 2개 이상 추출하세요.
