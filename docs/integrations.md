@@ -4,121 +4,94 @@
 
 ---
 
-## 연동 완료
+## 연동 완료 (키 불필요)
 
-### yfinance (US 주가 + 재무)
-
-| 항목 | 내용 |
-|------|------|
-| 용도 | US 종목 주가 (OHLCV), 재무지표 (PER, PBR, ROE, 시가총액 등) |
-| Collector | `backend/app/collectors/stock_price.py`, `financials.py` |
-| 인증 | 불필요 (무료) |
-| 호출 방식 | `yf.download()` (주가), `yf.Ticker().info` (재무) |
-| 주의사항 | MultiIndex 컬럼 반환 → `droplevel("Ticker")` 필요. rate limit 있음 (과도한 호출 시 차단). `asyncio.to_thread`로 비동기 래핑. |
-| 데이터 범위 | 최대 수십 년치 가능, 현재 on-demand로 요청 기간만큼 수집 |
-
-### FinanceDataReader (KR 주가)
+### yfinance (US 주가 + 재무 + 뉴스)
 
 | 항목 | 내용 |
 |------|------|
-| 용도 | KR 종목 주가 (OHLCV) |
-| Collector | `backend/app/collectors/stock_price.py` |
+| 용도 | US 종목 주가 (OHLCV), 재무지표, 뉴스 (10건), 종목 검색/자동등록 |
+| Collector | `stock_price.py`, `financials.py`, `news.py`, `stock_lookup.py` |
 | 인증 | 불필요 (무료) |
-| 호출 방식 | `fdr.DataReader(ticker, start)` |
-| 주의사항 | KRX 종목코드 6자리 (예: `005930`). `asyncio.to_thread`로 비동기 래핑. |
-| 데이터 범위 | 수년치 가능 |
+| 주의사항 | MultiIndex 컬럼 → `droplevel("Ticker")`. rate limit 있음. 뉴스는 최대 10건. 한국 종목은 `.KS`/`.KQ` 접미사 필요. |
+| market 정규화 | exchange 코드 (NMS, NGM 등) → NASDAQ/NYSE/KRX 자동 변환 |
+
+### FinanceDataReader (KR 주가 + 종목 검색)
+
+| 항목 | 내용 |
+|------|------|
+| 용도 | KR 종목 주가 (OHLCV), KRX 전체 종목 검색 |
+| Collector | `stock_price.py`, `stock_lookup.py` |
+| 인증 | 불필요 (무료) |
+| 주의사항 | KRX 종목코드 6자리. `asyncio.to_thread`로 비동기 래핑. |
 
 ### ExchangeRate API (환율)
 
 | 항목 | 내용 |
 |------|------|
 | 용도 | 주요 통화 환율 (USD/KRW, USD/EUR, USD/JPY) |
-| Collector | `backend/app/collectors/exchange_rate.py` |
+| Collector | `exchange_rate.py` |
 | 엔드포인트 | `https://open.er-api.com/v6/latest/USD` |
-| 인증 | 불필요 (무료 tier) |
-| 호출 방식 | httpx GET |
-| 주의사항 | 무료 tier는 일 1,500회 제한. 하루 1회 동기화면 충분. |
-| 수집 통화 | `CURRENCY_PAIRS` dict에서 관리 (`KRW`, `EUR`, `JPY`) |
+| 인증 | 불필요 (무료, 일 1,500회) |
 
 ---
 
 ## 연동 완료 (API 키 필요)
 
-### Naver News API (뉴스)
+### Azure AI Foundry — LLM 분석 ✅
 
 | 항목 | 내용 |
 |------|------|
-| 용도 | 종목 관련 뉴스 수집 |
-| Collector | `backend/app/collectors/news.py` |
-| 엔드포인트 | `https://openapi.naver.com/v1/search/news.json` |
-| 인증 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` (backend/.env) |
-| 발급 방법 | [Naver Developers](https://developers.naver.com/) → 애플리케이션 등록 → 검색 API 사용 |
-| 호출 방식 | httpx GET, 헤더에 Client ID/Secret |
-| 주의사항 | 일 25,000회 제한. HTML 태그 포함된 title → `strip_html()` 처리. pubDate RFC 2822 형식. |
-| 키 미설정 시 | `{"news_synced": 0, "error": "Naver API 키 미설정"}` 반환 (예외 없음) |
+| 용도 | 뉴스/공시 → 키워드 자동 추출, AI 요약/피드백 생성 |
+| Adapter | `app/services/llm/adapter.py` (AzureOpenAIAdapter) |
+| API 형식 | Responses API (`input[]` → `output[].content[].text`) |
+| 인증 | `LLM_ENDPOINT`, `LLM_API_KEY`, `LLM_DEPLOYMENT` (.env) |
+| 인증 헤더 | `api-key` 헤더 |
+| 현재 모델 | gpt-5.4-mini |
+| 비용 | 종목당 1회 호출, 월 $2-5 예상 |
+| 키 미설정 시 | LLM 분석 스킵, 나머지 동기화는 정상 진행 |
 
-### DART 공시 API (공시)
+### Naver News API (KR 뉴스) ✅
+
+| 항목 | 내용 |
+|------|------|
+| 용도 | KR 종목 관련 뉴스 수집 (50건/종목) |
+| Collector | `news.py` (`_sync_naver_news`) |
+| 인증 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` |
+| 발급 | [Naver Developers](https://developers.naver.com/) → 애플리케이션 등록 → 검색 API |
+| 제한 | 일 25,000회 |
+
+### NewsAPI.org (US 뉴스) ✅
+
+| 항목 | 내용 |
+|------|------|
+| 용도 | US 종목 영문 뉴스 수집 (30건/종목, yfinance 보조) |
+| Collector | `news.py` (`_sync_newsapi`) |
+| 인증 | `NEWSAPI_KEY` |
+| 발급 | [NewsAPI.org](https://newsapi.org/register) → 가입 즉시 발급 |
+| 제한 | 무료 플랜 일 100건 호출 |
+| 키 미설정 시 | US 뉴스는 yfinance 10건만 수집 |
+
+### DART 공시 API (KR 공시)
 
 | 항목 | 내용 |
 |------|------|
 | 용도 | KR 종목 공시 목록 수집 |
-| Collector | `backend/app/collectors/disclosure.py` |
-| 엔드포인트 | `https://opendart.fss.or.kr/api/list.json` |
-| 인증 | `DART_API_KEY` (backend/.env) |
-| 발급 방법 | [DART OpenAPI](https://opendart.fss.or.kr/) → 회원가입 → 인증키 발급 |
-| 호출 방식 | httpx GET, query param에 `crtfc_key` |
-| 주의사항 | KR 종목만 해당. `stock.dart_code` (기업고유번호) 필요. 일 10,000회 제한. |
-| 키/코드 미설정 시 | 에러 메시지와 함께 graceful 반환 |
+| Collector | `disclosure.py` |
+| 인증 | `DART_API_KEY` |
+| 발급 | [DART OpenAPI](https://opendart.fss.or.kr/) → 회원가입 → 인증키 발급 |
+| 제한 | 일 10,000회 |
+| 현재 상태 | 코드 완성, **API 키 미설정** |
 
 ---
 
 ## 미연동 (TODO)
 
-### DART 재무제표 API (KR 재무지표)
-
-| 항목 | 내용 |
-|------|------|
-| 용도 | KR 종목 재무지표 (매출, 영업이익, PER 등) |
-| 현재 상태 | `financials.py`에 placeholder — `"KR 재무지표 DART 파싱 미구현"` 반환 |
-| 엔드포인트 | `https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json` |
-| 인증 | `DART_API_KEY` (공시와 동일 키) |
-| 비고 | DART 재무제표는 XML/JSON 형태로 항목이 많아 파싱 로직 필요 |
-
-### LLM API (AI 분석)
-
-| 항목 | 내용 |
-|------|------|
-| 용도 | 뉴스/공시 → 키워드 자동 추출, AI 요약/피드백 생성 |
-| 현재 상태 | AI 피드백 패널은 목업 텍스트. LLM 미연동. |
-| 후보 | Claude API (Anthropic), OpenAI GPT, Azure OpenAI |
-| 예상 구현 | 멀티 어댑터 패턴 — config로 provider 선택 |
-| 환경변수 (예상) | `LLM_PROVIDER`, `ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY` |
-
-### WebSocket (실시간 데이터)
-
-| 항목 | 내용 |
-|------|------|
-| 용도 | 장중 실시간 호가/체결 데이터 |
-| 현재 상태 | 미구현 |
-| 후보 | 한국투자증권 OpenAPI (KR), Alpaca/Polygon.io (US) |
-| 비고 | 인증 토큰 발급 필요, WebSocket 연결 유지 관리 |
-
-### YouTube Data API (유튜브 의견 수집)
-
-| 항목 | 내용 |
-|------|------|
-| 용도 | 주식 관련 유튜브 채널 의견/댓글 수집 |
-| 현재 상태 | 미구현 (Phase 3) |
-| 엔드포인트 | `https://www.googleapis.com/youtube/v3/` |
-| 인증 | Google API Key |
-
-### CNN/매크로 뉴스
-
-| 항목 | 내용 |
-|------|------|
-| 용도 | 글로벌 매크로 뉴스 수집 + LLM 기반 종목 연관성 태깅 |
-| 현재 상태 | 미구현 (Phase 3) |
-| 후보 | NewsAPI, RSS 피드, 직접 크롤링 |
+| 서비스 | 용도 | Phase |
+|--------|------|-------|
+| DART 재무제표 API | KR 재무지표 파싱 | 3 |
+| 한국투자증권 OpenAPI | 실시간 호가/체결 (WebSocket) | 인프라 |
+| YouTube Data API | 주식 유튜브 의견 수집 | 3 |
 
 ---
 
@@ -127,8 +100,16 @@
 | 변수 | 필수 | 용도 | 발급처 |
 |------|------|------|--------|
 | `DATABASE_URL` | **필수** | PostgreSQL 연결 | 직접 설정 |
-| `DART_API_KEY` | 선택 | 공시 + 재무 수집 | [DART OpenAPI](https://opendart.fss.or.kr/) |
-| `NAVER_CLIENT_ID` | 선택 | 뉴스 수집 | [Naver Developers](https://developers.naver.com/) |
-| `NAVER_CLIENT_SECRET` | 선택 | 뉴스 수집 | 상동 |
+| `ADMIN_EMAIL` | **필수** | 관리자 로그인 | 직접 설정 |
+| `ADMIN_PASSWORD` | **필수** | 관리자 비밀번호 | 직접 설정 |
+| `JWT_SECRET` | **필수** | JWT 서명 | 직접 설정 |
+| `LLM_ENDPOINT` | 선택 | Azure AI Foundry | Azure Portal |
+| `LLM_API_KEY` | 선택 | LLM 인증 | Azure Portal |
+| `LLM_DEPLOYMENT` | 선택 | 모델 배포명 | Azure Portal |
+| `NAVER_CLIENT_ID` | 선택 | KR 뉴스 | [Naver Developers](https://developers.naver.com/) |
+| `NAVER_CLIENT_SECRET` | 선택 | KR 뉴스 | 상동 |
+| `NEWSAPI_KEY` | 선택 | US 뉴스 | [NewsAPI.org](https://newsapi.org/) |
+| `DART_API_KEY` | 선택 | KR 공시 | [DART OpenAPI](https://opendart.fss.or.kr/) |
+| `SCHEDULER_ENABLED` | 선택 | 자동 동기화 | `true`/`false` |
 
-> 선택 항목 미설정 시 해당 Collector는 에러 메시지와 함께 0건 반환 (앱 정상 동작)
+> 선택 항목 미설정 시 해당 기능만 스킵, 앱 정상 동작
