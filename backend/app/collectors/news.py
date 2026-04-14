@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -8,8 +9,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.collectors.scraper import scrape_news_content
 from app.models import Stock
 from app.models.news import News
+
+logger = logging.getLogger(__name__)
 
 
 def strip_html(text: str) -> str:
@@ -54,12 +58,15 @@ async def _sync_naver_news(db: AsyncSession, stock: Stock) -> dict:
         except Exception:
             pub_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
+        content = strip_html(item.get("description", "")) or None
+
         stmt = insert(News).values(
             stock_id=stock.id,
             title=strip_html(item.get("title", "")),
             source="네이버뉴스",
             url=item.get("link", ""),
             published_at=pub_date,
+            content=content,
         ).on_conflict_do_nothing(constraint="uq_news_stock_url")
         result = await db.execute(stmt)
         if result.rowcount > 0:
@@ -183,12 +190,15 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
         if not title or not url or title == "[Removed]":
             continue
 
+        content = article.get("description") or article.get("content") or None
+
         stmt = insert(News).values(
             stock_id=stock.id,
             title=title[:500],
             source=source_name,
             url=url[:1000],
             published_at=pub_date,
+            content=content,
         ).on_conflict_do_nothing(constraint="uq_news_stock_url")
         result = await db.execute(stmt)
         if result.rowcount > 0:
@@ -204,7 +214,6 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
 async def sync_news(db: AsyncSession, stock: Stock) -> dict:
     """종목 시장에 따라 적절한 뉴스 소스로 동기화한다."""
     if stock.market in ("NYSE", "NASDAQ"):
-        # yfinance(10건) + NewsAPI(30건) 합산
         yf_result = await _sync_yfinance_news(db, stock)
         api_result = await _sync_newsapi(db, stock)
         total = yf_result.get("news_synced", 0) + api_result.get("news_synced", 0)
@@ -215,5 +224,15 @@ async def sync_news(db: AsyncSession, stock: Stock) -> dict:
         result = {"news_synced": total}
         if errors:
             result["error"] = "; ".join(errors)
-        return result
-    return await _sync_naver_news(db, stock)
+    else:
+        result = await _sync_naver_news(db, stock)
+
+    # 본문 스크래핑 (실패해도 뉴스 수집 결과는 유지)
+    try:
+        scrape_result = await scrape_news_content(db, stock.id)
+        result["scraped"] = scrape_result.get("scraped", 0)
+    except Exception as e:
+        logger.warning("Content scraping failed for %s: %s", stock.ticker, e)
+        result["scraped"] = 0
+
+    return result

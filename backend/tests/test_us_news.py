@@ -85,9 +85,11 @@ class TestSyncYfinanceNews:
 
 class TestSyncNewsRouting:
     @pytest.mark.asyncio
+    @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, return_value={"scraped": 0})
+    @patch("app.collectors.news._sync_newsapi", new_callable=AsyncMock, return_value={"news_synced": 0})
     @patch("app.collectors.news._sync_yfinance_news", new_callable=AsyncMock, return_value={"news_synced": 5})
     @patch("app.collectors.news._sync_naver_news", new_callable=AsyncMock)
-    async def test_us_stock_uses_yfinance(self, mock_naver, mock_yf):
+    async def test_us_stock_uses_yfinance(self, mock_naver, mock_yf, mock_newsapi, mock_scrape):
         db = AsyncMock()
         result = await sync_news(db, _make_stock("TSLA", "NASDAQ"))
         mock_yf.assert_called_once()
@@ -95,11 +97,51 @@ class TestSyncNewsRouting:
         assert result["news_synced"] == 5
 
     @pytest.mark.asyncio
+    @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, return_value={"scraped": 0})
     @patch("app.collectors.news._sync_yfinance_news", new_callable=AsyncMock)
     @patch("app.collectors.news._sync_naver_news", new_callable=AsyncMock, return_value={"news_synced": 10})
-    async def test_kr_stock_uses_naver(self, mock_naver, mock_yf):
+    async def test_kr_stock_uses_naver(self, mock_naver, mock_yf, mock_scrape):
         db = AsyncMock()
         result = await sync_news(db, _make_stock("005930", "KRX"))
         mock_naver.assert_called_once()
         mock_yf.assert_not_called()
         assert result["news_synced"] == 10
+
+
+class TestSyncNewsWithScraping:
+    @pytest.mark.asyncio
+    @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, return_value={"scraped": 3})
+    @patch("app.collectors.news._sync_newsapi", new_callable=AsyncMock, return_value={"news_synced": 10})
+    @patch("app.collectors.news._sync_yfinance_news", new_callable=AsyncMock, return_value={"news_synced": 5})
+    async def test_us_sync_calls_scraper(self, mock_yf, mock_newsapi, mock_scrape):
+        db = AsyncMock()
+        stock = _make_stock("TSLA", "NASDAQ")
+        result = await sync_news(db, stock)
+
+        mock_scrape.assert_called_once_with(db, stock.id)
+        assert result["news_synced"] == 15
+        assert result["scraped"] == 3
+
+    @pytest.mark.asyncio
+    @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, return_value={"scraped": 5})
+    @patch("app.collectors.news._sync_naver_news", new_callable=AsyncMock, return_value={"news_synced": 20})
+    async def test_kr_sync_calls_scraper(self, mock_naver, mock_scrape):
+        db = AsyncMock()
+        stock = _make_stock("005930", "KRX")
+        result = await sync_news(db, stock)
+
+        mock_scrape.assert_called_once_with(db, stock.id)
+        assert result["news_synced"] == 20
+        assert result["scraped"] == 5
+
+    @pytest.mark.asyncio
+    @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, side_effect=Exception("scrape error"))
+    @patch("app.collectors.news._sync_yfinance_news", new_callable=AsyncMock, return_value={"news_synced": 5})
+    @patch("app.collectors.news._sync_newsapi", new_callable=AsyncMock, return_value={"news_synced": 0})
+    async def test_scraper_failure_does_not_break_sync(self, mock_newsapi, mock_yf, mock_scrape):
+        db = AsyncMock()
+        stock = _make_stock("TSLA", "NASDAQ")
+        result = await sync_news(db, stock)
+
+        assert result["news_synced"] == 5
+        assert result["scraped"] == 0
