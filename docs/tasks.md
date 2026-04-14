@@ -122,8 +122,16 @@
 - [x] 본문 없는 기사는 `(본문 없음)` 표시, 추론 방지 지침 추가
 - [x] sync_news → scrape → analyze 파이프라인 통합
 
+### 데이터 관리
+- [x] 뉴스 본문 retention 정책 (30일 초과 content NULL 처리)
+- [x] 스케줄러 sync job에 cleanup 자동 실행 통합
+- [x] `NEWS_CONTENT_RETENTION_DAYS` 환경변수로 설정 가능
+
+### 프론트엔드
+- [x] keyword-timeline duplicate key 버그 수정
+
 ### 테스트
-- [x] 신규 테스트 32개 (scraper 9 + us_news 10 + analyzer 13)
+- [x] 신규 테스트 34개 (scraper 9 + us_news 10 + analyzer 13 + scheduler cleanup 2)
 
 ---
 
