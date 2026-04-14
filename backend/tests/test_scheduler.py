@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.scheduler import _sync_single_stock, scheduled_sync_job, init_scheduler
+from app.scheduler import _sync_single_stock, scheduled_sync_job, init_scheduler, cleanup_old_news_content
 
 
 def _make_stock(ticker="005930", name="삼성전자"):
@@ -88,10 +88,11 @@ class TestSyncSingleStock:
 
 class TestScheduledSyncJob:
     @pytest.mark.asyncio
+    @patch("app.scheduler.cleanup_old_news_content", new_callable=AsyncMock, return_value={"cleaned": 0})
     @patch("app.scheduler._sync_single_stock", new_callable=AsyncMock)
     @patch("app.scheduler.sync_exchange_rates", new_callable=AsyncMock)
     @patch("app.scheduler.async_session")
-    async def test_syncs_favorited_stocks(self, mock_session, mock_rates, mock_single):
+    async def test_syncs_favorited_stocks(self, mock_session, mock_rates, mock_single, mock_cleanup):
         stock1 = _make_stock("005930")
         stock2 = _make_stock("TSLA", "Tesla")
 
@@ -140,3 +141,43 @@ class TestInitScheduler:
         init_scheduler()
         assert mock_sched.add_job.call_count == 2
         mock_sched.start.assert_called_once()
+
+
+class TestCleanupOldNewsContent:
+    @pytest.mark.asyncio
+    @patch("app.scheduler.settings")
+    @patch("app.scheduler.async_session")
+    async def test_cleans_old_content(self, mock_session, mock_settings):
+        mock_settings.news_content_retention_days = 30
+
+        db_mock = AsyncMock()
+        exec_result = MagicMock()
+        exec_result.rowcount = 15
+        db_mock.execute = AsyncMock(return_value=exec_result)
+
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=db_mock)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await cleanup_old_news_content()
+
+        assert result["cleaned"] == 15
+        db_mock.execute.assert_called_once()
+        db_mock.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.scheduler.settings")
+    @patch("app.scheduler.async_session")
+    async def test_nothing_to_clean(self, mock_session, mock_settings):
+        mock_settings.news_content_retention_days = 30
+
+        db_mock = AsyncMock()
+        exec_result = MagicMock()
+        exec_result.rowcount = 0
+        db_mock.execute = AsyncMock(return_value=exec_result)
+
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=db_mock)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await cleanup_old_news_content()
+
+        assert result["cleaned"] == 0

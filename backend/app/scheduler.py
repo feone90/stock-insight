@@ -2,15 +2,17 @@
 
 import asyncio
 import logging
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.database import async_session
 from app.models import Favorite, Stock
+from app.models.news import News
 from app.collectors.stock_price import sync_prices
 from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
@@ -65,6 +67,22 @@ async def _sync_single_stock(stock: Stock) -> dict:
             return results
 
 
+async def cleanup_old_news_content():
+    """오래된 뉴스의 본문(content)을 NULL 처리하여 DB 용량을 관리한다."""
+    cutoff = date.today() - timedelta(days=settings.news_content_retention_days)
+    async with async_session() as db:
+        result = await db.execute(
+            update(News)
+            .where(News.published_at < cutoff, News.content.isnot(None))
+            .values(content=None)
+        )
+        await db.commit()
+        cleaned = result.rowcount
+        if cleaned > 0:
+            logger.info("Cleaned content from %d old news articles (before %s)", cleaned, cutoff)
+        return {"cleaned": cleaned}
+
+
 async def scheduled_sync_job():
     """스케줄러가 호출하는 전체 동기화 잡."""
     logger.info("Scheduled sync started")
@@ -87,6 +105,9 @@ async def scheduled_sync_job():
     # 환율 동기화 (별도 세션)
     async with async_session() as db:
         await sync_exchange_rates(db)
+
+    # 오래된 뉴스 본문 정리
+    await cleanup_old_news_content()
 
     synced = [r["ticker"] for r in results if isinstance(r, dict) and "ticker" in r]
     logger.info("Scheduled sync completed: %d stocks synced (%s)", len(synced), ", ".join(synced))

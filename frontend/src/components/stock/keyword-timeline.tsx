@@ -22,12 +22,12 @@ export function KeywordTimeline({
   return (
     <div className="mt-2 border-t border-slate-800 pt-2">
       <div className="flex gap-1 overflow-x-auto">
-        {dailyKeywords.map((dk) => {
+        {dailyKeywords.map((dk, idx) => {
           const colors = TYPE_COLORS[dk.type];
           const isSelected = selectedDate === dk.date;
           return (
             <button
-              key={dk.date}
+              key={`${dk.date}-${idx}`}
               onClick={() => onDateSelect(dk.date)}
               className={`flex flex-col items-center gap-1 rounded-md p-1.5 min-w-[80px] transition-colors ${
                 isSelected ? "bg-slate-800" : "hover:bg-slate-900"
