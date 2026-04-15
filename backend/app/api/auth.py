@@ -66,7 +66,9 @@ def decode_token(token: str) -> dict:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> UserInfo:
-    """현재 인증된 사용자를 반환한다. 미인증 시 401."""
+    """현재 인증된 사용자를 반환한다. 미인증 시 401. DEV_MODE 시 바이패스."""
+    if settings.dev_mode:
+        return UserInfo(email=settings.admin_email or "dev@local", role="admin")
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

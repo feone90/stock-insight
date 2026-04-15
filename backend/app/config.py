@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     llm_deployment: str = ""  # Azure OpenAI deployment name
     llm_model: str = ""  # model name (OpenAI용)
 
+    # Dev mode (skip auth)
+    dev_mode: bool = True
+
     # Data retention
     news_content_retention_days: int = 30
 

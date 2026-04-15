@@ -70,7 +70,7 @@ export function TopNav() {
         <StockSearch />
       </div>
       <div className="flex items-center gap-3">
-        {user?.role === "admin" && (
+        {isAdmin() && (
           <button
             onClick={handleSyncAll}
             disabled={syncing}
