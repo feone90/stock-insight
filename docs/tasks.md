@@ -127,6 +127,10 @@
 - [x] 스케줄러 sync job에 cleanup 자동 실행 통합
 - [x] `NEWS_CONTENT_RETENTION_DAYS` 환경변수로 설정 가능
 
+### 개발 편의
+- [x] DEV_MODE 인증 바이패스 (백엔드 + 프론트엔드)
+- [x] 프로덕션 배포 시 `DEV_MODE=false`로 전환
+
 ### 프론트엔드
 - [x] keyword-timeline duplicate key 버그 수정
 
