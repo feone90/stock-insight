@@ -143,10 +143,26 @@
 
 ---
 
-## Phase 2.5 — AI 대화형 (미착수)
+## Phase 2.5 — LangGraph Multi-Agent 대화형 AI (설계 완료, 구현 미착수)
 
-- [ ] 대화형 AI 질문 기능 (챗 인터페이스)
-- [ ] "삼성전자 지금 사도 될까?" 같은 질문에 데이터 기반 답변
+Design doc: `~/.gstack/projects/feone90-stock-insight/main-design-20260415-langgraph-agents.md`
+
+### Phase A: 대화형 Agent (다음 구현 대상)
+- [ ] `langchain` + `langgraph` + `langchain-openai` 의존성 추가
+- [ ] `create_agent` + `AzureChatOpenAI`로 Conversational Agent 구현
+- [ ] Agent tools 6개 (get_stock_info, get_recent_prices, get_recent_news, get_analysis, search_stocks, get_financials)
+- [ ] Chat API (POST /api/chat, SSE 스트리밍)
+- [ ] `langgraph-checkpoint-postgres`로 대화 메모리
+- [ ] /chat 페이지 (프론트엔드 Chat UI)
+
+### Phase B: Multi-Agent 확장 (별도 설계)
+- [ ] Research Agent (자율 뉴스 수집, 교차 검증)
+- [ ] Analysis Agent (감성 분석, 재무 교차 검증)
+- [ ] Supervisor (LLM 기반 라우터) 도입
+
+### Phase C/D: 실시간 + 개인화 (별도 설계)
+- [ ] WebSocket 실시간 가격, 급등/급락 알림
+- [ ] 사용자 투자 성향 학습, 맞춤 추천
 
 ## Phase 3 — 데이터 확장 (미착수)
 

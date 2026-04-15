@@ -11,3 +11,5 @@ __pycache__/
 node_modules/
 .next/
 notes/
+.gstack/
+.playwright-mcp/
