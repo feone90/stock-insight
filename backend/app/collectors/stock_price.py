@@ -1,12 +1,17 @@
 import asyncio
+import logging
 from datetime import date, timedelta
 
 import pandas as pd
-from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PriceHistory, Stock
+
+logger = logging.getLogger(__name__)
+
+# 전일 대비 이 비율 이상 변동하면 이상치로 판단
+PRICE_ANOMALY_RATIO = 3.0
 
 
 def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:  # pragma: no cover
@@ -41,21 +46,44 @@ async def sync_prices(db: AsyncSession, stock: Stock, days: int = 365) -> dict:
     if df is None or df.empty:
         return {"prices_synced": 0, "error": "주가 데이터 없음"}
 
+    # 이상치 필터링: 전일 대비 300%+ 변동 시 스킵
+    prev_close = None
+    skipped = 0
     count = 0
     for idx, row in df.iterrows():
         dt = idx.date() if hasattr(idx, "date") else idx
-        stmt = insert(PriceHistory).values(
+        close = float(row.get("Close", 0))
+
+        if close <= 0:
+            continue
+
+        if prev_close and prev_close > 0:
+            ratio = close / prev_close
+            if ratio > PRICE_ANOMALY_RATIO or ratio < (1 / PRICE_ANOMALY_RATIO):
+                logger.warning(
+                    "Price anomaly for %s on %s: %.2f → %.2f (%.1fx), skipping",
+                    stock.ticker, dt, prev_close, close, ratio,
+                )
+                skipped += 1
+                continue
+
+        prev_close = close
+
+        values = dict(
             stock_id=stock.id,
             date=dt,
             open=float(row.get("Open", 0)),
             high=float(row.get("High", 0)),
             low=float(row.get("Low", 0)),
-            close=float(row.get("Close", 0)),
+            close=close,
             volume=int(row.get("Volume", 0)),
-        ).on_conflict_do_nothing(constraint="uq_stock_date")
-        result = await db.execute(stmt)
-        if result.rowcount > 0:
-            count += 1
+        )
+        stmt = insert(PriceHistory).values(**values).on_conflict_do_update(
+            constraint="uq_stock_date",
+            set_={k: v for k, v in values.items() if k not in ("stock_id", "date")},
+        )
+        await db.execute(stmt)
+        count += 1
 
     # Stock 최신 종가 업데이트
     if not df.empty:
