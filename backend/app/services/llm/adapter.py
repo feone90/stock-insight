@@ -84,14 +84,29 @@ class AzureOpenAIAdapter(LLMAdapter):
           {"type": "done"}
         """
         import json as _json
+        import logging
+        _logger = logging.getLogger(__name__)
 
-        body = {
+        # Responses API: system message → "instructions" field, not in input
+        instructions = None
+        input_messages = []
+        for m in messages:
+            if m.get("role") == "system":
+                instructions = m["content"]
+            elif m.get("type") in ("function_call", "function_call_output"):
+                input_messages.append(m)  # tool call/result items pass through
+            else:
+                input_messages.append(m)
+
+        body: dict = {
             "model": self.deployment,
-            "input": messages,
+            "input": input_messages,
             "tools": tools,
             "tool_choice": "auto",
             "temperature": 0.3,
         }
+        if instructions:
+            body["instructions"] = instructions
 
         async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
@@ -102,6 +117,8 @@ class AzureOpenAIAdapter(LLMAdapter):
                     "Content-Type": "application/json",
                 },
             )
+            if resp.status_code != 200:
+                _logger.error("Foundry API error %s: %s", resp.status_code, resp.text[:500])
             resp.raise_for_status()
 
         data = resp.json()
