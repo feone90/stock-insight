@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 
 import httpx
 from openai import AsyncOpenAI
@@ -16,6 +17,13 @@ class LLMAdapter(ABC):
     @abstractmethod
     async def generate_json(self, prompt: str) -> str:
         """프롬프트를 전송하고 JSON 응답을 반환한다."""
+
+    async def chat_with_tools(
+        self, messages: list[dict], tools: list[dict]
+    ) -> AsyncGenerator[dict, None]:
+        """Tool-calling 지원 어댑터만 구현. 기본은 NotImplementedError."""
+        raise NotImplementedError("This adapter does not support tool calling")
+        yield  # pragma: no cover
 
 
 class AzureOpenAIAdapter(LLMAdapter):
@@ -64,6 +72,59 @@ class AzureOpenAIAdapter(LLMAdapter):
 
     async def generate_json(self, prompt: str) -> str:
         return await self._call(prompt, json_mode=True)
+
+    async def chat_with_tools(
+        self, messages: list[dict], tools: list[dict]
+    ) -> AsyncGenerator[dict, None]:
+        """Foundry Responses API로 tool-calling 요청, 결과를 async generator로 yield.
+
+        Yields:
+          {"type": "text", "content": "..."}
+          {"type": "function_call", "name": "...", "arguments": {...}, "call_id": "..."}
+          {"type": "done"}
+        """
+        import json as _json
+
+        body = {
+            "model": self.deployment,
+            "input": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": 0.3,
+        }
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                self.endpoint,
+                json=body,
+                headers={
+                    "api-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+
+        data = resp.json()
+        for item in data.get("output", []):
+            item_type = item.get("type")
+            if item_type == "message":
+                for content in item.get("content", []):
+                    if content.get("type") == "output_text":
+                        yield {"type": "text", "content": content.get("text", "")}
+            elif item_type == "function_call":
+                raw_args = item.get("arguments", "{}")
+                try:
+                    args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except _json.JSONDecodeError:
+                    args = {}
+                yield {
+                    "type": "function_call",
+                    "name": item.get("name", ""),
+                    "arguments": args,
+                    "call_id": item.get("call_id", ""),
+                }
+
+        yield {"type": "done"}
 
 
 class OpenAIAdapter(LLMAdapter):
