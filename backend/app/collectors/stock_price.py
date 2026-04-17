@@ -10,8 +10,8 @@ from app.models import PriceHistory, Stock
 
 logger = logging.getLogger(__name__)
 
-# 전일 대비 이 비율 이상 변동하면 이상치로 판단
-PRICE_ANOMALY_RATIO = 3.0
+# 전일 대비 이 비율 이상 변동하면 이상치로 판단 (1.5 = 50% 이상 변동)
+PRICE_ANOMALY_RATIO = 1.5
 
 
 def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:  # pragma: no cover
