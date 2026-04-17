@@ -96,3 +96,77 @@ export async function syncStock(ticker: string): Promise<SyncResult> {
 export async function syncAll(): Promise<SyncAllResult> {
   return postJson(`/api/admin/sync/all`);
 }
+
+// --- Chat API ---
+
+import type { ChatMessage, SseEvent, ThreadSummary } from "@/types/chat";
+
+export async function* streamChat(
+  message: string,
+  threadId: string | null,
+  signal: AbortSignal
+): AsyncGenerator<SseEvent, void, void> {
+  const res = await fetch(`${API_BASE}/api/chat`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ message, thread_id: threadId }),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Chat API error: ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let idx: number;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const raw = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const event = parseSseBlock(raw);
+      if (event) yield event;
+    }
+  }
+}
+
+function parseSseBlock(block: string): SseEvent | null {
+  const lines = block.split("\n");
+  let eventName = "";
+  let dataLine = "";
+  for (const line of lines) {
+    if (line.startsWith("event:")) eventName = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLine = line.slice(5).trim();
+  }
+  if (!eventName || !dataLine) return null;
+  try {
+    const data = JSON.parse(dataLine);
+    return { event: eventName, data } as SseEvent;
+  } catch {
+    return null;
+  }
+}
+
+export async function listThreads(): Promise<ThreadSummary[]> {
+  const res = await fetchJson<{ threads: ThreadSummary[] }>("/api/chat/threads");
+  return res.threads;
+}
+
+export async function getThreadHistory(threadId: string): Promise<ChatMessage[]> {
+  const res = await fetchJson<{ thread_id: string; messages: ChatMessage[] }>(
+    `/api/chat/history/${threadId}`
+  );
+  return res.messages;
+}
+
+export async function deleteThread(threadId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/chat/history/${threadId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+}

@@ -80,6 +80,12 @@ export function TopNav() {
           </button>
         )}
         <Link
+          href="/chat"
+          className="text-sm text-purple-400 transition-colors hover:text-purple-300"
+        >
+          챗
+        </Link>
+        <Link
           href="/"
           className="text-sm text-yellow-400 hover:text-yellow-300 transition-colors"
         >
