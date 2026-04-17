@@ -6,6 +6,7 @@ from app.models.news import News
 from app.models.disclosure import Disclosure
 from app.models.financial import Financial
 from app.models.exchange_rate import ExchangeRate
+from app.models.chat import ChatMessage
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "Disclosure",
     "Financial",
     "ExchangeRate",
+    "ChatMessage",
 ]
