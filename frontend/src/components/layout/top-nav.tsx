@@ -83,7 +83,7 @@ export function TopNav() {
           href="/chat"
           className="text-sm text-purple-400 transition-colors hover:text-purple-300"
         >
-          챗
+          Ask AI
         </Link>
         <Link
           href="/"
