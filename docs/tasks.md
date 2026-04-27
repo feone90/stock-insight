@@ -161,7 +161,7 @@ Plan: `docs/superpowers/plans/2026-04-16-phase-a-chat-agent.md`
 - [x] 컴포넌트: MessageBubble (markdown), ToolCallBadge, ChatInput (send/stop), ChatSidebar, MessageList
 - [x] react-markdown + remark-gfm + @tailwindcss/typography
 - [x] Top-nav "Ask AI" 링크
-- [ ] 한국어 tool-selection eval 20문항 (ship gate 80%)
+- [x] 한국어 tool-selection eval 20문항 — 19/20 PASS (95%), ship gate ≥ 80% 통과 (`backend/scripts/eval_chat_tools.py`, 리포트: `docs/gstack/phase-a-eval-20260427-092834.md`)
 
 **Scope 변경:** LangGraph/Checkpointer/AzureChatOpenAI → Phase B 이연 (eng review outside voice 수용). 기존 AzureOpenAIAdapter 확장 + chat_messages 테이블로 단순화.
 

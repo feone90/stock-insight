@@ -43,10 +43,8 @@
 - **Effort:** CC ~10분
 - **Added:** 2026-04-16 (Phase 2.5 Phase A eng review)
 
-## [Phase 2.5 출시 전] 한국어 tool selection eval (수동)
-- **What:** 20개 대표 한국어 질문 × 기대 tool 선택 × 답변 품질 rubric을 수동 체크. Phase A 출시 전 ship gate.
-- **Why:** Agent의 tool 라우팅 신뢰성은 프롬프트/모델 특성에 따라 요동. 가족 (장인어른 등) 실사용 전에 기본 질문 포맷은 녹아 있어야 함. 자동화된 eval은 Phase B로.
-- **Context:** 예시 질문: "삼성전자 어때?" / "SK하이닉스 최근 뉴스" / "요즘 반도체 종목 뭐 있어?" / "애플 PER 얼마야?". 각 질문별로 (a) 기대 tool, (b) 답변에 포함돼야 할 근거 (숫자/제목) 정의.
-- **Depends on:** Phase A 구현 완료
-- **Effort:** CC가 질문 세트 초안 + 수동 실행 30분
-- **Added:** 2026-04-16 (Phase 2.5 Phase A eng review)
+## ~~[Phase 2.5 출시 전] 한국어 tool selection eval~~ ✅ Done (2026-04-27)
+- 19/20 PASS (95%), ship gate ≥ 80% 통과.
+- Harness: `backend/scripts/eval_chat_tools.py` — `uv run python -m scripts.eval_chat_tools`
+- 리포트: `docs/gstack/phase-a-eval-20260427-092834.md`
+- 단일 실패 (#12 "네이버 주가 흐름 어때?"): seed 이름이 영문 `NAVER`라 한글 search miss → 한 번 만에 포기. LLM 비결정성 — #6/#11에서는 영문 재시도 후 통과. **후속:** seed에 한국어 alias 추가하거나 search_stocks에 ko↔en 매핑 보강.
