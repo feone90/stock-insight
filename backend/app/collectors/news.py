@@ -149,10 +149,15 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
 
 
 async def fetch_newsapi(query: str, page_size: int = 30) -> dict:  # pragma: no cover
-    """NewsAPI.org에서 뉴스를 검색한다."""
+    """NewsAPI.org에서 뉴스를 검색한다.
+
+    `qInTitle`을 쓰면 본문에 종목명이 우연히 한 번 등장하는 광범위 매칭
+    (예: 'Laptop very slow' 같은 무관 기사가 'Microsoft' 한 단어로 끌려오는 케이스)
+    을 차단한다. 제목에 종목명/티커가 들어간 기사만 통과.
+    """
     url = "https://newsapi.org/v2/everything"
     params = {
-        "q": query,
+        "qInTitle": query,
         "pageSize": page_size,
         "sortBy": "publishedAt",
         "language": "en",
@@ -164,13 +169,26 @@ async def fetch_newsapi(query: str, page_size: int = 30) -> dict:  # pragma: no 
         return resp.json()
 
 
+def _build_newsapi_query(stock: Stock) -> str:
+    """제목 매칭용 쿼리: '"<풀네임>" OR <티커>'.
+
+    풀네임은 따옴표로 감싸 정확 일치를 노리고, 티커는 단독 토큰으로 매칭.
+    예: '"Microsoft Corporation" OR MSFT'.
+    """
+    name = (stock.name or "").strip()
+    ticker = (stock.ticker or "").strip()
+    if name and ticker:
+        return f'"{name}" OR {ticker}'
+    return name or ticker
+
+
 async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
     """NewsAPI.org로 US 종목 뉴스를 보조 수집한다."""
     if not settings.newsapi_key:
         return {"news_synced": 0}
 
     try:
-        data = await fetch_newsapi(stock.name)
+        data = await fetch_newsapi(_build_newsapi_query(stock))
     except Exception as e:
         return {"news_synced": 0, "error": f"NewsAPI 조회 실패: {e}"}
 
