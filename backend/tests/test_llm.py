@@ -21,48 +21,84 @@ def _mock_completion(content: str):
     return resp
 
 
+def _mock_foundry_response(text: str | None):
+    """Foundry Responses API 응답 형태 mock. text=None → 빈 출력."""
+    if text is None:
+        body = {"output": []}
+    else:
+        body = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": text}],
+                }
+            ]
+        }
+    resp = MagicMock()
+    resp.json.return_value = body
+    resp.status_code = 200
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def _patch_httpx(mock_resp):
+    """httpx.AsyncClient context manager + post() 를 패치하는 헬퍼."""
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_resp)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_client)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return patch("app.services.llm.adapter.httpx.AsyncClient", return_value=cm), mock_client
+
+
 class TestAzureOpenAIAdapter:
     @pytest.mark.asyncio
     async def test_generate(self):
-        adapter = AzureOpenAIAdapter.__new__(AzureOpenAIAdapter)
-        adapter.deployment = "gpt-4o-mini"
-        adapter.client = AsyncMock()
-        adapter.client.chat.completions.create.return_value = _mock_completion("hello")
+        adapter = AzureOpenAIAdapter(
+            endpoint="https://x.openai.azure.com/responses",
+            api_key="k",
+            deployment="gpt-4o-mini",
+        )
+        patch_ctx, mock_client = _patch_httpx(_mock_foundry_response("hello"))
 
-        result = await adapter.generate("test prompt")
+        with patch_ctx:
+            result = await adapter.generate("test prompt")
 
         assert result == "hello"
-        adapter.client.chat.completions.create.assert_called_once()
-        call_kwargs = adapter.client.chat.completions.create.call_args[1]
-        assert call_kwargs["model"] == "gpt-4o-mini"
-        assert call_kwargs["messages"] == [{"role": "user", "content": "test prompt"}]
+        mock_client.post.assert_called_once()
+        body = mock_client.post.call_args.kwargs["json"]
+        assert body["model"] == "gpt-4o-mini"
+        assert body["input"] == [{"role": "user", "content": "test prompt"}]
+        assert "text" not in body  # generate() — JSON 모드 아님
 
     @pytest.mark.asyncio
     async def test_generate_json(self):
-        json_resp = '{"keywords": []}'
-        adapter = AzureOpenAIAdapter.__new__(AzureOpenAIAdapter)
-        adapter.deployment = "gpt-4o-mini"
-        adapter.client = AsyncMock()
-        adapter.client.chat.completions.create.return_value = _mock_completion(json_resp)
+        adapter = AzureOpenAIAdapter(
+            endpoint="https://x.openai.azure.com/responses",
+            api_key="k",
+            deployment="gpt-4o-mini",
+        )
+        patch_ctx, mock_client = _patch_httpx(_mock_foundry_response('{"keywords": []}'))
 
-        result = await adapter.generate_json("test prompt")
+        with patch_ctx:
+            result = await adapter.generate_json("test prompt")
 
-        assert result == json_resp
-        call_kwargs = adapter.client.chat.completions.create.call_args[1]
-        assert call_kwargs["response_format"] == {"type": "json_object"}
+        assert result == '{"keywords": []}'
+        body = mock_client.post.call_args.kwargs["json"]
+        assert body["text"] == {"format": {"type": "json_object"}}
 
     @pytest.mark.asyncio
     async def test_generate_empty_content(self):
-        adapter = AzureOpenAIAdapter.__new__(AzureOpenAIAdapter)
-        adapter.deployment = "test"
-        adapter.client = AsyncMock()
-        choice = MagicMock()
-        choice.message.content = None
-        resp = MagicMock()
-        resp.choices = [choice]
-        adapter.client.chat.completions.create.return_value = resp
+        adapter = AzureOpenAIAdapter(
+            endpoint="https://x.openai.azure.com/responses",
+            api_key="k",
+            deployment="test",
+        )
+        patch_ctx, _ = _patch_httpx(_mock_foundry_response(None))
 
-        result = await adapter.generate("test")
+        with patch_ctx:
+            result = await adapter.generate("test")
+
         assert result == ""
 
 

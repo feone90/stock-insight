@@ -143,19 +143,30 @@
 
 ---
 
-## Phase 2.5 — LangGraph Multi-Agent 대화형 AI (설계 완료, 구현 미착수)
+## Phase 2.5 — 대화형 Chat Agent (2026-04-16~)
 
-Design doc: `~/.gstack/projects/feone90-stock-insight/main-design-20260415-langgraph-agents.md`
+Design: `~/.gstack/projects/feone90-stock-insight/main-design-20260416-phase-a-revised.md`
+Plan: `docs/superpowers/plans/2026-04-16-phase-a-chat-agent.md`
 
-### Phase A: 대화형 Agent (다음 구현 대상)
-- [ ] `langchain` + `langgraph` + `langchain-openai` 의존성 추가
-- [ ] `create_agent` + `AzureChatOpenAI`로 Conversational Agent 구현
-- [ ] Agent tools 6개 (get_stock_info, get_recent_prices, get_recent_news, get_analysis, search_stocks, get_financials)
-- [ ] Chat API (POST /api/chat, SSE 스트리밍)
-- [ ] `langgraph-checkpoint-postgres`로 대화 메모리
-- [ ] /chat 페이지 (프론트엔드 Chat UI)
+### Phase A: 대화형 Agent ✅ (2026-04-17)
+- [x] Test DB isolation (conftest.py stockinsight_test + SAVEPOINT rollback)
+- [x] Foundry Responses API function calling smoke test (gpt-5.4-mini, function_call 확인)
+- [x] chat_messages 테이블 + Alembic migration
+- [x] Pydantic chat schemas
+- [x] 3 tools: get_stock_snapshot, get_recent_news, search_stocks
+- [x] AzureOpenAIAdapter.chat_with_tools (Foundry Responses API instructions 분리)
+- [x] Chat streaming orchestrator (tool-calling loop, max 5 rounds)
+- [x] Chat API: POST /api/chat (SSE), GET /threads, GET/DELETE /history/{thread_id}
+- [x] /chat 페이지: 좌측 사이드바 + 메시지 리스트 + 하단 고정 입력창
+- [x] 컴포넌트: MessageBubble (markdown), ToolCallBadge, ChatInput (send/stop), ChatSidebar, MessageList
+- [x] react-markdown + remark-gfm + @tailwindcss/typography
+- [x] Top-nav "Ask AI" 링크
+- [x] 한국어 tool-selection eval 20문항 — 19/20 PASS (95%), ship gate ≥ 80% 통과 (`backend/scripts/eval_chat_tools.py`, 리포트: `docs/gstack/phase-a-eval-20260427-092834.md`)
 
-### Phase B: Multi-Agent 확장 (별도 설계)
+**Scope 변경:** LangGraph/Checkpointer/AzureChatOpenAI → Phase B 이연 (eng review outside voice 수용). 기존 AzureOpenAIAdapter 확장 + chat_messages 테이블로 단순화.
+
+### Phase B: LangGraph Multi-Agent (별도 설계)
+- [ ] LangGraph + AsyncPostgresSaver 도입
 - [ ] Research Agent (자율 뉴스 수집, 교차 검증)
 - [ ] Analysis Agent (감성 분석, 재무 교차 검증)
 - [ ] Supervisor (LLM 기반 라우터) 도입
@@ -182,6 +193,6 @@ Design doc: `~/.gstack/projects/feone90-stock-insight/main-design-20260415-langg
 ## 개선사항
 
 - [ ] 프론트엔드 테스트 추가 (Vitest + React Testing Library)
-- [ ] 테스트 DB 격리 (conftest.py 트랜잭션 롤백)
+- [x] 테스트 DB 격리 (conftest.py 트랜잭션 롤백) ✅ Phase 2.5에서 완료
 - [ ] 모바일 반응형 레이아웃
 - [ ] 종목 검색: US 종목 이름 검색 지원 (현재 티커만)

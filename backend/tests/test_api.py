@@ -107,9 +107,15 @@ async def test_stock_prices_auto_sync(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_analysis_not_found(client: AsyncClient):
-    """분석 데이터 없는 종목 → 404"""
-    response = await client.get("/api/stocks/TSLA/analysis")
-    assert response.status_code == 404
+    """분석 데이터 없는 종목 → 200 + 빈 응답 (frontend가 graceful 처리).
+    AAPL은 seed에 등록만 되고 ANALYSES 딕셔너리에는 없음."""
+    response = await client.get("/api/stocks/AAPL/analysis")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["keywords"] == []
+    assert data["daily_keywords"] == []
+    assert data["summary"] == ""
+    assert data["feedback"] == ""
 
 
 @pytest.mark.asyncio

@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.stocks import _get_or_register_stock
 from app.database import get_db
-from app.dependencies import get_stock_or_404
 from app.models import Analysis, Stock
 from app.schemas.stock import AnalysisResponse
 
@@ -12,7 +12,9 @@ router = APIRouter(prefix="/api/stocks", tags=["analysis"])
 
 
 @router.get("/{ticker}/analysis", response_model=AnalysisResponse)
-async def stock_analysis(period: str = "weekly", stock: Stock = Depends(get_stock_or_404), db: AsyncSession = Depends(get_db)):
+async def stock_analysis(ticker: str, period: str = "weekly", db: AsyncSession = Depends(get_db)):
+    stock = await _get_or_register_stock(ticker, db)
+
     analysis_result = await db.execute(
         select(Analysis)
         .options(selectinload(Analysis.keywords), selectinload(Analysis.daily_keywords))
@@ -22,7 +24,10 @@ async def stock_analysis(period: str = "weekly", stock: Stock = Depends(get_stoc
     )
     analysis = analysis_result.scalar_one_or_none()
     if not analysis:
-        raise HTTPException(status_code=404, detail="분석 데이터가 없습니다")
+        return AnalysisResponse(
+            date="", period_type=period, keywords=[],
+            daily_keywords=[], summary="", feedback="",
+        )
 
     return AnalysisResponse(
         date=analysis.date.isoformat(),
