@@ -22,7 +22,12 @@
 - **Effort:** 5분
 - **Added:** 2026-04-14
 
-## 프론트엔드 테스트
+## test_admin_api.py::test_sync_stock skip 해제
+- **What:** `tests/test_admin_api.py::test_sync_stock`이 `@pytest.mark.skip`로 막혀 있음. SAVEPOINT setup에서 "Future attached to a different loop" RuntimeError. 파일 내 첫 async 테스트가 session-scoped engine과 function-scoped event loop 사이 mismatch로 깨지는 패턴.
+- **Why:** 사전 인프라 이슈 (Phase A 작업과 무관). happy path는 같은 파일 `test_sync_stock_with_errors`가 커버 중이라 ship 영향은 없으나, 회귀 가드는 약화됨.
+- **시도 가능한 fix:** `asyncio_default_fixture_loop_scope = "session"` 시도했으나 다른 60+ 테스트가 깨짐 → 더 깊은 fixture 리팩토링 필요. conftest의 `event_loop` session 스코프 fixture를 신형 pytest-asyncio API로 마이그레이션하거나, `db`/`client` fixture를 세션 스코프 connection pool과 호환되게 재작성.
+- **Effort:** CC 30~60분
+- **Added:** 2026-04-27
 - **What:** Vitest + React Testing Library 설정 + 핵심 컴포넌트 테스트
 - **Why:** 프론트엔드 테스트 0개. auth/toast/search 등 핵심 플로우 커버 필요.
 - **Effort:** CC ~30분

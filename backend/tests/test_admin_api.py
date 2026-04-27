@@ -2,9 +2,29 @@ import pytest
 from unittest.mock import patch, AsyncMock
 
 
+@pytest.fixture(autouse=True)
+def _bypass_auth():
+    """Admin tests don't exercise auth — they assume DEV_MODE bypass.
+    Auth-specific assertions live in test_auth.py."""
+    with patch("app.api.auth.settings") as s:
+        s.dev_mode = True
+        s.admin_email = "admin@test.com"
+        s.admin_password = "test"
+        s.jwt_secret = "test-secret"
+        s.jwt_expire_hours = 24
+        yield s
+
+
 @pytest.mark.asyncio
 async def test_sync_stock(client):
-    """종목별 동기화 API"""
+    """종목별 동기화 API.
+
+    NOTE: setup 단계에서 'Future attached to a different loop' RuntimeError가
+    간헐적으로 발생 — 파일 내 첫 async 테스트가 session-scoped engine과
+    function-scoped event loop 간 mismatch로 깨지는 패턴. 같은 엔드포인트의
+    error-path 검증은 test_sync_stock_with_errors가 커버. fixture 인프라 fix는
+    TODOS.md 참조.
+    """
     mock_results = {
         "prices": {"prices_synced": 10},
         "financials": {"financials_synced": 1},
