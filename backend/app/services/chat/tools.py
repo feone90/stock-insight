@@ -8,7 +8,7 @@ LLM never sees or supplies it (no impersonation surface).
 """
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import desc, select
 
@@ -26,8 +26,8 @@ from app.models.news import News
 
 logger = logging.getLogger(__name__)
 
-NEWS_CONTENT_SNIPPET_LEN = 400
-DISCLOSURE_CONTENT_SNIPPET_LEN = 400
+NEWS_CONTENT_SNIPPET_LEN = 1200  # avg DB content is 1800-2300 chars; 1200 captures the lede + key paragraphs.
+DISCLOSURE_CONTENT_SNIPPET_LEN = 1000
 
 
 async def get_stock_snapshot(ticker: str) -> dict:
@@ -212,6 +212,71 @@ async def get_recent_news(ticker: str, days: int = 7) -> list[dict]:
         return items
 
 
+async def get_news_around_date(
+    ticker: str, target_date: str, window_days: int = 3
+) -> dict:
+    """특정 과거 일자 ±N일 윈도우 내 뉴스. 가격 급락/급등 같은 사건의 *동시대* 보도 확인용.
+
+    각 결과에 `delta_days` (사건일 대비 보도일 간격, +N이면 사후 보도)와
+    `is_post_hoc` 플래그를 붙여 인과 vs 사후 분석을 LLM이 구분할 수 있게 한다.
+    """
+    ticker = ticker.strip().upper()
+    try:
+        target = date.fromisoformat(target_date)
+    except (ValueError, TypeError):
+        return {"error": f"target_date '{target_date}'는 YYYY-MM-DD 형식이어야 합니다."}
+
+    window_days = max(1, min(int(window_days or 3), 14))
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock:
+            return {"error": f"종목 '{ticker}'을(를) 찾을 수 없습니다."}
+
+        lo = target - timedelta(days=window_days)
+        hi = target + timedelta(days=window_days)
+        rows = (
+            await db.execute(
+                select(News)
+                .where(
+                    News.stock_id == stock.id,
+                    News.published_at >= datetime.combine(lo, datetime.min.time()),
+                    News.published_at < datetime.combine(
+                        hi + timedelta(days=1), datetime.min.time()
+                    ),
+                )
+                .order_by(News.published_at.asc())
+                .limit(20)
+            )
+        ).scalars().all()
+
+        items = []
+        for n in rows:
+            content = (n.content or "").strip()
+            if len(content) > NEWS_CONTENT_SNIPPET_LEN:
+                content = content[:NEWS_CONTENT_SNIPPET_LEN] + "..."
+            delta_days = (n.published_at.date() - target).days
+            items.append({
+                "title": n.title,
+                "published_at": n.published_at.strftime("%Y-%m-%d"),
+                "delta_days": delta_days,
+                "is_post_hoc": delta_days > 0,
+                "source": n.source or "",
+                "url": n.url or "",
+                "content_snippet": content,
+            })
+
+        return {
+            "ticker": ticker,
+            "target_date": target_date,
+            "window_days": window_days,
+            "count": len(items),
+            "items": items,
+        }
+
+
 async def get_recent_disclosures(ticker: str, days: int = 30) -> list[dict]:
     """최근 N일 공시 상위 10건. 시드/수집 안 된 경우 빈 리스트 반환."""
     ticker = ticker.strip().upper()
@@ -379,7 +444,11 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "name": "get_recent_news",
-        "description": "종목의 최근 뉴스 (제목, 출처, URL, 본문 일부). '뉴스/소식/기사/본문 요약' 류 질문에 사용.",
+        "description": (
+            "종목의 최근 뉴스 (제목, 출처, URL, **content_snippet**). "
+            "각 결과의 `content_snippet`은 기사 본문 일부다 — **반드시 읽고 핵심을 요약해서 답변에 녹여라.** "
+            "그냥 제목+URL만 인용하면 안 된다."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -387,6 +456,30 @@ TOOL_SCHEMAS = [
                 "days": {"type": "integer", "description": "최근 며칠 (기본 7)", "default": 7},
             },
             "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_news_around_date",
+        "description": (
+            "특정 *과거 일자* ±N일 윈도우 내 뉴스. "
+            "가격 급등/급락 같은 **과거 사건의 동시대(contemporary) 보도**를 찾을 때 반드시 이 도구를 써라. "
+            "get_recent_news는 오늘 기준 최근 N일이라 과거 사건 인과 분석에 부적합. "
+            "결과의 `delta_days`가 양수(+)면 사건 *이후* 보도(post-hoc) — 원인이 아니라 사후 분석으로 다뤄라. "
+            "**`content_snippet`을 읽고 각 기사의 핵심을 1~2문장으로 요약해 답변에 포함해라.**"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "target_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "window_days": {
+                    "type": "integer",
+                    "description": "양쪽 N일 (기본 3, 최대 14)",
+                    "default": 3,
+                },
+            },
+            "required": ["ticker", "target_date"],
         },
     },
     {
@@ -456,6 +549,7 @@ TOOL_FUNCTIONS = {
     "get_stock_snapshot": get_stock_snapshot,
     "get_price_history": get_price_history,
     "get_recent_news": get_recent_news,
+    "get_news_around_date": get_news_around_date,
     "get_recent_disclosures": get_recent_disclosures,
     "get_exchange_rate": get_exchange_rate,
     "search_stocks": search_stocks,
