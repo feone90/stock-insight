@@ -10,6 +10,17 @@ interface Props {
   streaming?: boolean;
 }
 
+// CommonMark emphasis flanking fails when `**` sits between a punctuation
+// character and a CJK / letter character (e.g. `**-3.97%**입니다`). Insert a
+// space on the failing boundary so the parser sees a valid right/left flank.
+function fixEmphasisBoundaries(s: string): string {
+  return s
+    // Opening `**`: letter/digit immediately before, punctuation immediately after.
+    .replace(/([\p{L}\p{N}])(\*\*)(?=\p{P})/gu, "$1 $2")
+    // Closing `**`: punctuation immediately before, letter/digit immediately after.
+    .replace(/(\p{P})(\*\*)(?=[\p{L}\p{N}])/gu, "$1$2 ");
+}
+
 export function MessageBubble({ message, streaming = false }: Props) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
@@ -47,7 +58,11 @@ export function MessageBubble({ message, streaming = false }: Props) {
         ) : (
           <div className="prose prose-invert prose-sm max-w-none text-sm leading-relaxed">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content || (streaming ? "질문을 이해하고 있어요..." : "")}
+              {message.content
+                ? fixEmphasisBoundaries(message.content)
+                : streaming
+                  ? "질문을 이해하고 있어요..."
+                  : ""}
             </ReactMarkdown>
             {streaming && <span className="inline-block ml-0.5 w-2 h-4 bg-slate-400 animate-pulse" />}
           </div>
