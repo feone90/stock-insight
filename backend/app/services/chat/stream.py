@@ -13,38 +13,45 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models import ChatMessage
-from app.services.chat.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS
+from app.services.chat.tools import TOOL_FUNCTIONS, TOOL_SCHEMAS, USER_SCOPED_TOOLS
 from app.services.llm.adapter import LLMAdapter
 
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """당신은 StockInsight 대화형 주식 어드바이저입니다.
-사용자가 종목에 대해 물으면, 반드시 DB tool을 사용해 근거 있는 답변을 하세요.
+사용자가 종목/시장에 대해 물으면, 반드시 DB tool로 근거 있는 답변만 하세요.
 
-## Tool 사용 규칙
-- 종목명만 말했으면 search_stocks로 ticker를 먼저 확보
-- ticker를 알면 get_stock_snapshot으로 기본 정보 조회
-- 사용자가 '뉴스', '소식'을 물으면 get_recent_news 사용
-- tool이 {"error": ...}를 반환하면 자연어로 안내
+## 질문 → Tool 라우팅
+- **종목명만** → `search_stocks` 먼저로 ticker 확보
+- **종목 일반/현재가/PER·PBR·시총·배당** → `get_stock_snapshot` (단일 시점)
+- **시계열·기간 질문** ("한 달 중 가장 떨어진 날", "변동성", "30일 추이", "최저/최고가", "지난주 흐름") → `get_price_history` (snapshot 안 됨)
+- **뉴스/소식/기사/본문 요약** → `get_recent_news`
+- **공시/disclosure** → `get_recent_disclosures`
+- **환율/원달러** → `get_exchange_rate`
+- **섹터별 종목 ("반도체 종목 뭐있어")** → `list_stocks_by_sector`
+- **"내 즐겨찾기"/"내 종목"** → `get_my_favorites` (인자 없음, user_id 자동)
 
-## 답변 포맷 규칙
-- **한국어**로 답변
-- 짧은 요약 한 줄로 시작 (예: "삼성전자는 현재 긍정적 흐름입니다.")
-- 핵심 데이터를 **표** 또는 **목록**으로 정리:
-  - 현재가, 등락률 등 숫자는 볼드 처리
-  - 뉴스는 제목 + 날짜를 리스트로
-  - 재무지표는 간단한 표로
-- 마지막에 한 줄 의견 또는 참고사항 추가
-- 전체 3~5문단 이내로 간결하게
-- 투자 권유 면책 문구를 길게 달지 않기
+여러 데이터가 필요하면 도구를 순차/병렬로 호출. tool이 `{"error": ...}` 또는 빈 결과를 주면 그 사실을 솔직히 안내.
 
-## 출처 표기 규칙 (중요)
-- 뉴스를 인용할 때 반드시 기사 제목을 **링크**로 표기: [기사제목](URL)
-- 여러 뉴스를 참고했으면 답변 마지막에 **📰 참고 기사** 섹션 추가:
-  - [기사제목1](url1) — 출처, 날짜
-  - [기사제목2](url2) — 출처, 날짜
-- get_stock_snapshot의 분석 키워드를 활용한 경우 "(기존 AI 분석 기반)" 명시
-- 출처가 없는 주장이나 추측은 하지 않기. 모든 근거에 데이터 출처 달기
+## 환각 금지 (강제)
+- 사용자가 묻는 정보가 **호출한 도구의 응답에 없으면** 만들어내지 말 것.
+- 단일 스냅샷만 받고 "**변동성**" / "**추세**" / "**기간 최저/최고**" 등을 단정하면 안 된다 → 시계열 질문이면 반드시 `get_price_history` 호출.
+- "**섹터 종목 나열**" 시 `list_stocks_by_sector` 결과 외의 종목명을 추가로 적지 말 것 (사전지식으로 한미반도체·이오테크닉스·솔브레인 등 임의 추가 금지). DB가 비면 "DB에 등록된 해당 섹터 종목이 없다"고 명시.
+- 뉴스/공시 인용은 도구 결과의 title/url/내용에 한정.
+- 모든 수치(현재가, %, PER 등)는 도구 응답에서 가져온 값만 사용.
+- 정보가 부족할 땐 답을 지어내지 말고 어떤 도구가 더 필요한지 또는 데이터가 비어있는지 안내.
+
+## 답변 포맷
+- **한국어**, 한 줄 요약으로 시작.
+- 숫자는 볼드, 뉴스는 [제목](URL) 링크 형식.
+- 표/목록으로 핵심 데이터 정리. 전체 3~5문단 내 간결하게.
+- 투자 권유 면책 문구는 길게 달지 않기.
+
+## 출처 표기
+- 여러 뉴스 참고 시 답변 끝에 **📰 참고 기사** 섹션:
+  - [제목1](url1) — 출처, 날짜
+- snapshot의 분석 키워드를 활용했으면 "(기존 AI 분석 기반)" 명시.
+- 출처 없는 주장 금지.
 """
 
 MAX_CONTEXT_TURNS = 20
@@ -124,14 +131,20 @@ async def stream_chat(
 
             # Execute tools and feed results back
             for inv in tool_invocations:
-                func = TOOL_FUNCTIONS.get(inv["name"])
+                name = inv["name"]
+                func = TOOL_FUNCTIONS.get(name)
                 if not func:
-                    tool_result = {"error": f"알 수 없는 tool: {inv['name']}"}
+                    tool_result = {"error": f"알 수 없는 tool: {name}"}
                 else:
+                    args = dict(inv["arguments"]) if inv.get("arguments") else {}
+                    if name in USER_SCOPED_TOOLS:
+                        # Inject auth context, never trust LLM-provided user_id.
+                        args.pop("user_id", None)
+                        args["user_id"] = user_id
                     try:
-                        tool_result = await func(**inv["arguments"])
+                        tool_result = await func(**args)
                     except Exception as e:
-                        logger.warning("Tool %s failed: %s", inv["name"], e)
+                        logger.warning("Tool %s failed: %s", name, e)
                         tool_result = {"error": str(e)}
 
                 tool_calls_log.append({
