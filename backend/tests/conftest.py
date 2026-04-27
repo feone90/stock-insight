@@ -2,16 +2,37 @@
 
 import asyncio
 import os
-from collections.abc import AsyncGenerator
 
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+# Override env BEFORE importing anything from `app` so settings doesn't pick up
+# real .env values (DEV_MODE bypass, real API keys, etc.) and tests stay
+# hermetic regardless of the developer's local .env.
+_TEST_ENV_OVERRIDES = {
+    "DEV_MODE": "false",
+    "DART_API_KEY": "",
+    "NAVER_CLIENT_ID": "",
+    "NAVER_CLIENT_SECRET": "",
+    "NEWSAPI_KEY": "",
+    "LLM_API_KEY": "",
+    "LLM_ENDPOINT": "",
+    "LLM_DEPLOYMENT": "",
+    "LLM_MODEL": "",
+    "ADMIN_EMAIL": "",
+    "ADMIN_PASSWORD": "",
+    "SCHEDULER_ENABLED": "false",
+}
+for _k, _v in _TEST_ENV_OVERRIDES.items():
+    os.environ[_k] = _v
 
-from app.config import settings
-from app.models import Base
+from collections.abc import AsyncGenerator  # noqa: E402
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import event  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
+
+from app.config import settings  # noqa: E402
+from app.models import Base  # noqa: E402
 
 # Test DB: stockinsight_test (dev DB = stockinsight)
 TEST_DB_URL = os.getenv(

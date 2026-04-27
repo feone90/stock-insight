@@ -18,6 +18,7 @@ def mock_settings():
         mock.admin_password = TEST_PASSWORD
         mock.jwt_secret = "test-secret-key"
         mock.jwt_expire_hours = 24
+        mock.dev_mode = False  # Without this, MagicMock returns truthy and bypasses auth.
         yield mock
 
 
