@@ -4,6 +4,8 @@
 
 StockInsight — 주식 분석 대시보드 (Next.js 16 + FastAPI + PostgreSQL + Azure OpenAI)
 
+대시보드(차트/키워드/AI 분석) + `/chat` 대화형 에이전트(자연어 질문 → DB tool-calling 응답).
+
 ## Quick Start
 
 ```bash
@@ -48,10 +50,11 @@ cd frontend && npm install && npm run dev
 
 | 경로 | 역할 |
 |------|------|
-| `app/api/` | FastAPI 라우터 (stocks, analysis, favorites, admin, auth, exchange_rates) |
+| `app/api/` | FastAPI 라우터 (stocks, analysis, favorites, admin, auth, exchange_rates, chat) |
 | `app/models/` | SQLAlchemy ORM 모델 |
 | `app/collectors/` | 외부 데이터 수집 (주가, 뉴스, 공시, 재무, 환율) |
 | `app/services/llm/` | LLM 어댑터 + 분석 파이프라인 |
+| `app/services/chat/` | Chat agent (3 tools + SSE 스트리밍 오케스트레이터) |
 | `app/scheduler.py` | APScheduler (8am/6pm KST 자동 동기화) |
 | `app/schemas/` | Pydantic response 모델 |
 | `app/dependencies.py` | 공유 의존성 (get_stock_or_404) |
@@ -67,17 +70,6 @@ cd frontend && npm install && npm run dev
 
 - 한국어 UI 텍스트, 코드/커밋 메시지는 영어
 - Collector 패턴: 외부 API 실패 시 `{"xxx_synced": 0, "error": "..."}` 반환 (예외 던지지 않음)
+- Chat tool 패턴: 성공 시 dict, 알려진 실패 시 `{"error": "..."}` (예외 던지지 않음)
 - DB upsert: `on_conflict_do_nothing` 또는 `on_conflict_do_update`
 - LLM 분석: 동기화 시 자동 실행 (llm_api_key 설정 시)
-
-## Skill routing
-
-When the user's request matches an available skill, ALWAYS invoke it using the Skill
-tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
-
-Key routing rules:
-- Bugs, errors → invoke investigate
-- Ship, deploy, PR → invoke ship
-- QA, test the site → invoke qa
-- Architecture review → invoke plan-eng-review
-- Code quality → invoke health
