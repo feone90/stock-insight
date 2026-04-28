@@ -41,7 +41,7 @@ async def test_research_no_tool_calls_returns_findings(monkeypatch):
             ]
         ]
     )
-    monkeypatch.setattr("app.services.analyst.research._adapter", lambda: adapter)
+    monkeypatch.setattr("app.services.analyst.research.get_analyst_adapter", lambda: adapter)
 
     out = await run_research(ticker="005930", max_rounds=10)
     assert out["findings"] == [{"k": "v"}]
@@ -69,7 +69,7 @@ async def test_research_dispatches_tool_then_returns(monkeypatch):
             ],
         ]
     )
-    monkeypatch.setattr("app.services.analyst.research._adapter", lambda: adapter)
+    monkeypatch.setattr("app.services.analyst.research.get_analyst_adapter", lambda: adapter)
     monkeypatch.setattr(
         "app.services.analyst.research.dispatch_research_tool",
         _make_async_return({"rsi_14": 58}),
@@ -99,7 +99,7 @@ async def test_research_caps_rounds(monkeypatch):
     ]
     # max_rounds=3 → 3 looping rounds + 1 forced final = 4 calls
     adapter = _FakeAdapter([looping_round, looping_round, looping_round, final_round])
-    monkeypatch.setattr("app.services.analyst.research._adapter", lambda: adapter)
+    monkeypatch.setattr("app.services.analyst.research.get_analyst_adapter", lambda: adapter)
     monkeypatch.setattr(
         "app.services.analyst.research.dispatch_research_tool",
         _make_async_return({"rsi_14": 58}),

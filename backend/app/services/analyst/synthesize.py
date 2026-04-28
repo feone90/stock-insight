@@ -1,108 +1,137 @@
-"""Stage 2: Synthesizer. Premium-tier LLM, structured StockCard output.
+"""Stage 2 synthesizer — judgment-only LLM call.
 
-Consumes Stage 1 research findings + ticker, produces a Pydantic-validated
-StockCard. Retries once on validation failure with a stricter prompt; second
-failure raises ValueError so the engine can store stale-data fallback.
+Produces `AnalystOutput` (4 LLM fields: glance, thesis, relations_narrative,
+decision + interp_citations). Data fields (technical, macro, fundamentals,
+news, relations_data) come from `data_layer.assemble_data_layer` and are
+merged with this output by `engine.compose`.
 
-Persona is defined in `analyst_v1` (see persona.py) — internal naming only,
-never surfaced to the UI.
+Retries once on validation failure with a stricter prompt; second failure
+raises ValueError so the engine can fall back to stale data.
+
+Persona is `analyst_v1` (see persona.py) — internal naming only, never
+surfaced to the UI.
 """
 from __future__ import annotations
 
 import json
 import logging
-import uuid
-from datetime import datetime, timezone
 
 from pydantic import ValidationError
-from sqlalchemy import select
 
-from app.database import async_session
-from app.models import Stock
-from app.schemas.card import StockCard
-from app.services.analyst.persona import ANALYST_V1, PERSONA_VERSION
-from app.services.llm.adapter import AzureOpenAIAdapter
+from app.schemas.card import AnalystOutput
+from app.services.analyst import get_analyst_adapter
+from app.services.analyst.persona import ANALYST_V1
 
 logger = logging.getLogger(__name__)
 
+RESEARCH_BLOB_MAX = 14000  # leave headroom under spec's 18KB total prompt
+PROMPT_SIZE_SOFT_LIMIT = 18000
 
-def _adapter():
-    """Factory wrapped so tests can monkeypatch."""
-    return AzureOpenAIAdapter()
+_FIELD_INSTRUCTIONS = """\
+출력 JSON에 다음 4개 분석 필드만 포함하라. 데이터 echoing 금지.
+
+1) glance
+   { final_grade: "S"|"A"|"B"|"C"|"D",
+     grade_delta: "up"|"down"|"same"|null,
+     stance: "BUY"|"WATCH"|"REJECT",
+     entry_stage: "ENTER"|"WAIT"|"REJECT",
+     one_line: str,
+     citations: list[int] }   # interp_citations 풀에서 참조
+
+2) thesis
+   { core_thesis: str,
+     supports: list[Claim] (≥3),
+     opposes: list[Claim] (≥2),
+     catalysts: list[Catalyst],            # 14일 윈도 내 없으면 빈 배열
+     no_catalysts_reason: str|null,         # catalysts=[] 일 때 반드시 채우기
+     scenarios: list[Scenario] (정확히 3개: BULL/BASE/BEAR, 확률 합 ≈ 1.0),
+     citations: list[int] }
+
+   Claim = { text: str, citations: list[int], interpretation: {kind, based_on, rationale}|null }
+   Catalyst = { when, event, impact_estimate, direction: "positive"|"negative"|"mixed", citation_ids: list[int] }
+   Scenario = { name: "BULL"|"BASE"|"BEAR", probability: 0..1, scenario_price: float|null,
+                scenario_change_pct: float|null, rationale: str }
+
+3) relations_narrative
+   { one_line: str,                          # 종목과 peer/공급망/그룹/테마/매크로 관계 한 줄 요약
+     notes_by_target: { ticker_or_theme: str },  # 각 관계 target에 대한 짧은 해설 (선택)
+     citations: list[int] }
+
+4) decision
+   { stance, sizing_note, support_price, risk_threshold, citations,
+     interpretation: {kind, based_on, rationale}|null }
+   note 필드는 출력하지 마라 — 서버가 주입한다.
+
+추가:
+- interp_citations: list[Citation]
+  Citation = { id: int, source_type: "db"|"market_data"|"news"|"disclosure"|"web"|"curated_relation",
+               label: str, url: str|null, timestamp: str|null }
+  · 해석 풀의 citation은 *드물게* 등장 — 리서처가 가져온 데이터 외에 네가 *새로* 도입한 출처에 한해 등록.
+  · 데이터 layer가 이미 채워줄 영역(지표/매크로/재무/뉴스/관계 구조)은 너의 citation으로 등록하지 마라.
+  · id는 1부터 순차. 위 4개 필드의 citations: list[int] 는 이 풀의 id를 참조한다.
+
+엄수:
+- 출력은 ticker/name/market/price/sector 등 메타데이터 포함 X (서버 주입).
+- technical/macro/fundamentals/news/relations 데이터 필드 포함 X (data_layer 책임).
+- catalysts 빈 배열이면 no_catalysts_reason 필수.
+- scenarios는 정확히 BULL/BASE/BEAR 3개. 확률 합 0.95~1.05.
+- supports ≥ 3, opposes ≥ 2 (편향 방지).
+- 모든 citations: list[int] 는 interp_citations에 등록된 id만 참조.
+- JSON 객체 1개만 출력. 코드 펜스 / 마크다운 금지.
+"""
 
 
-async def _fetch_stock_metadata(ticker: str) -> dict:
-    """DB-sourced fields the server fills. LLM never produces these."""
-    async with async_session() as db:
-        stock = (
-            await db.execute(select(Stock).where(Stock.ticker == ticker))
-        ).scalar_one_or_none()
-        if not stock:
-            return {"ticker": ticker}
-        return {
-            "ticker": stock.ticker,
-            "name_ko": stock.name or "",
-            "name_en": stock.name or "",
-            "market": stock.market or "",
-            "sector": stock.sector or "",
-            "tags": [],  # frontend can derive from sector + theme relations
-            "price": stock.current_price or 0.0,
-            "change": stock.change or 0.0,
-            "change_pct": stock.change_percent or 0.0,
-            "asof": datetime.now(timezone.utc).isoformat(),
-        }
-
-
-def _build_prompt(ticker: str, research: dict) -> str:
-    return (
-        ANALYST_V1
-        + "\n\n---\n\n"
-        + f"종목 ticker = {ticker}\n\n"
-        + f"리서처가 모은 증거 (JSON):\n{json.dumps(research, ensure_ascii=False, default=str)[:20000]}\n\n"
-        + "위 증거만 사용해 다음 9개 분석 필드만 포함한 JSON을 출력하라:\n"
-        + "  glance, thesis, technical, relations, news, macro, fundamentals, decision, citations\n"
-        + "ticker/name/market/price/sector 등 종목 메타데이터는 서버가 주입하므로 출력 X.\n\n"
-        + "필수 규칙:\n"
-        + "- 각 numerical claim은 반드시 citations에 등록된 [n]을 가진다.\n"
-        + "- catalysts가 14일 윈도 내에 없으면 빈 배열 + no_catalysts_reason 명시.\n"
-        + "- scenarios는 BULL/BASE/BEAR 3개, 확률 합 1.0.\n"
-        + "- supports ≥ 3, opposes ≥ 2.\n"
-        + "- stance/entry_stage/final_grade는 enum 정확히 사용.\n"
-        + "- decision 필드 반드시 포함 (stance, sizing_note, support_price, risk_threshold, citations).\n"
-        + "- macro 필드 반드시 포함 (one_line, vix, fx_pairs, us_10y, sensitivities, upcoming_events, citations).\n"
-        + "- citations는 top-level 배열에 각 [n] entry 등록 (id, source_type, label).\n\n"
-        + "출력은 JSON 객체 1개만. 코드 펜스 금지. 마크다운 금지."
-    )
+def _build_prompt(ticker: str, research: dict, retry: bool = False) -> str:
+    research_blob = json.dumps(research, ensure_ascii=False, default=str)[:RESEARCH_BLOB_MAX]
+    parts = [
+        ANALYST_V1,
+        "\n\n---\n\n",
+        f"종목 ticker = {ticker}\n\n",
+        f"리서처가 모은 증거 (JSON):\n{research_blob}\n\n",
+        _FIELD_INSTRUCTIONS,
+    ]
+    if retry:
+        parts.append(
+            "\n[재시도] 이전 응답이 스키마 검증 실패. "
+            "필수 필드 모두 채우고 enum 정확히. "
+            "supports ≥3, opposes ≥2, scenarios 정확히 BULL/BASE/BEAR 3개. "
+            "JSON 1개만, 코드 펜스 X."
+        )
+    return "".join(parts)
 
 
 async def run_synthesize(
     ticker: str, research: dict, max_retries: int = 1
-) -> StockCard:
-    """LLM → StockCard. Retries on validation error up to `max_retries`.
+) -> AnalystOutput:
+    """LLM → AnalystOutput. Retries on validation error up to `max_retries`.
 
-    Stock metadata (ticker, name, market, price, etc.) is server-injected
-    from DB — the LLM only produces the analytical content (glance, thesis,
-    technical, relations, news, macro, fundamentals, decision, citations).
-    Server-controlled fields (analysis_id, generated_at, persona_version,
-    schema_version) are also injected.
+    Stage-2 produces ONLY analyst judgment. Data sections (technical/macro/
+    fundamentals/news/relations_data) come from `data_layer.assemble_data_layer`
+    and are merged at `engine.compose` — not here.
     """
-    metadata = await _fetch_stock_metadata(ticker)
-    prompt = _build_prompt(ticker, research)
-    adapter = _adapter()
+    adapter = get_analyst_adapter()
 
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
-        if attempt > 0:
-            prompt += (
-                "\n\n[재시도] 이전 응답이 스키마 검증에 실패. "
-                "모든 필수 필드 채우고 enum 값 정확히 사용. JSON만 응답."
+        prompt = _build_prompt(ticker, research, retry=attempt > 0)
+        prompt_size = len(prompt.encode("utf-8"))
+        logger.info(
+            "synthesize[%s] attempt %d prompt size=%d bytes",
+            ticker, attempt + 1, prompt_size,
+        )
+        if prompt_size > PROMPT_SIZE_SOFT_LIMIT:
+            logger.warning(
+                "synthesize[%s] prompt size %d exceeds soft limit %d",
+                ticker, prompt_size, PROMPT_SIZE_SOFT_LIMIT,
             )
+
         try:
             raw_text = await adapter.generate_json(prompt)
         except Exception as e:
             last_error = e
             logger.warning(
-                "synthesize attempt %d adapter error: %s", attempt + 1, e
+                "synthesize[%s] attempt %d adapter error: %s",
+                ticker, attempt + 1, e,
             )
             continue
 
@@ -111,34 +140,24 @@ async def run_synthesize(
         except json.JSONDecodeError as e:
             last_error = e
             logger.warning(
-                "synthesize attempt %d JSON parse error: %s; raw[:500]=%r",
-                attempt + 1, e, (raw_text or "")[:500]
+                "synthesize[%s] attempt %d JSON parse error: %s; raw[:500]=%r",
+                ticker, attempt + 1, e, (raw_text or "")[:500],
             )
             continue
-        # Diagnostic: log a fingerprint of received fields so we know if the LLM
-        # is producing a full StockCard or just a stub.
-        logger.info(
-            "synthesize attempt %d received keys=%s (text len=%d)",
-            attempt + 1, sorted(raw.keys()) if isinstance(raw, dict) else "non-dict",
-            len(raw_text or ""),
-        )
 
-        # Server-inject: DB metadata wins over anything LLM tried to produce.
-        raw.update(metadata)
-        # Server-controlled meta
-        raw.setdefault("analysis_id", str(uuid.uuid4()))
-        raw.setdefault(
-            "generated_at", datetime.now(timezone.utc).isoformat()
-        )
-        raw["persona_version"] = PERSONA_VERSION
-        raw.setdefault("schema_version", "v1")
+        if isinstance(raw, dict):
+            logger.info(
+                "synthesize[%s] attempt %d received keys=%s",
+                ticker, attempt + 1, sorted(raw.keys()),
+            )
 
         try:
-            return StockCard.model_validate(raw)
+            return AnalystOutput.model_validate(raw)
         except ValidationError as e:
             last_error = e
             logger.warning(
-                "synthesize attempt %d validation error: %s", attempt + 1, e
+                "synthesize[%s] attempt %d validation error: %s",
+                ticker, attempt + 1, e,
             )
             continue
 

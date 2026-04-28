@@ -191,3 +191,42 @@ class StockCard(BaseModel):
     persona_version: str
     schema_version: str = "v1"
     refresh_state: Literal["fresh", "stale", "loading", "error"] = "fresh"
+
+
+# === Layered output (data vs analyst) — composed into StockCard at engine ===
+
+
+class DataLayer(BaseModel):
+    """Server-produced sections. No LLM judgment, only data plumbing.
+
+    Each section may be `None` if its sub-fetch failed (graceful degrade);
+    `engine.compose` substitutes a stub so the final StockCard contract holds.
+    Citation IDs in nested fields reference `data_citations` (1..K).
+    """
+    technical: TechMomentum | None = None
+    macro: MacroContext | None = None
+    fundamentals: Fundamentals | None = None
+    news: list[NewsItem] = []
+    relations_data: list[Relation] = []
+    data_citations: list[Citation] = []
+
+
+class RelationsNarrative(BaseModel):
+    """Analyst commentary that overlays `DataLayer.relations_data`."""
+    one_line: str
+    notes_by_target: dict[str, str] = {}
+    citations: list[int] = []
+
+
+class AnalystOutput(BaseModel):
+    """The 4 LLM-produced judgment fields. No data echoing.
+
+    Citation IDs in nested fields reference `interp_citations` (1..M),
+    which `engine.compose` re-numbers to K+1..K+M when merging with
+    `DataLayer.data_citations`.
+    """
+    glance: GlanceVerdict
+    thesis: Thesis
+    relations_narrative: RelationsNarrative
+    decision: Decision
+    interp_citations: list[Citation] = []

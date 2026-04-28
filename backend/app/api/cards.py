@@ -13,7 +13,7 @@ from app.dependencies import get_stock_or_404
 from app.models import Stock
 from app.models.analysis import Analysis
 from app.services.analyst.cost import can_proceed
-from app.services.analyst.engine import analyze
+from app.services.analyst.engine import analyze, is_analyzable
 
 router = APIRouter(prefix="/api/stocks", tags=["cards"])
 
@@ -55,6 +55,9 @@ async def trigger_analyze(
 ):
     if not can_proceed():
         raise HTTPException(503, "daily analysis budget exceeded")
+    ok, reason = await is_analyzable(ticker)
+    if not ok:
+        raise HTTPException(422, f"not analyzable: {reason}")
     bg.add_task(analyze, ticker)
     return {"status": "queued", "ticker": ticker.upper()}
 
@@ -74,6 +77,9 @@ async def force_refresh(
     if now - last < settings.analysis_cooldown_seconds:
         remaining = int(settings.analysis_cooldown_seconds - (now - last))
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
+    ok, reason = await is_analyzable(ticker)
+    if not ok:
+        raise HTTPException(422, f"not analyzable: {reason}")
     _last_refresh[key] = now
     bg.add_task(analyze, ticker)
     return {"status": "refresh_queued", "ticker": key}

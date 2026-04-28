@@ -47,6 +47,7 @@ async def test_smoke_analyze_005930_produces_valid_card():
 
     # Persona traceability — server-controlled
     assert card.persona_version == "analyst_v1"
+    assert card.schema_version == "v2"
 
     # Evidence balance — persona contract
     assert len(card.thesis.supports) >= 3, "supports must be ≥3"

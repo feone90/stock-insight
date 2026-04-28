@@ -11,19 +11,14 @@ import json
 import logging
 from typing import Any
 
+from app.services.analyst import get_analyst_adapter
 from app.services.analyst.persona import RESEARCHER_V1, RESEARCHER_VERSION
 from app.services.analyst.tools import (
     RESEARCH_TOOL_SCHEMAS,
     dispatch_research_tool,
 )
-from app.services.llm.adapter import AzureOpenAIAdapter
 
 logger = logging.getLogger(__name__)
-
-
-def _adapter():
-    """Factory wrapped so tests can monkeypatch."""
-    return AzureOpenAIAdapter()
 
 
 async def _consume_one_round(adapter, messages: list[dict], tools: list[dict]) -> tuple[list[dict], str]:
@@ -68,7 +63,7 @@ async def run_research(ticker: str, max_rounds: int = 10) -> dict:
         {"role": "user", "content": user_prompt},
     ]
 
-    adapter = _adapter()
+    adapter = get_analyst_adapter()
     rounds_used = 0
 
     for _ in range(max_rounds):

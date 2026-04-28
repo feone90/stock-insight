@@ -224,7 +224,7 @@ async def test_llm_classify_news_returns_per_item_classification(monkeypatch):
     fake_adapter = AsyncMock()
     fake_adapter.generate_json = AsyncMock(return_value=fake_response_text)
     monkeypatch.setattr(
-        "app.services.analyst.tools._adapter", lambda: fake_adapter
+        "app.services.analyst.tools.get_analyst_adapter", lambda: fake_adapter
     )
 
     items = [
@@ -253,7 +253,7 @@ async def test_llm_discover_relations_writes_to_cache(db_for_tools, monkeypatch)
     fake_adapter = AsyncMock()
     fake_adapter.generate_json = AsyncMock(return_value=fake_response_text)
     monkeypatch.setattr(
-        "app.services.analyst.tools._adapter", lambda: fake_adapter
+        "app.services.analyst.tools.get_analyst_adapter", lambda: fake_adapter
     )
 
     out = await llm_discover_relations("DSCV1", relation_types=["peer", "theme"])

@@ -1,25 +1,25 @@
-"""Stage 2 synthesizer tests with mocked adapter."""
+"""Stage 2 synthesizer tests with mocked adapter.
+
+After the data/analyst split, `run_synthesize` returns `AnalystOutput`
+(NOT `StockCard`). The 4 LLM-judgment fields only — data fields
+come from `data_layer` and are merged at `engine.compose`.
+"""
 import json
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.schemas.card import StockCard
-from app.services.analyst.synthesize import run_synthesize
+from app.schemas.card import AnalystOutput
+from app.services.analyst.synthesize import (
+    PROMPT_SIZE_SOFT_LIMIT,
+    _build_prompt,
+    run_synthesize,
+)
 
 
-def _valid_card_dict() -> dict:
+def _valid_analyst_dict() -> dict:
+    """Minimum-valid AnalystOutput shape — only the 4 LLM fields."""
     return {
-        "ticker": "005930",
-        "name_ko": "삼성전자",
-        "name_en": "Samsung Electronics",
-        "market": "KRX",
-        "sector": "반도체",
-        "tags": ["AI/HBM"],
-        "price": 78400.0,
-        "change": 1200.0,
-        "change_pct": 1.55,
-        "asof": "2026-04-28T00:00:00+00:00",
         "glance": {
             "final_grade": "C",
             "stance": "WATCH",
@@ -47,81 +47,71 @@ def _valid_card_dict() -> dict:
             ],
             "citations": [1],
         },
-        "technical": {
-            "rsi_14": 58, "mfi_14": None, "atr_pct": 2.3, "cmf_20": None, "obv_ratio": None,
-            "ma_stack": "정배열", "rvol_20": 1.4, "box_position": None,
-            "summary_line": "RSI 58 정배열", "citations": [1],
-        },
-        "relations": {"one_line": "x", "relations": [], "citations": [1]},
-        "news": [],
-        "macro": {
-            "one_line": "x", "vix": 18.7, "fx_pairs": {"USD/KRW": 1378.0}, "us_10y": 4.6,
-            "sensitivities": [], "upcoming_events": [], "citations": [1],
-        },
-        "fundamentals": {
-            "per": 14.2, "pbr": 1.4, "market_cap_krw": 4.68e14,
-            "dividend_yield": 2.1, "per_5y_z": -0.5, "citations": [1],
+        "relations_narrative": {
+            "one_line": "SK하이닉스 동조 강세",
+            "notes_by_target": {"000660": "HBM 동조 수혜"},
+            "citations": [1],
         },
         "decision": {
-            "stance": "WATCH", "sizing_note": "대기", "support_price": 75000,
-            "risk_threshold": 72500, "citations": [1],
+            "stance": "WATCH",
+            "sizing_note": "대기",
+            "support_price": 75000,
+            "risk_threshold": 72500,
+            "citations": [1],
         },
-        "citations": [{"id": 1, "source_type": "db", "label": "DB · 가격"}],
-        "analysis_id": "test-1",
-        "generated_at": "2026-04-28T00:00:00+00:00",
-        "persona_version": "analyst_v1",
+        "interp_citations": [
+            {"id": 1, "source_type": "web", "label": "분석가 도입 출처"},
+        ],
     }
 
 
 @pytest.mark.asyncio
-async def test_synthesize_returns_validated_stock_card(monkeypatch):
-    fake_card_dict = _valid_card_dict()
+async def test_synthesize_returns_analyst_output(monkeypatch):
+    payload = _valid_analyst_dict()
     adapter = AsyncMock()
-    adapter.generate_json = AsyncMock(return_value=json.dumps(fake_card_dict))
+    adapter.generate_json = AsyncMock(return_value=json.dumps(payload))
     monkeypatch.setattr(
-        "app.services.analyst.synthesize._adapter", lambda: adapter
+        "app.services.analyst.synthesize.get_analyst_adapter", lambda: adapter
     )
 
-    research_result = {"findings": [{"k": "v"}], "citations": []}
-    card = await run_synthesize(ticker="005930", research=research_result)
-    assert isinstance(card, StockCard)
-    assert card.glance.stance == "WATCH"
-    assert card.thesis.no_catalysts_reason == "윈도 내 일정 없음"
-    assert card.thesis.catalysts == []
+    out = await run_synthesize(ticker="005930", research={"findings": []})
+    assert isinstance(out, AnalystOutput)
+    assert out.glance.stance == "WATCH"
+    assert out.thesis.no_catalysts_reason == "윈도 내 일정 없음"
+    assert out.relations_narrative.notes_by_target["000660"] == "HBM 동조 수혜"
+    assert out.decision.support_price == 75000
 
 
 @pytest.mark.asyncio
 async def test_synthesize_retries_on_validation_error(monkeypatch):
-    """First response is invalid; second is valid → returns card after retry."""
-    bad = {"ticker": "X"}  # missing required fields
-    good = _valid_card_dict()
+    bad = {"glance": {"stance": "WATCH"}}  # missing required fields
+    good = _valid_analyst_dict()
 
     adapter = AsyncMock()
     adapter.generate_json = AsyncMock(
         side_effect=[json.dumps(bad), json.dumps(good)]
     )
     monkeypatch.setattr(
-        "app.services.analyst.synthesize._adapter", lambda: adapter
+        "app.services.analyst.synthesize.get_analyst_adapter", lambda: adapter
     )
 
-    card = await run_synthesize(
+    out = await run_synthesize(
         ticker="005930", research={"findings": []}, max_retries=1
     )
-    assert isinstance(card, StockCard)
+    assert isinstance(out, AnalystOutput)
     assert adapter.generate_json.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_synthesize_raises_after_exhausted_retries(monkeypatch):
-    """Two bad responses → raises ValueError."""
-    bad = {"ticker": "X"}
+    bad = {"glance": {"stance": "WATCH"}}
 
     adapter = AsyncMock()
     adapter.generate_json = AsyncMock(
         side_effect=[json.dumps(bad), json.dumps(bad)]
     )
     monkeypatch.setattr(
-        "app.services.analyst.synthesize._adapter", lambda: adapter
+        "app.services.analyst.synthesize.get_analyst_adapter", lambda: adapter
     )
 
     with pytest.raises(ValueError, match="synthesize failed"):
@@ -130,17 +120,16 @@ async def test_synthesize_raises_after_exhausted_retries(monkeypatch):
         )
 
 
-@pytest.mark.asyncio
-async def test_synthesize_overrides_persona_version_to_server_value(monkeypatch):
-    """Even if LLM emits a wrong persona_version, server forces analyst_v1."""
-    card_dict = _valid_card_dict()
-    card_dict["persona_version"] = "rogue_v99"
-
-    adapter = AsyncMock()
-    adapter.generate_json = AsyncMock(return_value=json.dumps(card_dict))
-    monkeypatch.setattr(
-        "app.services.analyst.synthesize._adapter", lambda: adapter
+def test_prompt_size_under_soft_limit():
+    """Spec §11 — synthesizer prompt size ≤ 18KB. Asserted with a representative
+    research blob (~14KB cap from synthesize module)."""
+    research = {
+        "findings": [{"key": "k", "value": "v" * 200} for _ in range(50)],
+        "citations": [{"id": i, "source_type": "db", "label": "x"} for i in range(20)],
+        "gaps_noted": [],
+    }
+    prompt = _build_prompt("005930", research)
+    size = len(prompt.encode("utf-8"))
+    assert size <= PROMPT_SIZE_SOFT_LIMIT, (
+        f"prompt size {size} exceeds soft limit {PROMPT_SIZE_SOFT_LIMIT}"
     )
-
-    card = await run_synthesize(ticker="005930", research={})
-    assert card.persona_version == "analyst_v1"

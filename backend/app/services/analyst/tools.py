@@ -18,8 +18,7 @@ from app.database import async_session
 from app.models import PriceHistory, Stock
 from app.models.macro_factor import MacroFactor
 from app.models.relation import StockRelation
-from app.services.analyst import indicators
-from app.services.llm.adapter import AzureOpenAIAdapter, OpenAIAdapter, get_adapter
+from app.services.analyst import get_analyst_adapter, indicators
 
 
 async def get_indicators(ticker: str) -> dict:
@@ -261,11 +260,6 @@ JSON으로만:
 """
 
 
-def _adapter():
-    """Factory wrapped so tests can monkeypatch."""
-    return get_adapter()
-
-
 async def llm_classify_news(items: list[dict]) -> dict:
     """Classify a batch of news items with topic/sentiment/impact."""
     if not items:
@@ -275,7 +269,7 @@ async def llm_classify_news(items: list[dict]) -> dict:
         for i, it in enumerate(items)
     )
     prompt = _NEWS_CLASSIFY_PROMPT + "\n\n뉴스:\n" + payload
-    adapter = _adapter()
+    adapter = get_analyst_adapter()
     try:
         raw = await adapter.generate_json(prompt)
         return json.loads(raw)
@@ -302,7 +296,7 @@ async def llm_discover_relations(
         prompt = _DISCOVER_RELATIONS_PROMPT.format(
             ticker=ticker, name=stock.name, types=", ".join(relation_types)
         )
-        adapter = _adapter()
+        adapter = get_analyst_adapter()
         try:
             raw = await adapter.generate_json(prompt)
             result = json.loads(raw)
