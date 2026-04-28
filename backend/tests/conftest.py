@@ -46,13 +46,6 @@ test_session_factory = async_sessionmaker(
 )
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_test_db():
     """Create schema + seed once per test session."""
