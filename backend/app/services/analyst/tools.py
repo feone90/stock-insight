@@ -350,3 +350,168 @@ async def llm_discover_relations(
                 {"source_type": "curated_relation", "label": f"AI 큐레이션 · {ticker}"}
             ],
         }
+
+
+# === Tool registry & dispatcher (consumed by Stage 1 research agent) ===
+
+# Re-export Phase A chat tools for the research agent.
+from app.services.chat.tools import (  # noqa: E402
+    get_recent_disclosures,
+    get_recent_news,
+    get_stock_snapshot,
+)
+
+
+RESEARCH_TOOL_FUNCTIONS = {
+    "get_stock_snapshot": get_stock_snapshot,
+    "get_recent_news": get_recent_news,
+    "get_recent_disclosures": get_recent_disclosures,
+    "get_indicators": get_indicators,
+    "get_relations": get_relations,
+    "get_macro_context": get_macro_context,
+    "get_investor_flow": get_investor_flow,
+    "web_search": web_search,
+    "llm_classify_news": llm_classify_news,
+    "llm_discover_relations": llm_discover_relations,
+}
+
+
+RESEARCH_TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "name": "get_stock_snapshot",
+        "description": "종목 기본 + 현재가 + 최신 재무. 시계열 X.",
+        "parameters": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_recent_news",
+        "description": "최근 N일 뉴스 + 본문 일부 + URL.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "days": {"type": "integer", "default": 7},
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_recent_disclosures",
+        "description": "공시 (DART/SEC) 최근 N일.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "days": {"type": "integer", "default": 30},
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_indicators",
+        "description": "RSI/ATR/MA/RVOL/OBV/CMF 계산값.",
+        "parameters": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_relations",
+        "description": "캐시된 ontology 관계. 비어있으면 llm_discover_relations 권장.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "relation_type": {
+                    "type": "string",
+                    "enum": [
+                        "peer",
+                        "supply_upstream",
+                        "supply_downstream",
+                        "group",
+                        "theme",
+                        "macro",
+                    ],
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "get_macro_context",
+        "description": "VIX/US10Y/USD/KRW/섹터 ETF 최신 스냅샷.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "type": "function",
+        "name": "get_investor_flow",
+        "description": "KR 한정 외국인/기관 순매매 (5일 기준).",
+        "parameters": {
+            "type": "object",
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "web_search",
+        "description": "Tavily 웹 검색. 키워드 자유 — 매번 다른 키워드 OK.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "max_results": {"type": "integer", "default": 5},
+                "recency_days": {"type": "integer", "default": 30},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "llm_classify_news",
+        "description": "뉴스 배치 → topic/sentiment/impact 라벨링.",
+        "parameters": {
+            "type": "object",
+            "properties": {"items": {"type": "array", "items": {"type": "object"}}},
+            "required": ["items"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "llm_discover_relations",
+        "description": "관계 캐시 stale일 때 LLM이 새로 발견. 결과는 stock_relations에 저장.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string"},
+                "relation_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+]
+
+
+async def dispatch_research_tool(name: str, args: dict) -> dict:
+    fn = RESEARCH_TOOL_FUNCTIONS.get(name)
+    if not fn:
+        return {"error": f"unknown tool: {name}"}
+    try:
+        return await fn(**args)
+    except TypeError as e:
+        return {"error": f"tool argument mismatch: {e}"}
+    except Exception as e:
+        return {"error": f"tool failure: {e}"}

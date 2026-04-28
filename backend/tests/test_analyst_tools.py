@@ -264,3 +264,37 @@ async def test_llm_discover_relations_writes_to_cache(db_for_tools, monkeypatch)
         )
     ).scalars().all()
     assert len(rows) == 2
+
+
+# --- Tool registry & dispatcher ---
+
+from app.services.analyst.tools import (  # noqa: E402
+    RESEARCH_TOOL_FUNCTIONS,
+    RESEARCH_TOOL_SCHEMAS,
+    dispatch_research_tool,
+)
+
+
+def test_research_tool_schemas_match_functions():
+    schema_names = {s["name"] for s in RESEARCH_TOOL_SCHEMAS}
+    func_names = set(RESEARCH_TOOL_FUNCTIONS.keys())
+    assert schema_names == func_names
+
+
+def test_research_tool_includes_required_set():
+    expected = {
+        "get_indicators",
+        "get_relations",
+        "get_macro_context",
+        "get_investor_flow",
+        "web_search",
+        "llm_classify_news",
+        "llm_discover_relations",
+    }
+    assert expected.issubset(set(RESEARCH_TOOL_FUNCTIONS.keys()))
+
+
+@pytest.mark.asyncio
+async def test_dispatch_unknown_tool_returns_error():
+    out = await dispatch_research_tool("nope", {})
+    assert out["error"].startswith("unknown tool")
