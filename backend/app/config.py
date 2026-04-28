@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     admin_email: str = ""
     admin_password: str = ""
 
+    # Tavily / analyst
+    tavily_api_key: str | None = None
+    analyst_research_model: str = "gpt-5-mini"
+    analyst_synthesize_model: str = "gpt-5"
+    analysis_daily_budget_usd: float = 10.0
+    analysis_cooldown_seconds: int = 300
+
+    # Cron strings for scheduler split
+    schedule_kr_morning: str = "30 8 * * 1-5"
+    schedule_kr_afternoon: str = "0 16 * * 1-5"
+    schedule_us_evening: str = "0 7 * * 1-5"
+    schedule_us_night: str = "30 22 * * 1-5"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

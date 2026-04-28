@@ -138,3 +138,66 @@ async def test_get_macro_context_returns_latest_per_factor(db_for_tools):
     assert out["fx_pairs"]["USD/KRW"] == 1378.0
     assert out["us_10y"] == 4.6
     assert out["citations"][0]["source_type"] == "market_data"
+
+
+import httpx as _httpx  # noqa: E402
+
+from app.services.analyst.tools import web_search  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_web_search_calls_tavily_and_returns_normalized(monkeypatch):
+    fake_response = {
+        "results": [
+            {
+                "title": "삼성전자 HBM3E 양산",
+                "url": "https://example.com/news/1",
+                "content": "삼성전자가 5월부터 HBM3E 양산을 시작한다.",
+                "published_date": "2026-04-28",
+            }
+        ]
+    }
+
+    class _FakeR:
+        status_code = 200
+
+        def json(self):
+            return fake_response
+
+        def raise_for_status(self):
+            pass
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        async def post(self, url, json):
+            return _FakeR()
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(
+        "app.services.analyst.tools.settings",
+        type("S", (), {"tavily_api_key": "tvly-test"}),
+    )
+
+    out = await web_search("삼성전자 HBM3E", max_results=3)
+    assert len(out["results"]) == 1
+    assert out["results"][0]["url"] == "https://example.com/news/1"
+    assert out["citations"][0]["source_type"] == "web"
+
+
+@pytest.mark.asyncio
+async def test_web_search_returns_empty_when_no_api_key(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.tools.settings",
+        type("S", (), {"tavily_api_key": None}),
+    )
+    out = await web_search("anything")
+    assert out["results"] == []
+    assert out.get("error") == "tavily_api_key not set"

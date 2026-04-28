@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+import httpx
 from sqlalchemy import select
 
+from app.config import settings
 from app.database import async_session
 from app.models import PriceHistory, Stock
 from app.models.macro_factor import MacroFactor
@@ -181,3 +183,49 @@ async def get_macro_context() -> dict:
                 else []
             ),
         }
+
+
+async def web_search(query: str, max_results: int = 5, recency_days: int = 30) -> dict:
+    """Tavily search. LLM picks `query` per analysis (no fixed keywords)."""
+    if not settings.tavily_api_key:
+        return {"results": [], "error": "tavily_api_key not set"}
+
+    payload = {
+        "api_key": settings.tavily_api_key,
+        "query": query,
+        "max_results": max_results,
+        "search_depth": "basic",
+        "include_raw_content": False,
+        "days": recency_days,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post("https://api.tavily.com/search", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        return {"results": [], "error": f"tavily error: {e}"}
+
+    results = []
+    for r in data.get("results", []):
+        results.append(
+            {
+                "title": r.get("title"),
+                "url": r.get("url"),
+                "snippet": r.get("content"),
+                "published_at": r.get("published_date"),
+            }
+        )
+
+    return {
+        "query": query,
+        "results": results,
+        "citations": [
+            {
+                "source_type": "web",
+                "label": f"web 검색 · '{query}'",
+                "url": r["url"],
+            }
+            for r in results
+        ],
+    }
