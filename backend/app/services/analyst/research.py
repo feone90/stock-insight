@@ -91,24 +91,27 @@ async def run_research(ticker: str, max_rounds: int = 10) -> dict:
             parsed["researcher_version"] = RESEARCHER_VERSION
             return parsed
 
-        # Append the assistant's tool-call decisions + each tool result.
-        messages.append(
-            {
-                "role": "assistant",
-                "content": content or "",
-                "tool_calls": tool_calls,
-            }
-        )
+        # Append each tool call + its result as Foundry Responses API top-level
+        # items (NOT OpenAI chat-completions assistant/tool messages).
         for call in tool_calls:
             tool_result = await dispatch_research_tool(
                 call["name"], call.get("arguments", {})
             )
             messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": call.get("call_id", ""),
+                    "type": "function_call",
+                    "call_id": call.get("call_id", ""),
                     "name": call["name"],
-                    "content": json.dumps(tool_result, default=str)[:8000],
+                    "arguments": json.dumps(
+                        call.get("arguments", {}), ensure_ascii=False
+                    ),
+                }
+            )
+            messages.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call.get("call_id", ""),
+                    "output": json.dumps(tool_result, ensure_ascii=False, default=str)[:8000],
                 }
             )
 

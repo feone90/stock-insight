@@ -60,12 +60,16 @@ class AzureOpenAIAdapter(LLMAdapter):
             resp.raise_for_status()
 
         data = resp.json()
+        # Concatenate all output_text chunks across all message items —
+        # Foundry can split a long response across multiple chunks; returning
+        # only the first one truncates JSON output mid-document.
+        texts: list[str] = []
         for item in data.get("output", []):
             if item.get("type") == "message":
                 for content in item.get("content", []):
                     if content.get("type") == "output_text":
-                        return content.get("text", "")
-        return ""
+                        texts.append(content.get("text", ""))
+        return "".join(texts)
 
     async def generate(self, prompt: str) -> str:
         return await self._call(prompt)

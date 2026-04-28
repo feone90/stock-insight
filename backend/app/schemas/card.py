@@ -115,12 +115,12 @@ class MacroContext(BaseModel):
 
 
 class Fundamentals(BaseModel):
-    per: float | None
-    pbr: float | None
-    market_cap_krw: float | None
-    dividend_yield: float | None
-    per_5y_z: float | None
-    citations: list[int]
+    per: float | None = None
+    pbr: float | None = None
+    market_cap_krw: float | None = None
+    dividend_yield: float | None = None
+    per_5y_z: float | None = None
+    citations: list[int] = []
 
 
 class Catalyst(BaseModel):
@@ -160,29 +160,32 @@ class Decision(BaseModel):
 
 
 class StockCard(BaseModel):
+    # Stock metadata — server-injected from DB (LLM doesn't produce these).
     ticker: str
-    name_ko: str
-    name_en: str
-    market: str
-    sector: str
-    tags: list[str]
+    name_ko: str = ""
+    name_en: str = ""
+    market: str = ""
+    sector: str = ""
+    tags: list[str] = []
 
-    price: float
-    change: float
-    change_pct: float
-    asof: datetime
+    price: float = 0.0
+    change: float = 0.0
+    change_pct: float = 0.0
+    asof: datetime | None = None
 
+    # Analytical content — LLM produces these.
     glance: GlanceVerdict
     thesis: Thesis
     technical: TechMomentum
     relations: RelationsSummary
-    news: list[NewsItem]
+    news: list[NewsItem] = []
     macro: MacroContext
     fundamentals: Fundamentals
     decision: Decision
 
-    citations: list[Citation]
+    citations: list[Citation] = []
 
+    # Server-controlled metadata.
     analysis_id: str
     generated_at: datetime
     persona_version: str

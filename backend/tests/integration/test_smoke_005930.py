@@ -7,10 +7,9 @@ Costs ~$0.5–1.2 per run. Requires:
     AZURE_OPENAI_*, TAVILY_API_KEY in .env
     DB seeded with 005930 (삼성전자)
 """
-import os
-
 import pytest
 
+from app.config import settings
 from app.schemas.card import StockCard
 from app.services.analyst.engine import analyze
 
@@ -36,8 +35,8 @@ _VALID_SOURCE_TYPES = {
 
 @pytest.mark.smoke
 @pytest.mark.skipif(
-    not os.getenv("TAVILY_API_KEY"),
-    reason="TAVILY_API_KEY not set; smoke test requires real env",
+    not settings.tavily_api_key,
+    reason="TAVILY_API_KEY not configured in .env; smoke test requires real keys",
 )
 @pytest.mark.asyncio
 async def test_smoke_analyze_005930_produces_valid_card():
