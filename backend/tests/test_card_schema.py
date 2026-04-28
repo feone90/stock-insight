@@ -136,3 +136,29 @@ def test_stop_loss_renamed_to_risk_threshold():
     d = Decision(stance="BUY", sizing_note="기본", support_price=90, risk_threshold=85, citations=[])
     assert d.risk_threshold == 85
     assert "stop_loss" not in d.model_dump()
+
+
+def test_persona_constants_exist_and_have_no_forbidden_words():
+    """Persona prompts must NOT contain UI-forbidden marketing words."""
+    from app.services.analyst.persona import (
+        ANALYST_V1,
+        PERSONA_VERSION,
+        RESEARCHER_V1,
+    )
+
+    assert PERSONA_VERSION == "analyst_v1"
+    # Forbidden marketing words — these are ENFORCED in the persona itself
+    # (the analyst is told to ban them in OUTPUT). The prompts are allowed
+    # to mention them in the "금지" list. So we only check that the
+    # persona TELLS the model to ban them.
+    for forbidden in ["강력 매수", "확실한 수익", "유망주"]:
+        assert forbidden in ANALYST_V1, (
+            f"persona prompt must explicitly forbid '{forbidden}'"
+        )
+    # And the persona must not call itself buffett-grade in the body — only
+    # the version string is "analyst_v1".
+    assert "워렌버핏" in ANALYST_V1  # mentioned in 금지 list
+    assert "버핏급" not in ANALYST_V1  # not used as identity
+    # Researcher prompt sanity
+    assert "추측 금지" in RESEARCHER_V1
+    assert "fabricate" in RESEARCHER_V1
