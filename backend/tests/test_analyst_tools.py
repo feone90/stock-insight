@@ -112,3 +112,29 @@ async def test_get_investor_flow_returns_none_for_us_stock(db_for_tools):
     await db.commit()
     out = await get_investor_flow("USTKR1")
     assert out.get("note") == "kr-only"
+
+
+# --- get_macro_context ---
+
+from datetime import date as _date  # noqa: E402
+
+from app.models.macro_factor import MacroFactor  # noqa: E402
+from app.services.analyst.tools import get_macro_context  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_get_macro_context_returns_latest_per_factor(db_for_tools):
+    db = db_for_tools
+    db.add_all([
+        MacroFactor(factor="VIX", date=_date(2026, 4, 28), value=18.7),
+        MacroFactor(factor="VIX", date=_date(2026, 4, 27), value=19.2),
+        MacroFactor(factor="USD/KRW", date=_date(2026, 4, 28), value=1378.0),
+        MacroFactor(factor="US10Y", date=_date(2026, 4, 28), value=4.6),
+    ])
+    await db.commit()
+
+    out = await get_macro_context()
+    assert out["vix"] == 18.7  # latest only
+    assert out["fx_pairs"]["USD/KRW"] == 1378.0
+    assert out["us_10y"] == 4.6
+    assert out["citations"][0]["source_type"] == "market_data"

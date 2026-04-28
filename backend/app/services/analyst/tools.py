@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models import PriceHistory, Stock
+from app.models.macro_factor import MacroFactor
 from app.models.relation import StockRelation
 from app.services.analyst import indicators
 
@@ -141,4 +142,42 @@ async def get_investor_flow(ticker: str) -> dict:
             "flow": [],
             "note": "investor flow collector not yet seeded — empty by design",
             "citations": [],
+        }
+
+
+async def get_macro_context() -> dict:
+    """Return latest snapshot of macro factors plus upcoming events placeholder."""
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(MacroFactor).order_by(MacroFactor.date.desc())
+            )
+        ).scalars().all()
+
+        latest: dict[str, tuple[float, date]] = {}
+        for r in rows:
+            if r.factor not in latest:
+                latest[r.factor] = (r.value, r.date)
+
+        return {
+            "vix": latest.get("VIX", (None, None))[0],
+            "us_10y": latest.get("US10Y", (None, None))[0],
+            "fx_pairs": {k: v[0] for k, v in latest.items() if "/" in k},
+            "sector_etfs": {
+                k: v[0] for k, v in latest.items() if k in {"XLK", "XLF", "XLE"}
+            },
+            "upcoming_events": [],  # populated by web_search in research stage
+            "citations": (
+                [
+                    {
+                        "source_type": "market_data",
+                        "label": (
+                            f"DB · macro_factors (latest per factor as of "
+                            f"{max((v[1] for v in latest.values()), default='n/a')})"
+                        ),
+                    }
+                ]
+                if latest
+                else []
+            ),
         }
