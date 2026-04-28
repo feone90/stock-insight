@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from app.scheduler import _sync_single_stock, scheduled_sync_job, init_scheduler, cleanup_old_news_content
 
@@ -138,8 +139,14 @@ class TestInitScheduler:
         mock_settings.scheduler_morning = "08:00"
         mock_settings.scheduler_evening = "18:00"
         mock_settings.scheduler_timezone = "Asia/Seoul"
+        # v2 split cron strings
+        mock_settings.schedule_kr_morning = "30 8 * * 1-5"
+        mock_settings.schedule_kr_afternoon = "0 16 * * 1-5"
+        mock_settings.schedule_us_evening = "0 7 * * 1-5"
+        mock_settings.schedule_us_night = "30 22 * * 1-5"
         init_scheduler()
-        assert mock_sched.add_job.call_count == 2
+        # 2 phase A + 4 v2 = 6 jobs registered
+        assert mock_sched.add_job.call_count == 6
         mock_sched.start.assert_called_once()
 
 
@@ -181,3 +188,98 @@ class TestCleanupOldNewsContent:
         result = await cleanup_old_news_content()
 
         assert result["cleaned"] == 0
+
+
+# ============================================================================
+# v2 KR/US analysis batch (split scheduler)
+# ============================================================================
+
+import pytest_asyncio  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+
+from app.models import Favorite, Stock as _Stock  # noqa: E402
+from app.scheduler import run_kr_analysis_batch, run_us_analysis_batch  # noqa: E402
+
+
+@pytest_asyncio.fixture
+async def db_for_v2_batch(db, monkeypatch):
+    """Patch async_session for both dedup helper and engine entry point."""
+
+    @asynccontextmanager
+    async def _session():
+        yield db
+
+    monkeypatch.setattr("app.services.analyst.dedup.async_session", _session)
+    monkeypatch.setattr("app.services.analyst.engine.async_session", _session)
+    return db
+
+
+@pytest.mark.asyncio
+async def test_run_kr_batch_analyzes_only_kr_unique(db_for_v2_batch, monkeypatch):
+    db = db_for_v2_batch
+    s1 = _Stock(ticker="KR1", name="x", market="KRX", sector="x")
+    s2 = _Stock(ticker="KR2", name="x", market="KOSPI", sector="x")
+    s3 = _Stock(ticker="US1", name="x", market="NASDAQ", sector="x")
+    db.add_all([s1, s2, s3])
+    await db.flush()
+    db.add_all([
+        Favorite(user_id="u1", stock_id=s1.id),
+        Favorite(user_id="u2", stock_id=s1.id),  # dup
+        Favorite(user_id="u1", stock_id=s2.id),
+        Favorite(user_id="u1", stock_id=s3.id),
+    ])
+    await db.commit()
+
+    called: list[str] = []
+
+    async def fake_analyze(ticker: str):
+        called.append(ticker)
+
+    monkeypatch.setattr("app.scheduler.analyze", fake_analyze)
+    monkeypatch.setattr("app.scheduler.can_proceed", lambda: True)
+
+    await run_kr_analysis_batch()
+    # Seed data may include other KR favorites — assert ours are present, US is absent.
+    assert "KR1" in called
+    assert "KR2" in called
+    assert "US1" not in called
+
+
+@pytest.mark.asyncio
+async def test_run_us_batch_analyzes_only_us_unique(db_for_v2_batch, monkeypatch):
+    db = db_for_v2_batch
+    db.add_all([
+        _Stock(ticker="US10", name="x", market="NASDAQ", sector="x"),
+        _Stock(ticker="US20", name="x", market="NYSE", sector="x"),
+        _Stock(ticker="KR_X", name="x", market="KOSPI", sector="x"),
+    ])
+    await db.flush()
+    rows = (await db.execute(select(_Stock))).scalars().all()
+    for r in rows:
+        if r.ticker in {"US10", "US20", "KR_X"}:
+            db.add(Favorite(user_id="u", stock_id=r.id))
+    await db.commit()
+
+    called: list[str] = []
+    monkeypatch.setattr("app.scheduler.analyze", lambda t: _push(called, t))
+    monkeypatch.setattr("app.scheduler.can_proceed", lambda: True)
+
+    await run_us_analysis_batch()
+    assert "US10" in called
+    assert "US20" in called
+    assert "KR_X" not in called
+
+
+@pytest.mark.asyncio
+async def test_kr_batch_skips_when_budget_exhausted(db_for_v2_batch, monkeypatch):
+    """can_proceed=False short-circuits the batch — no analyze calls."""
+    called: list[str] = []
+    monkeypatch.setattr("app.scheduler.analyze", lambda t: _push(called, t))
+    monkeypatch.setattr("app.scheduler.can_proceed", lambda: False)
+
+    await run_kr_analysis_batch()
+    assert called == []
+
+
+async def _push(target: list, ticker: str):
+    target.append(ticker)
