@@ -1,6 +1,6 @@
 # Refactor — Synthesizer / Data Layer Split
 
-**Status:** Draft — pending plan-eng-review
+**Status:** Reviewed (plan-eng-review applied) — ready to implement
 **Date:** 2026-04-28
 **Branch:** `feat/v2-backend-engine`
 **Parent spec:** `docs/superpowers/specs/2026-04-28-ontology-aware-stock-card-design.md` (commit `8e2f4a6`)
@@ -45,27 +45,50 @@ LLM is **only invoked for judgment**. Data is plumbed through.
 
 ### 3.1 Pipeline
 
+Two parallel branches after research, joined at compose. The analyst does NOT
+read DataAssembler output directly — it reads research notes (which already
+include indicator/news values via Stage 1 tool calls). Compose is the
+single source of truth for which numbers land in the final card.
+
 ```
 [Stage 1: Research]
    research_agent → research_notes (free-form findings, gaps, source list)
                       │
-                      ├──────────────┐
-                      ▼              ▼
-[Layer A: DataAssembler]    [Layer B: Analyst LLM]
-  - get_indicators(ticker)    - INPUT: research + DataAssembler output
-  - get_macro_context()       - LLM call (analyst_v1 persona)
-  - get_fundamentals(ticker)  - OUTPUT: AnalystOutput (4 fields)
-  - get_recent_news + classify    glance, thesis, relations_interp, decision
-  - server stock metadata
-                      │              │
-                      ▼              ▼
-              [Engine.compose(data, analyst, ticker) → StockCard]
+            ┌─────────┴─────────┐
+            ▼                   ▼
+  [Layer A: DataAssembler]  [Layer B: Analyst LLM]
+  asyncio.gather(            INPUT: research_notes only
+    get_indicators,          (NOT data layer output)
+    get_macro_context,       OUTPUT: AnalystOutput
+    fetch_fundamentals,        - glance
+    fetch_recent_news_         - thesis
+    + classify,                - relations_narrative (one_line + notes_by_target)
+    fetch_relations_data       - decision
+  )                            - interp_citations (rare, optional)
+  OUTPUT: DataLayer
+    - technical
+    - macro
+    - fundamentals
+    - news
+    - relations_data (list[Relation], cache+DB)
+    - data_citations
+            │                   │
+            └─────────┬─────────┘
+                      ▼
+        [Engine.compose(data, analyst, ticker) → StockCard]
+        - server-injects identity (ticker, name, market, price, asof)
+        - merges relations_data + relations_narrative.notes_by_target
+        - re-numbers citations globally (data first, then analyst-introduced)
+        - re-maps Claim.citations: list[int] field-level (no prose substitution)
+        - validates against StockCard (strict)
                       │
                       ▼
                   [persist]
 ```
 
 ### 3.2 Schema split
+
+Relations is split between layers — structure is data, narrative is analyst.
 
 ```python
 # Existing StockCard becomes a *composed* shape. The LLM never produces the
@@ -77,39 +100,68 @@ class DataLayer(BaseModel):
     macro: MacroContext
     fundamentals: Fundamentals
     news: list[NewsItem]
-    raw_citations: list[Citation]  # data-source citations
+    relations_data: list[Relation]   # target_ticker, name, type, strength,
+                                     # today_change_pct — all from cache+DB
+    data_citations: list[Citation]   # data-source citations (db/market_data/
+                                     # news/disclosure/web/curated_relation)
+
+
+class RelationsNarrative(BaseModel):
+    """Analyst-only commentary that overlays the structured relations_data."""
+    one_line: str
+    notes_by_target: dict[str, str]  # {"000660": "HBM 동조 수혜", ...}
+    citations: list[int]
+
 
 class AnalystOutput(BaseModel):
-    """The four LLM-produced sections only."""
+    """The LLM-produced judgment fields only — no data echoing."""
     glance: GlanceVerdict
     thesis: Thesis
-    relations: RelationsSummary  # peer descriptions = LLM judgment
+    relations_narrative: RelationsNarrative   # NOT the full RelationsSummary
     decision: Decision
-    interp_citations: list[Citation]  # any new citations LLM introduces (rare)
+    interp_citations: list[Citation] = []     # rare: LLM introduces a new web
+                                              # source not already in research
 
-# StockCard composes them at engine layer:
+# StockCard composes them at engine layer (frontend contract unchanged):
 class StockCard(BaseModel):
-    # identity (server-injected from DB)
+    # identity — server-injected from DB at compose
     ticker, name_ko, name_en, market, sector, tags, price, change, change_pct, asof
     # analyst layer
-    glance, thesis, relations, decision  ← from AnalystOutput
+    glance, thesis, decision  ← from AnalystOutput
     # data layer
     technical, macro, fundamentals, news  ← from DataLayer
-    # merged
-    citations  ← (data + analyst, deduped, [n] re-numbered)
+    # merged at compose:
+    relations  ← RelationsSummary built from data.relations_data
+                   + analyst.relations_narrative.{one_line, notes_by_target}
+    # citations: data first, then analyst, deduped, globally re-numbered
+    citations
     # meta
     analysis_id, generated_at, persona_version, schema_version, refresh_state
 ```
 
-### 3.3 Citation merging
+### 3.3 Citation merging — schema-level remap (NOT prose substitution)
 
-Each layer produces its own `Citation` list. The engine:
-1. Collects DataLayer citations first (1, 2, 3, ...)
-2. Appends AnalystOutput citations (continue numbering)
-3. Re-points any inline `[n]` references in AnalystOutput strings to the merged numbering (search/replace)
-4. Final list goes into `StockCard.citations`
+The schema already separates citations from prose: `Claim.text` is plain
+prose with no inline `[n]` markers; `Claim.citations: list[int]` is a
+structured field of citation IDs. Same for every section's citations list.
+Therefore citation merging is a pure ID remap, not a string-substitution problem.
 
-Easier alternative: each layer uses **string-prefixed IDs** (e.g., `D-1`, `D-2`, `A-1`) and frontend renders as-is. Decision deferred to `plan-eng-review` — both are valid.
+Algorithm at compose:
+1. Concatenate citation pools in order: `final = data.data_citations + analyst.interp_citations`.
+2. Build remap: each citation gets a final ID from 1..N based on its position
+   in `final`. Save mapping `old_id → new_id`. Data citations first (their old
+   IDs come from DataAssembler, typically 1..K), analyst citations renumber to
+   K+1..K+M.
+3. Walk every nested `citations: list[int]` field across the composed
+   StockCard (Claim.citations, GlanceVerdict.citations, MacroContext.citations,
+   etc.) and apply the remap.
+4. Validate: every integer referenced in any `citations` list must appear in
+   the final pool. If not, raise — engine returns 503 (compose error).
+
+Decision: **global re-numbering chosen, prefix variant rejected.**
+String prefixes (D-/A-) only become useful if the analyst emits inline
+`[n]` in prose, which our schema explicitly avoids. So global integer IDs
+are simpler, cleaner UI, no extra rendering logic.
 
 ---
 
@@ -117,22 +169,40 @@ Easier alternative: each layer uses **string-prefixed IDs** (e.g., `D-1`, `D-2`,
 
 ### Modified
 - `backend/app/schemas/card.py`
-  - Add `DataLayer` and `AnalystOutput` Pydantic models.
-  - `StockCard` keeps current shape (frontend contract unchanged) — composed at engine.
+  - Add `DataLayer`, `AnalystOutput`, `RelationsNarrative` Pydantic models.
+  - `StockCard` keeps current shape (frontend contract unchanged).
+- `backend/app/services/analyst/__init__.py`
+  - Add common `get_analyst_adapter()` factory. Replaces duplicated `_adapter()`
+    helpers in research.py / synthesize.py / tools.py / data_layer.py (DRY).
 - `backend/app/services/analyst/synthesize.py`
   - Returns `AnalystOutput` (NOT `StockCard`).
-  - Prompt drastically reduced: "produce ONLY 4 fields: glance/thesis/relations/decision".
-  - No need to inject DB metadata here.
+  - Prompt focused on 4 LLM fields: glance, thesis, relations_narrative, decision.
+  - **Remove `_fetch_stock_metadata`** — moved into `data_layer.py` / `engine.compose`.
+  - Use shared `get_analyst_adapter()`.
+- `backend/app/services/analyst/research.py` and `tools.py`
+  - Use shared `get_analyst_adapter()`.
 - `backend/app/services/analyst/engine.py`
-  - Renamed orchestration: research → data fetch (parallel) → analyst → compose → persist.
-  - `compose()` does merging, citation renumbering, identity injection, validation.
+  - Rewrite `analyze(ticker)`:
+    1. `research = await run_research(ticker)`
+    2. `data, analyst = await asyncio.gather(assemble_data_layer(ticker), run_synthesize(ticker, research))`
+    3. `card = compose(ticker, data, analyst)`
+    4. persist (existing upsert logic).
+  - New `compose(ticker, data, analyst) -> StockCard` does merging, citation
+    remap, identity injection, validation.
 
 ### Created
 - `backend/app/services/analyst/data_layer.py`
-  - `assemble_data_layer(ticker) -> DataLayer` — calls `get_indicators` + `get_macro_context` + `get_fundamentals` + recent news + maybe `llm_classify_news`.
-  - Pure orchestration; no new LLM calls except the existing `llm_classify_news` for news labeling.
+  - `assemble_data_layer(ticker) -> DataLayer` — `asyncio.gather` over:
+    - `get_indicators` (existing tool)
+    - `get_macro_context` (existing tool)
+    - `_fetch_fundamentals` (new helper — Financial table query)
+    - `_fetch_recent_news` (existing tool) + `llm_classify_news` (existing)
+    - `_fetch_relations_data` (existing `get_relations` for all types)
+  - Per-section graceful degrade: if a sub-fetch fails, that section becomes
+    None/empty + warning log; compose proceeds.
+  - Background-trigger `llm_discover_relations` if relation cache `refreshed_at`
+    older than 7 days (fire-and-forget; current analysis uses stale cache).
 - `backend/tests/test_data_layer.py`
-  - One test per data sub-fetch + an integration test for full assembly.
 
 ### Deleted
 - None. Existing tools (`get_indicators`, `get_macro_context`, etc.) all stay.
@@ -153,34 +223,68 @@ Easier alternative: each layer uses **string-prefixed IDs** (e.g., `D-1`, `D-2`,
 | Case | Behavior |
 |------|----------|
 | Stock not in DB | Fail-fast 404 from API; engine never invoked |
-| < 30 days price history | `technical = None` or all-null fields; thesis can still produce, citations note "indicators unavailable" |
+| **`stock.current_price <= 0` or 0 price-history rows** | **Fail-fast 422** at API; do NOT analyze. UI shows "데이터 수집 중". Avoids misleading 0원 cards |
+| < 30 days price history (but price > 0) | `technical = None`; thesis still produces with citations noting "indicators unavailable" |
 | Tavily key missing | `web_search` returns `{results: [], error: ...}`; research notes flag gap; analyst proceeds with reduced evidence |
-| LLM returns malformed AnalystOutput | Retry once with stricter prompt; second fail = raise ValueError, persist last-good or stale-banner state |
-| Citation [n] in analyst text doesn't resolve | Engine drops the bracket OR keeps and frontend shows "?" — TBD in eng review |
-| LLM tries to output technical/macro/fundamentals | Ignored at compose step (server values win); LLM gets feedback in retry only if shape itself invalid |
+| `stock_relations` cache stale (>7 days `refreshed_at`) | Use stale cache for current analysis; **fire-and-forget background refresh** via `llm_discover_relations`. Next analysis sees fresh cache |
+| News with `published_at` > 14 days old | Filter out at data_layer; only include recent (configurable, default 14d) |
+| LLM cites non-existent citation ID (e.g. references `[99]` but only 5 citations exist) | Compose raises; engine retries synthesize once. Second fail = stale cache fallback |
+| LLM scenario probabilities don't sum to ~1.0 (tolerance 0.95–1.05) | Pydantic validator; retry once |
+| LLM returns malformed AnalystOutput (other validation errors) | Retry once with stricter prompt; second fail = stale-banner state |
+| LLM tries to override server fields (ticker/name/price) | Compose ignores — server fields injected last, win |
+| LLM tries to output technical/macro/fundamentals despite prompt | Ignored at compose step (data layer wins) |
 | Same-day re-run | Engine upserts in `analyses` (existing behavior preserved) |
-| Phase A v1 row exists | Not touched — only v2 rows have `card_data` populated |
+| Phase A v1 row exists for same stock_id+date | Not touched — `WHERE schema_version='v2'` discriminator |
+| **Concurrent analyze() calls for same ticker** | **`asyncio.Lock` per-ticker** (in-memory dict in engine.py). Second call awaits first. Single-process scope |
+| Memory: research notes 30KB + data 10KB + analyst output 5KB | Within hand. Log warning if total > 200KB (signals research went off rails) |
 
 ---
 
 ## 7. Test plan
 
 ### Unit
-- `test_data_layer.py::test_assemble_returns_full_data_layer_with_seeded_ticker`
-- `test_data_layer.py::test_assemble_handles_missing_indicators_gracefully`
-- `test_data_layer.py::test_assemble_handles_empty_news`
-- `test_synthesizer.py` — update existing tests to expect `AnalystOutput` (4 fields), not `StockCard`.
+- `test_data_layer.py`
+  - `test_assemble_returns_full_data_layer_with_seeded_ticker` — happy path
+  - `test_assemble_handles_missing_indicators_gracefully` — < 30 days history → technical=None, others populated
+  - `test_assemble_handles_empty_news` — no news → news=[]
+  - `test_assemble_handles_empty_macro` — no macro_factors rows → macro fields None
+  - `test_assemble_skips_when_stock_not_found` — returns sentinel or raises clearly
+  - `test_assemble_uses_asyncio_gather` — patch the underlying tools, assert all 5 awaited concurrently (timing-based or call-order assertion)
+  - `test_assemble_triggers_relations_refresh_when_stale` — fire-and-forget bg task scheduled
+- `test_synthesizer.py` — UPDATE existing tests:
+  - All currently expect `StockCard` return — change to `AnalystOutput`.
+  - Update mock LLM responses to omit data layer fields (only 4 LLM fields).
 
 ### Integration
-- `test_engine.py::test_compose_merges_data_and_analyst_into_stock_card`
-- `test_engine.py::test_compose_renumbers_citations_correctly`
-- `test_engine.py::test_compose_preserves_phase_a_v1_rows`
+- `test_engine.py`
+  - `test_compose_merges_data_and_analyst_into_stock_card` — happy
+  - `test_compose_renumbers_citations_globally` — old IDs from layers are remapped, all `Claim.citations: list[int]` reference final IDs
+  - `test_compose_merges_relations_data_with_narrative` — Relation objects from data layer get `notes` from `relations_narrative.notes_by_target`
+  - `test_compose_server_fields_win_over_llm` — LLM emits `ticker="WRONG"` → compose forces correct
+  - `test_compose_preserves_phase_a_v1_rows` — REGRESSION CRITICAL
+  - `test_compose_handles_same_day_upsert`
+  - `test_analyze_uses_per_ticker_lock` — two concurrent analyze() calls for same ticker serialize
 
-### Smoke (opt-in)
-- `test_smoke_005930.py` — same assertions, but now LLM output is 1/2 size → expected reliability ≥ 90% on first call.
+### Adversarial (LLM mis-output)
+- `test_synthesizer_adversarial.py`
+  - `test_llm_cites_nonexistent_id_triggers_retry`
+  - `test_llm_scenario_probabilities_dont_sum_triggers_retry`
+  - `test_llm_returns_too_few_supports_triggers_retry`
+  - `test_llm_returns_garbage_json_after_retries_raises_value_error`
+
+### Property-based (citation invariants)
+- `test_compose_property.py` (use `hypothesis` lib if accessible, else manual fuzz)
+  - For random valid (DataLayer, AnalystOutput) pairs: every `Claim.citations: list[int]` element exists in `StockCard.citations` final pool.
+  - Citation IDs in final pool are 1..N contiguous (no gaps).
+  - Total citations count == sum of input layer citations (no double-count).
+
+### Smoke (opt-in `-m smoke`)
+- `test_smoke_005930.py` — UPDATE assertions for new compose flow. Expected reliability ≥ 90% first attempt.
+- `test_smoke_aapl.py` — NEW. Cross-ticker validation (US market).
+- `test_smoke_low_data_ticker.py` — NEW. Pick a recent IPO or thinly-covered ticker → assert graceful degrade (technical=None, etc.) without raising.
 
 ### Regression
-- All 191 existing tests must pass unchanged.
+- All 191 existing tests must pass unchanged. Run full suite at PR time.
 
 ---
 
@@ -205,35 +309,52 @@ Easier alternative: each layer uses **string-prefixed IDs** (e.g., `D-1`, `D-2`,
 
 ---
 
-## 10. Open questions for plan-eng-review
+## 10. Open questions — resolved by plan-eng-review
 
-1. **Citation merging strategy** — global re-number vs prefix (D-/A-)? Trade-off: re-number is cleaner UI, prefix is robust to LLM drift.
-2. **Should `relations` stay LLM or move to data layer?** Strength values come from cache (data), but interpretation/peer-strength comparison needs judgment. Currently splitting: structure from data, narrative from LLM.
-3. **Parallelism** — should DataAssembler fetches run in `asyncio.gather`? Each is a small DB query; serial might be fine. Premature opt?
-4. **News classification** — `llm_classify_news` is an LLM call inside the data layer. Is that "data" or "LLM"? It's deterministic-ish (low-temp categorical labels). Place in data layer for now.
-5. **Error in DataAssembler**: if `get_indicators` fails (DB issue), do we fail the whole analysis or proceed with `technical: None`? Currently lean toward "proceed with null section + research_notes records the gap".
-6. **`AnalystOutput` validation strictness** — keep `min_length=3` for supports? Yes, but maybe move that constraint into a per-attempt prompt-side check so the LLM knows to retry itself. Pydantic validation at the outer layer can stay strict.
+| # | Question | Decision |
+|---|----------|----------|
+| 1 | Citation merging — global vs prefix | **Global re-number, schema-field remap.** Prose has no inline `[n]`, only `citations: list[int]` field. Pure ID remap, no string substitution |
+| 2 | Relations LLM vs data | **Split.** `relations_data: list[Relation]` is data layer (structure from cache+DB); `relations_narrative` is analyst (one_line + notes_by_target overlay) |
+| 3 | DataAssembler parallelism | **`asyncio.gather` over 5 fetches.** Concrete benefit on manual refresh latency |
+| 4 | News classification placement | **Data layer.** Deterministic-ish categorical (low-temp); analyst should consume already-classified news |
+| 5 | DataAssembler error handling | **Per-section graceful degrade.** Sub-fetch fail → that section None/empty + warning log. Compose proceeds. UI shows "데이터 부족" badge |
+| 6 | `AnalystOutput` validation strictness | **Keep strict** (`min_length=3` supports, `==3` scenarios, etc.). Failure → retry once with stricter prompt. Second fail → stale-banner fallback or 503. Don't silently relax |
 
 ---
 
 ## 11. Acceptance criteria for refactor PR
 
 - [ ] All 191 existing tests pass unchanged.
-- [ ] New `test_data_layer.py` ≥ 3 tests, all green.
+- [ ] New `test_data_layer.py` ≥ 7 tests, all green.
 - [ ] `test_synthesizer.py` updated to expect `AnalystOutput`, all green.
-- [ ] `test_engine.py` updated for new compose flow, all green.
-- [ ] Smoke test passes for 005930 on first attempt without retry.
-- [ ] Smoke test passes for 1 US ticker (e.g., AAPL) on first attempt — cross-ticker validation.
-- [ ] Synthesizer prompt size measurably smaller (logged).
-- [ ] No regression in Phase A chat (`/chat` endpoint still works).
-- [ ] Frontend contract (`/api/stocks/{ticker}/card` response shape) unchanged from external POV.
-- [ ] persona_version stays `analyst_v1`; persona prompt updated to focus on 4 sections.
+- [ ] `test_synthesizer_adversarial.py` ≥ 4 tests, all green.
+- [ ] `test_engine.py` updated for new compose flow ≥ 7 tests, all green.
+- [ ] `test_compose_property.py` citation invariants ≥ 3 tests.
+- [ ] Smoke `005930` passes first attempt without retry.
+- [ ] Smoke `AAPL` (or another US ticker) passes — cross-ticker validation.
+- [ ] Smoke low-data ticker — graceful degrade without raising.
+- [ ] `_fetch_stock_metadata` removed from `synthesize.py`; replaced by `data_layer.py` + `engine.compose` server-injection.
+- [ ] `RelationsSummary` composed from `data.relations_data` + `analyst.relations_narrative`.
+- [ ] Common `get_analyst_adapter()` factory in `services/analyst/__init__.py`; duplicate `_adapter()` removed from research/synthesize/tools.
+- [ ] `asyncio.Lock` per-ticker in `engine.py` for concurrent analyze().
+- [ ] Synthesizer prompt size ≤ 18KB (logged + asserted in test).
+- [ ] No regression in Phase A chat (`/chat` endpoint still works — explicit smoke).
+- [ ] Frontend contract (`/api/stocks/{ticker}/card` response shape) unchanged.
+- [ ] persona_version stays `analyst_v1`; prompt updated to focus on 4 fields.
 
 ---
 
 ## 12. Out of scope
 
-- Modular per-section synthesis (4 separate LLM calls). Would help further but adds orchestration complexity. Reserve for v2.1 if 1-call still proves unreliable.
+- **Modular per-section synthesis** (4 separate LLM calls — one per analyst field).
+  Single-call with 4 fields should be reliable. **Escalation trigger:** if smoke
+  pass rate < 80% across 5 diverse tickers (KR mega-cap, KR small-cap, US
+  mega-cap, US ETF, recent IPO), then v2.1 splits into per-section calls.
 - Frontend changes — Plan 2 territory.
-- Eval harness expansion — Plan 5 territory.
-- Switching to Foundry's `response_format: json_schema` strict mode — needs investigation whether Foundry supports it. Reserve for follow-up.
+- Eval harness expansion (LLM-as-judge for citation accuracy, cycle awareness)
+  — Plan 5 territory.
+- Switching to Foundry's `response_format: json_schema` strict mode — needs
+  investigation whether Foundry supports it. Reserve for follow-up after
+  smoke-stable.
+- **`hypothesis` library introduction** — if not already a dep, add only if
+  property tests prove valuable; otherwise hand-fuzz.
