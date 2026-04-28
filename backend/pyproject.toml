@@ -20,6 +20,7 @@ dependencies = [
     "apscheduler>=3.11.2",
     "psycopg2-binary>=2.9.11",
     "trafilatura>=2.0.0",
+    "tavily-python>=0.7.24",
 ]
 
 [dependency-groups]
