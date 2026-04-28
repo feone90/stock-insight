@@ -6,7 +6,9 @@ source_type from {db, market_data, news, disclosure, web, curated_relation}
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
+from datetime import datetime as _dt
 
 import httpx
 from sqlalchemy import select
@@ -17,6 +19,7 @@ from app.models import PriceHistory, Stock
 from app.models.macro_factor import MacroFactor
 from app.models.relation import StockRelation
 from app.services.analyst import indicators
+from app.services.llm.adapter import AzureOpenAIAdapter, OpenAIAdapter, get_adapter
 
 
 async def get_indicators(ticker: str) -> dict:
@@ -229,3 +232,121 @@ async def web_search(query: str, max_results: int = 5, recency_days: int = 30) -
             for r in results
         ],
     }
+
+
+_NEWS_CLASSIFY_PROMPT = """\
+다음 뉴스 항목들을 분류한다. 각 item에 대해:
+- topic: earnings | macro | regulation | M&A | product | other
+- sentiment: positive | neutral | negative
+- impact: positive | mixed | neutral | negative
+
+JSON으로만 응답:
+{"items": [{"index": 0, "topic": "...", "sentiment": "...", "impact": "..."}, ...]}
+"""
+
+
+_DISCOVER_RELATIONS_PROMPT = """\
+종목 {ticker}({name})에 대한 ontology 관계를 발견한다.
+요청 타입: {types}.
+- peer: 같은 사업 영역 직접 경쟁/대체
+- supply_upstream: 본 종목이 공급받는 곳 (e.g. 칩 설계 → 파운드리)
+- supply_downstream: 본 종목 공급의 수요처
+- group: 같은 기업집단/지배구조
+- theme: 함께 묶이는 내러티브 (AI, EV, biosimilar 등)
+
+JSON으로만:
+{{"relations": [{{"target_ticker": "...", "to_kind": "stock|theme", "relation_type": "...", "strength": 0..1, "notes": "..."}}, ...]}}
+
+확신 없으면 빈 배열. 추측 금지.
+"""
+
+
+def _adapter():
+    """Factory wrapped so tests can monkeypatch."""
+    return get_adapter()
+
+
+async def llm_classify_news(items: list[dict]) -> dict:
+    """Classify a batch of news items with topic/sentiment/impact."""
+    if not items:
+        return {"items": []}
+    payload = "\n".join(
+        f"{i}. [{it.get('title', '')}] {it.get('summary', '')[:200]}"
+        for i, it in enumerate(items)
+    )
+    prompt = _NEWS_CLASSIFY_PROMPT + "\n\n뉴스:\n" + payload
+    adapter = _adapter()
+    try:
+        raw = await adapter.generate_json(prompt)
+        return json.loads(raw)
+    except Exception as e:
+        return {"items": [], "error": f"llm error: {e}"}
+
+
+async def llm_discover_relations(
+    ticker: str, relation_types: list[str] | None = None
+) -> dict:
+    """LLM curates relations for a stock; writes to stock_relations cache."""
+    relation_types = relation_types or [
+        "peer", "supply_upstream", "supply_downstream", "group", "theme"
+    ]
+    ticker = ticker.strip().upper()
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock:
+            return {"error": f"종목 '{ticker}' 없음"}
+
+        prompt = _DISCOVER_RELATIONS_PROMPT.format(
+            ticker=ticker, name=stock.name, types=", ".join(relation_types)
+        )
+        adapter = _adapter()
+        try:
+            raw = await adapter.generate_json(prompt)
+            result = json.loads(raw)
+        except Exception as e:
+            return {"written": 0, "error": f"llm error: {e}"}
+
+        written = 0
+        for rel in result.get("relations", []):
+            target = rel.get("target_ticker") or rel.get("target") or ""
+            if not target:
+                continue
+            target = target.strip().upper()
+            existing = (
+                await db.execute(
+                    select(StockRelation).where(
+                        StockRelation.from_stock_id == stock.id,
+                        StockRelation.to_target == target,
+                        StockRelation.relation_type == rel.get("relation_type", "peer"),
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing:
+                existing.strength = float(rel.get("strength", 0.5))
+                existing.notes = rel.get("notes")
+                existing.refreshed_at = _dt.utcnow()
+            else:
+                db.add(
+                    StockRelation(
+                        from_stock_id=stock.id,
+                        to_target=target,
+                        to_kind=rel.get("to_kind", "stock"),
+                        relation_type=rel.get("relation_type", "peer"),
+                        strength=float(rel.get("strength", 0.5)),
+                        notes=rel.get("notes"),
+                        source="llm-curation",
+                        refreshed_at=_dt.utcnow(),
+                    )
+                )
+            written += 1
+        await db.commit()
+        return {
+            "ticker": ticker,
+            "written": written,
+            "citations": [
+                {"source_type": "curated_relation", "label": f"AI 큐레이션 · {ticker}"}
+            ],
+        }

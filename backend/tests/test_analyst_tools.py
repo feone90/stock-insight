@@ -10,6 +10,7 @@ from datetime import date, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 from app.models import PriceHistory, Stock
 from app.models.relation import StockRelation
@@ -201,3 +202,65 @@ async def test_web_search_returns_empty_when_no_api_key(monkeypatch):
     out = await web_search("anything")
     assert out["results"] == []
     assert out.get("error") == "tavily_api_key not set"
+
+
+from unittest.mock import AsyncMock  # noqa: E402
+
+from app.services.analyst.tools import (  # noqa: E402
+    llm_classify_news,
+    llm_discover_relations,
+)
+
+
+@pytest.mark.asyncio
+async def test_llm_classify_news_returns_per_item_classification(monkeypatch):
+    fake_response_text = (
+        '{"items": ['
+        '{"index": 0, "topic": "earnings", "sentiment": "positive", "impact": "positive"},'
+        '{"index": 1, "topic": "macro", "sentiment": "negative", "impact": "negative"}'
+        ']}'
+    )
+
+    fake_adapter = AsyncMock()
+    fake_adapter.generate_json = AsyncMock(return_value=fake_response_text)
+    monkeypatch.setattr(
+        "app.services.analyst.tools._adapter", lambda: fake_adapter
+    )
+
+    items = [
+        {"title": "1Q 어닝 서프라이즈", "summary": "..."},
+        {"title": "Fed 매파 발언", "summary": "..."},
+    ]
+    out = await llm_classify_news(items)
+    assert out["items"][0]["topic"] == "earnings"
+    assert out["items"][1]["impact"] == "negative"
+
+
+@pytest.mark.asyncio
+async def test_llm_discover_relations_writes_to_cache(db_for_tools, monkeypatch):
+    db = db_for_tools
+    s = Stock(ticker="DSCV1", name="DSCV", market="KRX", sector="기타")
+    db.add(s)
+    await db.commit()
+
+    fake_response_text = (
+        '{"relations": ['
+        '{"target_ticker": "DSCV2", "to_kind": "stock", "relation_type": "peer", "strength": 0.8, "notes": "동조"},'
+        '{"target_ticker": "AI/HBM", "to_kind": "theme", "relation_type": "theme", "strength": 1.0}'
+        ']}'
+    )
+
+    fake_adapter = AsyncMock()
+    fake_adapter.generate_json = AsyncMock(return_value=fake_response_text)
+    monkeypatch.setattr(
+        "app.services.analyst.tools._adapter", lambda: fake_adapter
+    )
+
+    out = await llm_discover_relations("DSCV1", relation_types=["peer", "theme"])
+    assert out["written"] >= 2
+    rows = (
+        await db.execute(
+            select(StockRelation).where(StockRelation.from_stock_id == s.id)
+        )
+    ).scalars().all()
+    assert len(rows) == 2
