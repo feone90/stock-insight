@@ -1,0 +1,116 @@
+"use client";
+
+import type { Thesis } from "@/types/card";
+import { SectionShell } from "./section-shell";
+
+const SCENARIO_BAR_COLOR = {
+  BULL: "bg-emerald-500",
+  BASE: "bg-blue-500",
+  BEAR: "bg-rose-500",
+} as const;
+
+export function ThesisSection({ thesis }: { thesis: Thesis }) {
+  const supportCount = thesis.supports?.length ?? 0;
+  const opposeCount = thesis.opposes?.length ?? 0;
+  const baseScenario = thesis.scenarios?.find((s) => s.name === "BASE");
+  const basePct = baseScenario ? Math.round(baseScenario.probability * 100) : null;
+  const catalystCount = thesis.catalysts?.length ?? 0;
+
+  const compactParts: string[] = [];
+  compactParts.push(`긍정 ${supportCount}`);
+  compactParts.push(`반대 ${opposeCount}`);
+  if (basePct !== null) compactParts.push(`BASE ${basePct}%`);
+  compactParts.push(catalystCount > 0 ? `catalysts ${catalystCount}건` : "임박 일정 없음");
+
+  return (
+    <SectionShell
+      emoji="▣"
+      title="종합 의견"
+      defaultOpen
+      highlight="glance"
+      compact={<span>{compactParts.join(" · ")}</span>}
+      expanded={<ThesisExpanded thesis={thesis} />}
+    />
+  );
+}
+
+function ThesisExpanded({ thesis }: { thesis: Thesis }) {
+  return (
+    <div className="space-y-4 text-sm">
+      <p className="font-medium leading-relaxed">{thesis.core_thesis}</p>
+
+      <ClaimList
+        label="긍정 근거"
+        labelClass="text-emerald-700 dark:text-emerald-400"
+        claims={thesis.supports.map((c) => c.text)}
+      />
+      <ClaimList
+        label="반대 근거"
+        labelClass="text-rose-700 dark:text-rose-400"
+        claims={thesis.opposes.map((c) => c.text)}
+      />
+
+      {thesis.scenarios.length > 0 ? (
+        <div>
+          <div className="text-xs font-semibold mb-1.5">시나리오</div>
+          <div className="space-y-1.5">
+            {thesis.scenarios.map((s, i) => {
+              const pct = Math.round(s.probability * 100);
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs font-medium w-12">{s.name}</span>
+                  <div className="flex-1 h-2 bg-[var(--surface-section)] rounded overflow-hidden">
+                    <div
+                      className={`h-full ${SCENARIO_BAR_COLOR[s.name]}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-xs w-10 text-right tabular-nums">{pct}%</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {thesis.catalysts.length > 0 ? (
+        <div>
+          <div className="text-xs font-semibold mb-1">14일 내 catalysts</div>
+          <ul className="space-y-1 text-xs text-[var(--surface-text-muted)]">
+            {thesis.catalysts.map((c, i) => (
+              <li key={i}>
+                · <span className="font-medium text-[var(--surface-text)]">{c.when}</span> — {c.event}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : thesis.no_catalysts_reason ? (
+        <p className="text-xs italic text-[var(--surface-text-subtle)]">
+          확인된 임박 일정 없음 — {thesis.no_catalysts_reason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ClaimList({
+  label,
+  labelClass,
+  claims,
+}: {
+  label: string;
+  labelClass: string;
+  claims: string[];
+}) {
+  if (claims.length === 0) return null;
+  return (
+    <div>
+      <div className={`text-xs font-semibold mb-1 ${labelClass}`}>{label}</div>
+      <ul className="space-y-1 list-disc list-inside text-[var(--surface-text-muted)]">
+        {claims.map((t, i) => (
+          <li key={i}>{t}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}

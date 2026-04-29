@@ -5,29 +5,26 @@ import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import { AtAGlancePanel } from "./at-a-glance-panel";
 import { CardHeader } from "./card-header";
+import { DecisionSection } from "./decision-section";
+import { FundamentalsSection } from "./fundamentals-section";
 import { HeroChart } from "./hero-chart";
-import {
-  CardFooter,
-  DecisionSection,
-  FundamentalsSection,
-  MacroSection,
-  NewsSection,
-  RelationsSection,
-  TechMomentumSection,
-  ThesisSection,
-} from "./placeholders";
+import { MacroSection } from "./macro-section";
+import { NewsSection } from "./news-section";
+import { CardFooter } from "./placeholders";
+import { RelationsSection } from "./relations-section";
+import { TechMomentumSection } from "./tech-momentum-section";
+import { ThesisSection } from "./thesis-section";
 
 /**
  * StockCardPage — v2 stock card.
  *
- * Layout (plan §4 + post-A design pass):
- *   - <1024px (mobile/tablet): 1-column stack
- *   - ≥1024px (desktop): 2-column. Left = chart + secondary sections;
- *     right = at-a-glance + decision + thesis (the "what should I do?" pane).
- *   Header and footer stay full width.
+ * Layout:
+ *   <1024px → 1-column stack
+ *   ≥1024px → 2-column. Left = chart + secondary sections;
+ *             right = at-a-glance + decision + thesis ("what should I do?").
  *
- * Sub-phases C/D fill section bodies; E adds the full state matrix; F
- * polishes footer + interactions and flips canonical /stock/[ticker].
+ * Plan §4 + §17 (responsive). Sub-phases D adds citation drilldown,
+ * E the full state matrix, F the footer + canonical-route flip.
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
@@ -36,7 +33,6 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
       <div className="mx-auto max-w-[1200px] px-4 py-6 md:py-8">
-        {/* Top-nav row */}
         <div className="mb-4 flex items-center justify-between">
           <div className="text-xs text-[var(--surface-text-subtle)]">
             {card
@@ -64,23 +60,22 @@ export function StockCardPage({ ticker }: { ticker: string }) {
           >
             <CardHeader card={card} />
 
-            {/* Body — 2-column on desktop, stacked on mobile */}
             <div className="grid gap-4 p-4 md:p-5 lg:grid-cols-[7fr_5fr] lg:gap-5">
-              {/* Left column — chart + secondary sections */}
+              {/* Left — chart + secondary */}
               <div className="space-y-3 min-w-0">
                 <HeroChart ticker={card.ticker} />
-                <RelationsSection />
-                <NewsSection />
-                <MacroSection />
-                <FundamentalsSection />
-                <TechMomentumSection />
+                <RelationsSection relations={card.relations} />
+                <NewsSection news={card.news} />
+                <MacroSection macro={card.macro} />
+                <FundamentalsSection fundamentals={card.fundamentals} />
+                <TechMomentumSection technical={card.technical} />
               </div>
 
-              {/* Right column — what-do-I-do pane */}
+              {/* Right — what-do-I-do pane */}
               <aside className="space-y-3 min-w-0">
                 <AtAGlancePanel card={card} />
-                <DecisionSection />
-                <ThesisSection />
+                <DecisionSection decision={card.decision} />
+                <ThesisSection thesis={card.thesis} />
               </aside>
             </div>
 
