@@ -1,0 +1,291 @@
+"""SEC EDGAR adapter — US primary (rawFinance + sector + fiscal_year_end).
+
+httpx 직접 호출. SEC EDGAR public API는 무료 + API key 불필요. SEC 의무는
+identifying User-Agent 헤더 (env-driven via SEC_USER_AGENT).
+
+Spec §6.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from app.services.external_data_adapters.base import (
+    ExternalAdapter,
+    FinancialSeries,
+    IdentityFacts,
+    SectorInfo,
+)
+from app.services.external_data_adapters.cache import ResultCache
+from app.services.external_data_adapters.constants import (
+    SIC_MAPPING_HIT_CONFIDENCE,
+    SIC_MAPPING_MISS_CONFIDENCE,
+)
+
+logger = logging.getLogger(__name__)
+
+SEC_DATA_BASE = "https://data.sec.gov"
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+
+_DATA_DIR = Path(__file__).parent.parent.parent / "data"
+_GICS_PATH = _DATA_DIR / "sic_to_gics.json"
+_TICKER_CACHE_PATH = _DATA_DIR / "sec_company_tickers.json"
+
+
+def _user_agent() -> str:
+    """SEC 의무: 요청자 식별 가능한 User-Agent. env에서만 읽음."""
+    ua = os.environ.get("SEC_USER_AGENT")
+    if not ua:
+        raise RuntimeError(
+            "SEC_USER_AGENT env not set — see backend/.env.example"
+        )
+    return ua
+
+
+class SecEdgarAdapter(ExternalAdapter):
+    """US primary. Direct httpx — no SDK, no MCP."""
+
+    def __init__(
+        self,
+        cache: ResultCache | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._cache = cache or ResultCache()
+        self._injected_client = client  # tests inject MockTransport-backed client
+        self._client: httpx.AsyncClient | None = None
+        self._gics_map: dict[str, dict] | None = None
+        self._ticker_cik_map: dict[str, str] | None = None
+        # SEC documents 10 req/sec; we stay well under but cap concurrency anyway.
+        self._sem = asyncio.Semaphore(8)
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._injected_client is not None:
+            return self._injected_client
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                headers={"User-Agent": _user_agent()},
+                timeout=10.0,
+            )
+        return self._client
+
+    async def fetch_company_facts(self, cik: str) -> dict:
+        url = f"{SEC_DATA_BASE}/api/xbrl/companyfacts/CIK{cik.zfill(10)}.json"
+        client = await self._get_client()
+        async with self._sem:
+            r = await _retry_get(client, url)
+        return r.json()
+
+    async def fetch_financial_series(self, ticker: str) -> FinancialSeries:
+        return await self._cache.get_or_fetch(
+            (ticker, "financials"),
+            lambda: self._fetch_financials(ticker),
+        )
+
+    async def _fetch_financials(self, ticker: str) -> FinancialSeries:
+        cik = await self._ticker_to_cik(ticker)
+        facts = await self.fetch_company_facts(cik)
+        rows = _normalize_xbrl_to_rows(facts)
+        if not rows:
+            logger.warning(
+                "sec_edgar empty XBRL units for %s (CIK %s)", ticker, cik
+            )
+        return FinancialSeries(
+            ticker=ticker.upper(),
+            period_type="annual",
+            rows=rows,
+            source="sec_edgar",
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+    async def fetch_sector(self, ticker: str) -> SectorInfo:
+        cik = await self._ticker_to_cik(ticker)
+        sub = await self._fetch_submissions(cik)
+        sic = str(sub.get("sic", "")).zfill(4) if sub.get("sic") else ""
+        gics = self._gics_for_sic(sic)
+        if gics is None:
+            logger.warning(
+                "sec_edgar SIC %s for %s unmapped — sector=Unknown", sic, ticker
+            )
+            return SectorInfo(
+                sector="Unknown",
+                industry_group=None,
+                confidence=SIC_MAPPING_MISS_CONFIDENCE,
+                source="sec_edgar_sic",
+            )
+        return SectorInfo(
+            sector=gics["sector"],
+            industry_group=gics.get("industry_group"),
+            confidence=SIC_MAPPING_HIT_CONFIDENCE,
+            source="sec_edgar_sic",
+        )
+
+    async def fetch_fiscal_year_end(self, ticker: str) -> str | None:
+        cik = await self._ticker_to_cik(ticker)
+        sub = await self._fetch_submissions(cik)
+        raw = sub.get("fiscalYearEnd")  # SEC returns "MMDD" or "0930"
+        if not isinstance(raw, str) or len(raw) != 4 or not raw.isdigit():
+            return None
+        return f"{raw[:2]}-{raw[2:]}"
+
+    async def _fetch_submissions(self, cik: str) -> dict:
+        # Cache submissions by CIK — both fetch_sector and fetch_fiscal_year_end
+        # hit it, but for the same ticker that's the same CIK.
+        return await self._cache.get_or_fetch(
+            (cik, "submissions"),
+            lambda: self._do_fetch_submissions(cik),
+        )
+
+    async def _do_fetch_submissions(self, cik: str) -> dict:
+        url = f"{SEC_DATA_BASE}/submissions/CIK{cik.zfill(10)}.json"
+        client = await self._get_client()
+        async with self._sem:
+            r = await _retry_get(client, url)
+        return r.json()
+
+    async def _ticker_to_cik(self, ticker: str) -> str:
+        if self._ticker_cik_map is None:
+            self._ticker_cik_map = await self._load_ticker_cik_map()
+        cik = self._ticker_cik_map.get(ticker.upper())
+        if cik is None:
+            raise ValueError(
+                f"SEC EDGAR has no CIK for ticker {ticker!r}"
+            )
+        return cik
+
+    async def _load_ticker_cik_map(self) -> dict[str, str]:
+        if _TICKER_CACHE_PATH.exists():
+            try:
+                payload = json.loads(_TICKER_CACHE_PATH.read_text(encoding="utf-8"))
+                return _parse_ticker_payload(payload)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("ticker→CIK cache read failed: %s", e)
+        client = await self._get_client()
+        async with self._sem:
+            r = await _retry_get(client, SEC_TICKERS_URL)
+        payload = r.json()
+        try:
+            _DATA_DIR.mkdir(parents=True, exist_ok=True)
+            _TICKER_CACHE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError as e:
+            logger.warning("ticker→CIK cache write failed: %s", e)
+        return _parse_ticker_payload(payload)
+
+    def _gics_for_sic(self, sic: str) -> dict | None:
+        if self._gics_map is None:
+            self._gics_map = _load_gics_map()
+        return self._gics_map.get(sic)
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers (pure; trivially testable in isolation)
+# ---------------------------------------------------------------------------
+
+
+def _parse_ticker_payload(payload: Any) -> dict[str, str]:
+    """SEC `company_tickers.json` → {ticker: cik_str}.
+
+    Payload format (numeric keys → entry dicts):
+        {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."}, ...}
+    """
+    out: dict[str, str] = {}
+    if not isinstance(payload, dict):
+        return out
+    for entry in payload.values():
+        if not isinstance(entry, dict):
+            continue
+        ticker = entry.get("ticker")
+        cik_int = entry.get("cik_str")
+        if isinstance(ticker, str) and isinstance(cik_int, int):
+            out[ticker.upper()] = str(cik_int)
+    return out
+
+
+async def _retry_get(
+    client: httpx.AsyncClient, url: str, max_attempts: int = 3
+) -> httpx.Response:
+    """httpx GET with exponential backoff on 429/5xx; 4xx raises immediately."""
+    delay = 0.5
+    last: httpx.Response | None = None
+    for attempt in range(1, max_attempts + 1):
+        r = await client.get(url)
+        last = r
+        if r.status_code < 400:
+            return r
+        if r.status_code == 429 or 500 <= r.status_code < 600:
+            if attempt < max_attempts:
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+        # 4xx (non-429) or final retry exhaustion
+        r.raise_for_status()
+    assert last is not None
+    last.raise_for_status()
+    return last  # pragma: no cover (raise_for_status above always raises)
+
+
+def _load_gics_map() -> dict[str, dict]:
+    if not _GICS_PATH.exists():
+        logger.warning(
+            "sic_to_gics.json missing at %s — all SIC fall to Unknown",
+            _GICS_PATH,
+        )
+        return {}
+    try:
+        payload = json.loads(_GICS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("sic_to_gics.json load failed: %s", e)
+        return {}
+    # Strip metadata keys (e.g., "_comment").
+    return {k: v for k, v in payload.items() if not k.startswith("_") and isinstance(v, dict)}
+
+
+def _normalize_xbrl_to_rows(facts: dict) -> list[dict]:
+    """XBRL company facts → annual FY rows. Phase A: minimal taxonomy."""
+    if not isinstance(facts, dict):
+        return []
+    facts_inner = facts.get("facts", {})
+    if not isinstance(facts_inner, dict):
+        return []
+    us_gaap = facts_inner.get("us-gaap", {})
+    if not isinstance(us_gaap, dict):
+        return []
+
+    by_period: dict[str, dict] = {}
+    _collect_fy(us_gaap.get("Revenues"), by_period, "revenue")
+    # Newer GAAP synonym used by Apple, Tesla, etc.
+    _collect_fy(
+        us_gaap.get("RevenueFromContractWithCustomerExcludingAssessedTax"),
+        by_period, "revenue",
+    )
+    _collect_fy(us_gaap.get("NetIncomeLoss"), by_period, "net_income")
+    _collect_fy(us_gaap.get("Assets"), by_period, "assets")
+
+    return sorted(by_period.values(), key=lambda r: r.get("period", ""))
+
+
+def _collect_fy(fact: Any, accumulator: dict[str, dict], key: str) -> None:
+    if not isinstance(fact, dict):
+        return
+    units = fact.get("units")
+    if not isinstance(units, dict):
+        return
+    for entries in units.values():
+        if not isinstance(entries, list):
+            continue
+        for e in entries:
+            if not isinstance(e, dict) or e.get("fp") != "FY":
+                continue
+            fy = e.get("fy")
+            if not isinstance(fy, int):
+                continue
+            period = str(fy)
+            row = accumulator.setdefault(period, {"period": period})
+            row.setdefault(key, e.get("val"))  # first match per FY wins
+        break  # one unit (USD) per fact is enough; ignore USD-per-share variants
