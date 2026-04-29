@@ -1,10 +1,11 @@
 """Dartlab adapter — KR DART primary + US analysis() boost layer.
 
-Direct calls to dartlab Python library (Apache 2.0). MCP `_executeTool` is
-bypassed entirely — 0.9.26 has broken tool dispatchers (companyFinancials,
-companyRatios, searchCompany, ...). Re-instantiates Company per call
-(HF disk cache makes warm calls ~0.45s); only normalized output is held by
-ResultCache. The 1.5GB Company object never sits in our cache (spec §2 #13).
+Direct calls to the dartlab Python library (Apache 2.0). The MCP tool
+dispatcher is bypassed entirely — 0.9.26 ships broken dispatchers for
+companyFinancials, companyRatios, searchCompany, etc. Re-instantiates
+Company per call (HF disk cache makes warm calls ~0.45s); only normalized
+output is held by ResultCache. The 1.5GB Company object never sits in our
+cache (spec §2 #13).
 
 US is a boost layer here, not primary. `Company('TSLA').rawFinance` raises
 AttributeError, and `companyAnalysis` cold load is ~21s. SEC EDGAR is the
