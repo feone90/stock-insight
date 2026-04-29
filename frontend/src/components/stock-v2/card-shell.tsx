@@ -1,14 +1,15 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
+import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
+import { AtAGlancePanel } from "./at-a-glance-panel";
+import { CardHeader } from "./card-header";
+import { HeroChart } from "./hero-chart";
 import {
-  AtAGlancePanel,
   CardFooter,
-  CardHeader,
   DecisionSection,
   FundamentalsSection,
-  HeroChart,
   MacroSection,
   NewsSection,
   RelationsSection,
@@ -17,21 +18,25 @@ import {
 } from "./placeholders";
 
 /**
- * StockCardPage shell — card outer container, theme toggle, and 7-section
- * accordion. Concrete content is filled across sub-phase B–F.
+ * StockCardPage shell — outer container, theme toggle, fetch hook, and the
+ * 7-section accordion. Sub-phase C/D fill the section bodies; sub-phase E
+ * adds the loading/empty/error/stale states; sub-phase F finishes the footer.
  *
- * Plan §4 (component tree).
+ * Plan §4 (component tree), §5 (data flow).
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
+  const { card, state } = useStockCard(ticker);
 
   return (
     <div className="min-h-screen bg-[var(--surface-card)] text-[var(--surface-text)]">
       <div className="mx-auto max-w-[1024px] px-4 py-6">
-        {/* Top-nav row — toggle is the only chrome in sub-phase A */}
+        {/* Top-nav row — toggle + meta */}
         <div className="mb-4 flex items-center justify-between">
           <div className="text-xs text-[var(--surface-text-muted)]">
-            ticker: {ticker} · v2 카드 (sub-phase A scaffold)
+            {card
+              ? `v2 카드 · schema ${card.schema_version} · persona ${card.persona_version}`
+              : `v2 카드 · ${ticker}`}
           </div>
           <button
             type="button"
@@ -43,22 +48,38 @@ export function StockCardPage({ ticker }: { ticker: string }) {
           </button>
         </div>
 
-        <article className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden">
-          {/* Server data not wired yet — pass null until sub-phase B */}
-          <CardHeader />
-          <HeroChart />
-          <AtAGlancePanel />
-          <div className="p-4 space-y-3">
-            <ThesisSection />
-            <TechMomentumSection />
-            <RelationsSection />
-            <NewsSection />
-            <MacroSection />
-            <FundamentalsSection />
-            <DecisionSection />
+        {/* States are sub-phase E's full responsibility; this is the minimum
+            so the page doesn't render with `null` props before fetch resolves. */}
+        {state === "loading" && !card ? (
+          <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] p-12 text-center text-sm text-[var(--surface-text-muted)]">
+            분석 데이터 불러오는 중...
           </div>
-          <CardFooter />
-        </article>
+        ) : state === "error" && !card ? (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-6 text-sm">
+            <p className="font-medium text-red-700 dark:text-red-300">
+              최근 분석 결과를 가져오지 못했어요.
+            </p>
+            <p className="mt-1 text-[var(--surface-text-muted)]">
+              새로고침해주세요. (sub-phase E에서 재시도 버튼 추가 예정)
+            </p>
+          </div>
+        ) : card ? (
+          <article className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden">
+            <CardHeader card={card} />
+            <HeroChart ticker={card.ticker} />
+            <AtAGlancePanel card={card} />
+            <div className="p-4 space-y-3">
+              <ThesisSection />
+              <TechMomentumSection />
+              <RelationsSection />
+              <NewsSection />
+              <MacroSection />
+              <FundamentalsSection />
+              <DecisionSection />
+            </div>
+            <CardFooter />
+          </article>
+        ) : null}
       </div>
     </div>
   );

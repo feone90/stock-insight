@@ -1,49 +1,14 @@
 "use client";
 
 /**
- * Placeholder components for sub-phase B–F.
+ * Placeholder section components — sub-phase C/D fill content, sub-phase F
+ * fills the footer.
  *
- * Each export is a stub with the correct prop type so `card-shell.tsx`
- * compiles today. Sub-phase B fills CardHeader / HeroChart / AtAGlancePanel /
- * CardFooter; sub-phase C+D fill the 7 sections; sub-phase E adds states.
- *
- * One file rather than 11 placeholder files — they get split out as each
- * sub-phase makes one of them real.
+ * `CardHeader`, `HeroChart`, `AtAGlancePanel` graduated to their own files
+ * during sub-phase B and are no longer placeholders.
  */
 
 import { SectionShell } from "./section-shell";
-
-// Sub-phase B introduces the StockCard prop type; placeholders are zero-arg today.
-
-export function CardHeader() {
-  return (
-    <header className="border-b border-[var(--surface-border)] p-4">
-      <div className="text-2xl md:text-3xl font-bold">[CardHeader]</div>
-      <div className="text-sm text-[var(--surface-text-muted)]">
-        sub-phase B — ticker · name · market · stance · price · asof
-      </div>
-    </header>
-  );
-}
-
-export function HeroChart() {
-  return (
-    <div className="h-60 md:h-80 border-b border-[var(--surface-border)] flex items-center justify-center text-[var(--surface-text-muted)]">
-      [HeroChart] — sub-phase B (lightweight-charts v5 reuse)
-    </div>
-  );
-}
-
-export function AtAGlancePanel() {
-  return (
-    <div className="border-b border-[var(--surface-border)] bg-[var(--surface-glance)] p-4">
-      <div className="text-base font-medium">[At-a-glance]</div>
-      <div className="text-sm text-[var(--surface-text-muted)]">
-        sub-phase B — Final Grade · Stance · Entry Stage 3-tile + one_line
-      </div>
-    </div>
-  );
-}
 
 export function ThesisSection() {
   return (

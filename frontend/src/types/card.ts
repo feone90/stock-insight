@@ -1,0 +1,196 @@
+/**
+ * Frontend mirror of backend `StockCard` Pydantic schema.
+ *
+ * Source of truth: `backend/app/schemas/card.py`. Keep in sync manually for now;
+ * P5 polish introduces an automated generator (pydantic-to-ts / openapi-typescript).
+ */
+
+export type SourceType =
+  | "db"
+  | "market_data"
+  | "news"
+  | "disclosure"
+  | "web"
+  | "curated_relation";
+
+export type InterpretationKind = "model_generated" | "rule_based";
+
+export interface Citation {
+  id: number;
+  source_type: SourceType;
+  label: string;
+  url?: string | null;
+  timestamp?: string | null; // ISO 8601
+}
+
+export interface Interpretation {
+  kind: InterpretationKind;
+  based_on: number[];
+  rationale?: string | null;
+}
+
+export interface Claim {
+  text: string;
+  citations: number[];
+  interpretation?: Interpretation | null;
+}
+
+export type Stance = "BUY" | "WATCH" | "REJECT";
+export type EntryStage = "ENTER" | "WAIT" | "REJECT";
+export type FinalGrade = "S" | "A" | "B" | "C" | "D";
+export type GradeDelta = "up" | "down" | "same";
+export type RelationType =
+  | "peer"
+  | "supply_upstream"
+  | "supply_downstream"
+  | "group"
+  | "theme"
+  | "macro";
+export type NewsImpact = "positive" | "negative" | "mixed" | "neutral";
+export type CatalystDirection = "positive" | "negative" | "mixed";
+export type ScenarioName = "BULL" | "BASE" | "BEAR";
+export type MaStack = "정배열" | "역배열" | "혼조";
+export type RefreshState = "fresh" | "stale" | "loading" | "error";
+
+export interface GlanceVerdict {
+  final_grade: FinalGrade;
+  grade_delta?: GradeDelta | null;
+  stance: Stance;
+  entry_stage: EntryStage;
+  one_line: string;
+  citations: number[];
+}
+
+export interface TechMomentum {
+  rsi_14: number | null;
+  mfi_14: number | null;
+  atr_pct: number | null;
+  cmf_20: number | null;
+  obv_ratio: number | null;
+  ma_stack: MaStack | null;
+  rvol_20: number | null;
+  box_position: string | null;
+  summary_line: string;
+  citations: number[];
+  interpretation?: Interpretation | null;
+}
+
+export interface Relation {
+  target_ticker: string;
+  target_name: string;
+  relation_type: RelationType;
+  strength: number;
+  today_change_pct?: number | null;
+  notes?: string | null;
+  citation_ids: number[];
+}
+
+export interface RelationsSummary {
+  one_line: string;
+  relations: Relation[];
+  citations: number[];
+}
+
+export interface NewsItem {
+  title: string;
+  source: string;
+  url: string;
+  published_at: string;
+  impact: NewsImpact;
+  summary: string;
+  citation_id: number;
+}
+
+export interface MacroSensitivity {
+  factor: string;
+  beta: number;
+  direction: "positive" | "negative" | "neutral";
+}
+
+export interface MacroContext {
+  one_line: string;
+  vix: number | null;
+  fx_pairs: Record<string, number>;
+  us_10y: number | null;
+  sensitivities: MacroSensitivity[];
+  upcoming_events: string[];
+  citations: number[];
+}
+
+export interface Fundamentals {
+  per?: number | null;
+  pbr?: number | null;
+  market_cap_krw?: number | null;
+  dividend_yield?: number | null;
+  per_5y_z?: number | null;
+  citations: number[];
+}
+
+export interface Catalyst {
+  when: string;
+  event: string;
+  impact_estimate: string;
+  direction: CatalystDirection;
+  citation_ids: number[];
+}
+
+export interface Scenario {
+  name: ScenarioName;
+  probability: number;
+  scenario_price: number | null;
+  scenario_change_pct: number | null;
+  rationale: string;
+}
+
+export interface Thesis {
+  core_thesis: string;
+  supports: Claim[];
+  opposes: Claim[];
+  catalysts: Catalyst[];
+  no_catalysts_reason?: string | null;
+  scenarios: Scenario[];
+  citations: number[];
+}
+
+export interface Decision {
+  stance: Stance;
+  sizing_note: string;
+  support_price: number | null;
+  risk_threshold: number | null;
+  note: string;
+  citations: number[];
+  interpretation?: Interpretation | null;
+}
+
+export interface StockCard {
+  // Stock metadata
+  ticker: string;
+  name_ko: string;
+  name_en: string;
+  market: string;
+  sector: string;
+  tags: string[];
+  price: number;
+  change: number;
+  change_pct: number;
+  asof: string | null;
+
+  // Analytical content
+  glance: GlanceVerdict;
+  thesis: Thesis;
+  technical: TechMomentum;
+  relations: RelationsSummary;
+  news: NewsItem[];
+  macro: MacroContext;
+  fundamentals: Fundamentals;
+  decision: Decision;
+
+  citations: Citation[];
+
+  // Server metadata
+  analysis_id: string;
+  generated_at: string;
+  persona_version: string;
+  schema_version: string;
+  refresh_state: RefreshState;
+}
