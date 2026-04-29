@@ -129,3 +129,28 @@
     @apply font-sans;
   }
 }
+
+/* === v2 stock card design tokens (P2 sub-phase A) ===
+ * See frontend/src/lib/design-tokens.ts for the full table. Only `surface-*`
+ * is wired here; verdict / grade / chart / cite / relation tokens stay JS-side
+ * until components consume them in sub-phase B/C/D.
+ */
+:root {
+  --surface-card: #ffffff;
+  --surface-section: #fafafa;
+  --surface-glance: #f5f0fe;
+  --surface-decision: #f0fdf4;
+  --surface-border: #e5e5e9;
+  --surface-text: #1a1a22;
+  --surface-text-muted: #6b6b75;
+}
+
+.dark {
+  --surface-card: #0f0f14;
+  --surface-section: #16161e;
+  --surface-glance: #1e1838;
+  --surface-decision: #0a1f12;
+  --surface-border: #252530;
+  --surface-text: #e0e0e8;
+  --surface-text-muted: #9ca3af;
+}
