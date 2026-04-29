@@ -295,6 +295,11 @@ spec §18 acceptance 중 frontend 의존 항목 모두 그린:
 - [ ] `/chat` 페이지 진입점은 P4까지 유지하되 카드 footer "분석에 질문"이 placeholder 모달 trigger
 - [ ] `/universe/:ticker` placeholder 라우트 (P3 anchor만)
 - [ ] UI 카피 금지어 검증 정규식 통과 ("워렌버핏" 등 — spec §18 마지막 항목)
+- [ ] 라이트/다크 양쪽 텍스트 vs surface 배경 contrast ≥4.5:1 (verdict 배지 포함, §17.3)
+- [ ] 폰트 크기 시스템 (모바일 base 16px / 데스크탑 base 14px, §17.2) 적용
+- [ ] 모든 인터랙티브 element 모바일 터치 target ≥44×44px (citation/footer 버튼/collapse 토글/기간 토글, §17.4)
+- [ ] citation `[n]` 클릭/탭 동작 동일 (모달 X, 같은 섹션 source list scroll + 1초 하이라이트, §17.5)
+- [ ] asof 표시 = 절대 시각 + hover/tap 시 상대 시각 tooltip (§17.5)
 
 ## 14. Out of scope (P3+로 위임)
 
@@ -337,6 +342,68 @@ spec §18 acceptance 중 frontend 의존 항목 모두 그린:
 - 모든 사용자 향 UI 텍스트는 한국어 (메모리 §korean_user_facing_text)
 - 코드 identifier / commit / log 메시지는 영어 (CLAUDE.md)
 - spec §6.4 금지어 ("워렌버핏", "전문가급", "강력 매수", "확실한 수익") UI 카피 0건
+
+---
+
+## 17. Design quality + 반응형 specs (plan-design-review patch)
+
+P2 plan-design-review (2026-04-29) 결과 add-on. 디자인 품질 + 반응형 디테일을 plan-time에 락인. 시각장애/색맹 a11y는 가족 사용자 시나리오에서 out of scope (사용자 명시).
+
+### 17.1 Breakpoints
+
+| 이름 | min-width | 대상 |
+|---|---|---|
+| `mobile` | 375px | iPhone SE / Android |
+| `tablet` | 768px | iPad portrait |
+| `desktop` | 1024px | 일반 노트북 |
+| `wide` | 1280px | 외장 모니터 |
+
+기준: ≥375px에서 1-column 폴백 작동, ≥1024px에서 hero chart + glance 패널 가로 배치.
+
+### 17.2 폰트 크기 시스템
+
+| 토큰 | 모바일 (≤768) | 데스크탑 (≥1024) |
+|---|---|---|
+| `text-h1` (ticker, 가격) | 24px | 28px |
+| `text-h2` (섹션 헤더) | 20px | 22px |
+| `text-h3` (sub-section) | 18px | 20px |
+| `text-body` | 16px | 14px |
+| `text-caption` | 14px | 13px |
+| `text-citation` (`[n]` 배지) | 12px | 12px |
+
+근거: 모바일은 viewing distance가 가까워 base 16px, 데스크탑은 더 멀어 14px. h1은 모든 viewport에서 stance/티커 강조 위해 동일하게 큼.
+
+### 17.3 컬러 contrast 검증
+
+- 라이트 / 다크 양쪽에서 텍스트 vs surface 배경 contrast ratio **≥4.5:1** (가독성 표준, 일반 사용자 다크모드 가독성 보장 — 시각장애 a11y와 무관)
+- verdict 배지 (BUY 녹색 / WATCH 노랑 / REJECT 빨강) — 배지 배경 vs 텍스트 ≥4.5:1
+- 차트 토큰 (spec §12.3) — line color vs grid color 시각적 분리
+
+검증: sub-phase F의 Playwright 시각 회귀에서 contrast 자동 체크 hook (`axe-core` 또는 `pa11y` import — 별도 도구 도입 X, 기존 Playwright runner에 한 번 invoke).
+
+### 17.4 터치 target ≥44px (모바일)
+
+- citation `[n]` 배지: 폰트 12px이지만 padding으로 클릭 영역 ≥44×44px
+- 강제 갱신 / 분석에 질문 footer 버튼: ≥44×44px
+- 섹션 collapse 토글: ≥44×44px
+- 기간 토글 (1D/1W/1M/3M/1Y): ≥44×44px
+- 다크/라이트 토글: ≥44×44px
+
+근거: 손가락 터치 정확도 표준. desktop은 클릭 영역 작아도 OK이지만 같은 컴포넌트라 모바일 기준 적용.
+
+### 17.5 인터랙션 형식
+
+- **citation `[n]`**: 클릭/탭 동작 동일 (모바일/데스크탑) — 같은 섹션 source list로 scroll + 1초 하이라이트. 모달/popup X (인지 부담 회피 + 일관성)
+- **asof 표시**: 절대 시각 + 상대 시각 둘 다
+  - 평소: 절대 시각 (`2026-04-29 14:23 KST`)
+  - hover (desktop) / tap (mobile) 시: 상대 시각 (`2시간 전`) tooltip
+- **기간 토글**: 즉시 차트 갱신 (데이터는 이미 fetch됨, render만 → loading skeleton 0.3s 미만)
+
+### 17.6 hero chart 모바일
+
+- desktop (≥1024px): width 100%, height 320px
+- 모바일 (≤768px): width 100%, height 240px (3:2 비율 유지, header + glance 보이게)
+- 차트 ToolTip (가격/날짜): 터치 시 상단 고정 (손가락이 ToolTip 가리는 거 방지)
 
 ---
 
