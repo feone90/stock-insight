@@ -99,13 +99,14 @@ export async function syncAll(): Promise<SyncAllResult> {
 }
 
 // --- v2 Card API (P2) ---
+// Backend router prefix is `/api/stocks` (not `/api/cards`) — see cards.py.
 
 export async function getStockCard(ticker: string): Promise<StockCard> {
-  return fetchJson(`/api/cards/${ticker}/card`);
+  return fetchJson(`/api/stocks/${ticker}/card`);
 }
 
 export async function refreshStockCard(ticker: string): Promise<StockCard> {
-  return postJson(`/api/cards/${ticker}/refresh`);
+  return postJson(`/api/stocks/${ticker}/refresh`);
 }
 
 // --- Chat API ---

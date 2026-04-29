@@ -23,6 +23,8 @@ from app.services.external_data_adapters.base import (
     IdentityFacts,
     SectorInfo,
 )
+
+__all__ = ["SecEdgarAdapter"]
 from app.services.external_data_adapters.cache import ResultCache
 from app.services.external_data_adapters.constants import (
     SIC_MAPPING_HIT_CONFIDENCE,
@@ -74,6 +76,25 @@ class SecEdgarAdapter(ExternalAdapter):
                 timeout=10.0,
             )
         return self._client
+
+    async def fetch_identity(self, ticker: str) -> IdentityFacts:
+        cik = await self._ticker_to_cik(ticker)
+        sub = await self._fetch_submissions(cik)
+        raw_fye = sub.get("fiscalYearEnd")
+        fiscal_year_end: str | None = None
+        if isinstance(raw_fye, str) and len(raw_fye) == 4 and raw_fye.isdigit():
+            fiscal_year_end = f"{raw_fye[:2]}-{raw_fye[2:]}"
+        return IdentityFacts(
+            ticker=ticker.upper(),
+            name=sub.get("name") or ticker.upper(),
+            market="US",
+            currency="USD",
+            fiscal_year_end=fiscal_year_end,
+            cik=cik,
+            corp_code=None,
+            fetched_at=datetime.now(timezone.utc),
+            source="sec_edgar",
+        )
 
     async def fetch_company_facts(self, cik: str) -> dict:
         url = f"{SEC_DATA_BASE}/api/xbrl/companyfacts/CIK{cik.zfill(10)}.json"
