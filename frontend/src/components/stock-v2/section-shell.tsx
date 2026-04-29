@@ -50,10 +50,12 @@ export function SectionShell({
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left min-h-11 hover:bg-[var(--surface-section-hover)]/50 transition-colors"
         aria-expanded={open}
       >
-        <span className="flex items-center gap-2.5 min-w-0">
-          <span aria-hidden className="text-base">{emoji}</span>
-          <span className="font-semibold text-[var(--surface-text)] truncate">{title}</span>
-          <span className="text-sm text-[var(--surface-text-muted)] truncate">
+        <span className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span aria-hidden className="text-base shrink-0">{emoji}</span>
+          <span className="font-semibold text-[var(--surface-text)] shrink-0">
+            {title}
+          </span>
+          <span className="text-sm text-[var(--surface-text-muted)] truncate min-w-0 flex-1">
             {compact}
           </span>
         </span>
