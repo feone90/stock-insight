@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import date as date_type, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +21,7 @@ from app.schemas.stock import (
     StockResponse,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
 
@@ -73,7 +76,27 @@ async def _get_or_register_stock(ticker: str, db: AsyncSession) -> Stock:
         raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
     if not stock:
         raise HTTPException(status_code=404, detail="종목을 찾을 수 없습니다")
+
+    # P1.5 Phase C: enrich sector + onto auto-population. Fire-and-forget so
+    # adapter latency never blocks the endpoint response; the task uses its own
+    # session because the request session is closed when the response returns.
+    asyncio.create_task(_enrich_stock_async(stock.id, stock.ticker))
     return stock
+
+
+async def _enrich_stock_async(stock_id: int, ticker: str) -> None:
+    """Background sector + peer registration. Failures are swallowed — the
+    next analysis trigger will pick up missing data on its own retry path."""
+    from app.database import async_session
+    from app.services.external_data_adapters.onto_hook import (
+        enrich_stock_after_register,
+    )
+
+    try:
+        async with async_session() as bg_db:
+            await enrich_stock_after_register(stock_id, ticker, bg_db)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("enrich_stock background task for %s failed: %s", ticker, e)
 
 
 @router.get("/{ticker}", response_model=StockDetailResponse)
