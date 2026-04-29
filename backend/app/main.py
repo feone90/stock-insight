@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,10 +17,30 @@ from app.api.chat import router as chat_router
 from app.database import engine
 from app.scheduler import init_scheduler, scheduler
 
+logger = logging.getLogger(__name__)
+
+
+async def _run_prewarm() -> None:
+    """Background prewarm task spawned at app startup. Failures are swallowed —
+    on-demand fetch will populate the cache lazily if prewarm is unavailable."""
+    from app.services.external_data_adapters.loaders import top_favorited_tickers
+    from app.services.external_data_adapters.prewarm import prewarm_favorites
+    try:
+        report = await prewarm_favorites(top_favorited_tickers)
+        logger.info("prewarm complete: %s", report)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("prewarm task failed: %s", e)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_scheduler()
+
+    # P1.5 Phase D: prewarm top favorites in background so the first card
+    # load for popular tickers hits the warm cache (sub-second) instead of
+    # cold (~5s KR / ~21s US).
+    asyncio.create_task(_run_prewarm())
+
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)
