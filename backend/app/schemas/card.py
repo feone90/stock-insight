@@ -9,10 +9,11 @@ Field renames vs early drafts (do not regress):
 - target_change_pct → scenario_change_pct
 - stop_loss → risk_threshold
 """
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 SourceType = Literal[
     "db",
@@ -24,6 +25,9 @@ SourceType = Literal[
 ]
 InterpretationKind = Literal["model_generated", "rule_based"]
 
+_RANGE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\s*[~–—]\s*(\d{4}-\d{2}-\d{2})")
+_SINGLE_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
 
 class Citation(BaseModel):
     id: int
@@ -31,6 +35,37 @@ class Citation(BaseModel):
     label: str
     url: str | None = None
     timestamp: datetime | None = None
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def _normalize_timestamp(cls, v):
+        # LLM occasionally emits non-ISO strings (date ranges, embedded labels,
+        # mojibake). Recover an end-date when a range is present, a single date
+        # when one is embedded; fall back to null otherwise.
+        if v is None or isinstance(v, datetime):
+            return v
+        if not isinstance(v, str):
+            return None
+        s = v.strip()
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            pass
+        m = _RANGE_RE.search(s)
+        if m:
+            try:
+                return datetime.fromisoformat(m.group(2))
+            except ValueError:
+                return None
+        m = _SINGLE_DATE_RE.search(s)
+        if m:
+            try:
+                return datetime.fromisoformat(m.group(0))
+            except ValueError:
+                return None
+        return None
 
 
 class Interpretation(BaseModel):
@@ -230,3 +265,37 @@ class AnalystOutput(BaseModel):
     relations_narrative: RelationsNarrative
     decision: Decision
     interp_citations: list[Citation] = []
+
+    @model_validator(mode="after")
+    def _validate_citation_refs(self) -> "AnalystOutput":
+        # spec §6: "LLM cites non-existent citation ID → retry". Any id
+        # referenced anywhere in the 4 analyst fields must exist in this
+        # output's own interp_citations pool — `engine.compose` handles the
+        # K-offset later, but the LLM is only allowed to cite the pool it
+        # registered itself.
+        valid_ids = {c.id for c in self.interp_citations}
+
+        def _check(ids: list[int], where: str) -> None:
+            for cid in ids:
+                if cid not in valid_ids:
+                    raise ValueError(
+                        f"{where} references citation id {cid} not in interp_citations pool"
+                    )
+
+        _check(self.glance.citations, "glance")
+        _check(self.thesis.citations, "thesis")
+        _check(self.relations_narrative.citations, "relations_narrative")
+        _check(self.decision.citations, "decision")
+        for i, claim in enumerate(self.thesis.supports):
+            _check(claim.citations, f"thesis.supports[{i}]")
+            if claim.interpretation:
+                _check(claim.interpretation.based_on, f"thesis.supports[{i}].interpretation")
+        for i, claim in enumerate(self.thesis.opposes):
+            _check(claim.citations, f"thesis.opposes[{i}]")
+            if claim.interpretation:
+                _check(claim.interpretation.based_on, f"thesis.opposes[{i}].interpretation")
+        for i, cat in enumerate(self.thesis.catalysts):
+            _check(cat.citation_ids, f"thesis.catalysts[{i}]")
+        if self.decision.interpretation:
+            _check(self.decision.interpretation.based_on, "decision.interpretation")
+        return self

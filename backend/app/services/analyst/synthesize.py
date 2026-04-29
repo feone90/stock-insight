@@ -66,7 +66,8 @@ _FIELD_INSTRUCTIONS = """\
 - interp_citations: list[Citation]
   Citation = { id: int, source_type: "db"|"market_data"|"news"|"disclosure"|"web"|"curated_relation",
                label: str, url: str|null, timestamp: str|null }
-  · 해석 풀의 citation은 *드물게* 등장 — 리서처가 가져온 데이터 외에 네가 *새로* 도입한 출처에 한해 등록.
+  · timestamp는 ISO 8601 단일 시점(YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM:SS)만 허용. 범위(YYYY-MM-DD~YYYY-MM-DD), 라벨, 설명문 절대 금지. 모르면 null.
+  · 해석 풀의 citation은 *드물게* 등장 — 리서처가 가져온 데이터 외에 네가 *새로* 도입한 출처에 한해 등록. 등록할 게 없으면 빈 배열 [].
   · 데이터 layer가 이미 채워줄 영역(지표/매크로/재무/뉴스/관계 구조)은 너의 citation으로 등록하지 마라.
   · id는 1부터 순차. 위 4개 필드의 citations: list[int] 는 이 풀의 id를 참조한다.
 
@@ -76,7 +77,7 @@ _FIELD_INSTRUCTIONS = """\
 - catalysts 빈 배열이면 no_catalysts_reason 필수.
 - scenarios는 정확히 BULL/BASE/BEAR 3개. 확률 합 0.95~1.05.
 - supports ≥ 3, opposes ≥ 2 (편향 방지).
-- 모든 citations: list[int] 는 interp_citations에 등록된 id만 참조.
+- 모든 citations / citation_ids / based_on 의 list[int] 는 위 interp_citations에 *직접 등록한* id (1..M)만 참조. 등록 안 한 id 절대 사용 금지. 참조할 게 없으면 빈 배열 [].
 - JSON 객체 1개만 출력. 코드 펜스 / 마크다운 금지.
 """
 
@@ -95,6 +96,10 @@ def _build_prompt(ticker: str, research: dict, retry: bool = False) -> str:
             "\n[재시도] 이전 응답이 스키마 검증 실패. "
             "필수 필드 모두 채우고 enum 정확히. "
             "supports ≥3, opposes ≥2, scenarios 정확히 BULL/BASE/BEAR 3개. "
+            "interp_citations[].timestamp는 ISO 8601 단일 날짜(YYYY-MM-DD)만, "
+            "범위/라벨/설명문 금지, 모르면 null. "
+            "모든 citations/citation_ids/based_on은 interp_citations에 등록한 id만 참조 "
+            "(등록 안 한 id 사용 금지). "
             "JSON 1개만, 코드 펜스 X."
         )
     return "".join(parts)
