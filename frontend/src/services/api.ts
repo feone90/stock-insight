@@ -1,4 +1,5 @@
 import type { Stock, PriceRecord, Analysis } from "@/types/stock";
+import type { StockCard } from "@/types/card";
 import { getToken } from "@/services/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -95,6 +96,16 @@ export async function syncStock(ticker: string): Promise<SyncResult> {
 
 export async function syncAll(): Promise<SyncAllResult> {
   return postJson(`/api/admin/sync/all`);
+}
+
+// --- v2 Card API (P2) ---
+
+export async function getStockCard(ticker: string): Promise<StockCard> {
+  return fetchJson(`/api/cards/${ticker}/card`);
+}
+
+export async function refreshStockCard(ticker: string): Promise<StockCard> {
+  return postJson(`/api/cards/${ticker}/refresh`);
 }
 
 // --- Chat API ---
