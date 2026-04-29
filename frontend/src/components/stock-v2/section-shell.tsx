@@ -42,23 +42,25 @@ export function SectionShell({
 
   return (
     <section
-      className={`rounded-md border border-[var(--surface-border)] ${highlightClass} mb-3`}
+      className={`rounded-xl border border-[var(--surface-border)] ${highlightClass} overflow-hidden`}
     >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left min-h-11"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left min-h-11 hover:bg-[var(--surface-section-hover)]/50 transition-colors"
         aria-expanded={open}
       >
-        <span className="flex items-center gap-2 text-base md:text-sm font-medium">
-          <span aria-hidden>{emoji}</span>
-          <span>{title}</span>
+        <span className="flex items-center gap-2.5 min-w-0">
+          <span aria-hidden className="text-base">{emoji}</span>
+          <span className="font-semibold text-[var(--surface-text)] truncate">{title}</span>
+          <span className="text-sm text-[var(--surface-text-muted)] truncate">
+            {compact}
+          </span>
         </span>
-        {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        <span className="shrink-0 text-[var(--surface-text-subtle)]">
+          {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        </span>
       </button>
-      <div className="px-4 pb-3 text-sm text-[var(--surface-text-muted)]">
-        {compact}
-      </div>
       {open && expanded ? (
         <div className="border-t border-[var(--surface-border)] px-4 py-3">
           {expanded}

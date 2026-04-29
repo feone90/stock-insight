@@ -9,15 +9,15 @@ const STANCE_LABEL = {
 } as const;
 
 const STANCE_BG = {
-  BUY: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+  BUY: "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300 border-emerald-500/30",
   WATCH:
-    "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300",
-  REJECT: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
+    "bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 border-amber-500/30",
+  REJECT: "bg-rose-500/15 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 border-rose-500/30",
 } as const;
 
 /**
- * Card header — ticker · names · market · tags · stance badge · price · asof.
- * Plan §7.1.
+ * Card header — ticker + names + market + tags + stance badge + price + asof.
+ * Spans full card width. Plan §7.1 + post-A design pass.
  */
 export function CardHeader({ card }: { card: StockCard }) {
   const change = card.change ?? 0;
@@ -25,13 +25,12 @@ export function CardHeader({ card }: { card: StockCard }) {
   const sign = change > 0 ? "+" : "";
   const changeColor =
     change > 0
-      ? "text-green-600 dark:text-green-400"
+      ? "text-emerald-600 dark:text-emerald-400"
       : change < 0
-        ? "text-red-600 dark:text-red-400"
+        ? "text-rose-600 dark:text-rose-400"
         : "text-[var(--surface-text-muted)]";
   const currencyMark = card.market === "KR" ? "₩" : card.market === "US" ? "$" : "";
 
-  // asof — show absolute time; tooltip relative time per plan §17.5
   const asofAbsolute = card.asof
     ? new Date(card.asof).toLocaleString("ko-KR", {
         dateStyle: "short",
@@ -41,48 +40,61 @@ export function CardHeader({ card }: { card: StockCard }) {
   const asofRelative = card.asof ? _formatRelative(new Date(card.asof)) : "";
 
   return (
-    <header className="border-b border-[var(--surface-border)] p-4">
-      <div className="flex items-start justify-between gap-4">
+    <header className="px-5 md:px-6 pt-5 md:pt-6 pb-4 md:pb-5 border-b border-[var(--surface-border)]">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        {/* Left: identity + tags + stance */}
         <div className="min-w-0 flex-1">
-          <div className="text-sm text-[var(--surface-text-muted)]">
-            <span className="font-medium text-[var(--surface-text)]">{card.ticker}</span>
-            {card.name_ko ? <> · {card.name_ko}</> : null}
-            {card.name_en ? <> · {card.name_en}</> : null}
-            {card.market ? <> · {card.market}</> : null}
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="text-2xl md:text-3xl font-bold tracking-tight">
+              {card.name_ko || card.ticker}
+            </span>
+            <span className="text-base md:text-lg font-mono text-[var(--surface-text-muted)]">
+              {card.ticker}
+            </span>
+            {card.market ? (
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded border border-[var(--surface-border)] text-[var(--surface-text-muted)]">
+                {card.market}
+              </span>
+            ) : null}
           </div>
-
-          {card.tags?.length ? (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {card.tags.map((t) => (
-                <span
-                  key={t}
-                  className="text-xs rounded-md border border-[var(--surface-border)] px-2 py-0.5"
-                >
-                  {t}
-                </span>
-              ))}
+          {card.name_en ? (
+            <div className="mt-0.5 text-sm text-[var(--surface-text-subtle)]">
+              {card.name_en}
             </div>
           ) : null}
 
-          <div
-            className={`mt-2 inline-flex items-center rounded-md px-2 py-1 text-sm font-medium ${STANCE_BG[card.glance.stance]}`}
-          >
-            {STANCE_LABEL[card.glance.stance]}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-md border px-2.5 py-1 text-sm font-semibold ${STANCE_BG[card.glance.stance]}`}
+            >
+              {STANCE_LABEL[card.glance.stance]}
+            </span>
+            {card.tags?.length
+              ? card.tags.slice(0, 5).map((t) => (
+                  <span
+                    key={t}
+                    className="text-xs rounded-md border border-[var(--surface-border)] px-2 py-0.5 text-[var(--surface-text-muted)]"
+                  >
+                    {t}
+                  </span>
+                ))
+              : null}
           </div>
         </div>
 
-        <div className="text-right shrink-0">
-          <div className="text-2xl md:text-3xl font-bold tabular-nums">
+        {/* Right: price + change + asof */}
+        <div className="text-left md:text-right shrink-0">
+          <div className="text-3xl md:text-[2rem] font-bold tabular-nums leading-tight">
             {currencyMark}
             {card.price.toLocaleString()}
           </div>
-          <div className={`text-sm font-medium tabular-nums ${changeColor}`}>
+          <div className={`text-sm font-semibold tabular-nums ${changeColor}`}>
             {sign}
             {change.toLocaleString()} ({sign}
             {changePct.toFixed(2)}%)
           </div>
           <div
-            className="text-xs text-[var(--surface-text-muted)]"
+            className="mt-1 text-xs text-[var(--surface-text-subtle)]"
             title={asofRelative}
           >
             {asofAbsolute}
@@ -93,7 +105,6 @@ export function CardHeader({ card }: { card: StockCard }) {
   );
 }
 
-/** "2시간 전" / "3분 전" / "방금 전" — relative time in Korean. */
 function _formatRelative(when: Date): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - when.getTime()) / 1000));
   if (diffSec < 60) return "방금 전";

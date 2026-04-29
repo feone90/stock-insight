@@ -130,27 +130,42 @@
   }
 }
 
-/* === v2 stock card design tokens (P2 sub-phase A) ===
- * See frontend/src/lib/design-tokens.ts for the full table. Only `surface-*`
- * is wired here; verdict / grade / chart / cite / relation tokens stay JS-side
- * until components consume them in sub-phase B/C/D.
+/* === v2 stock card design tokens (P2) ===
+ * Light/dark surface system. Glance/decision get subtle accent backgrounds;
+ * the rest of the card sits on `surface-card` with `surface-section` as
+ * recessed inset for collapsible bodies.
  */
 :root {
+  --surface-bg: #f4f5f7;        /* page background — slightly cooler than card */
   --surface-card: #ffffff;
-  --surface-section: #fafafa;
-  --surface-glance: #f5f0fe;
-  --surface-decision: #f0fdf4;
-  --surface-border: #e5e5e9;
-  --surface-text: #1a1a22;
-  --surface-text-muted: #6b6b75;
+  --surface-section: #fafafb;
+  --surface-section-hover: #f3f4f6;
+  --surface-glance: #f7f3ff;    /* subtle violet — at-a-glance accent */
+  --surface-decision: #f0fdf5;  /* subtle green — decision accent */
+  --surface-border: #e6e7eb;
+  --surface-border-strong: #d4d4d8;
+  --surface-text: #18181b;
+  --surface-text-muted: #71717a;
+  --surface-text-subtle: #a1a1aa;
+  --surface-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 4px 12px -2px rgb(0 0 0 / 0.06);
 }
 
 .dark {
-  --surface-card: #0f0f14;
-  --surface-section: #16161e;
-  --surface-glance: #1e1838;
-  --surface-decision: #0a1f12;
-  --surface-border: #252530;
-  --surface-text: #e0e0e8;
-  --surface-text-muted: #9ca3af;
+  --surface-bg: #0a0a0f;        /* deeper than card so the card "lifts" */
+  --surface-card: #131319;
+  --surface-section: #1a1a22;
+  --surface-section-hover: #20202a;
+  --surface-glance: #1d1632;    /* deeper violet */
+  --surface-decision: #0d2018;  /* deeper green */
+  --surface-border: #2a2a36;
+  --surface-border-strong: #3a3a48;
+  --surface-text: #f4f4f5;
+  --surface-text-muted: #a1a1aa;
+  --surface-text-subtle: #71717a;
+  --surface-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.5), 0 8px 24px -6px rgb(0 0 0 / 0.6);
+}
+
+/* Apply page background to body so the card "lifts" off it */
+body {
+  background-color: var(--surface-bg);
 }
