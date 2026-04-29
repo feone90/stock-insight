@@ -16,8 +16,12 @@ class StockRelation(Base):
 
     __tablename__ = "stock_relations"
     __table_args__ = (
+        # Source is part of the unique tuple so concurrent writers (auto
+        # post-save hook + llm_web_search bg refresh) can persist the same
+        # (from, to, type) edge in parallel rows. Spec §9.
         UniqueConstraint(
-            "from_stock_id", "to_target", "relation_type", name="uq_relation_triple"
+            "from_stock_id", "to_target", "relation_type", "source",
+            name="uq_relation_triple",
         ),
         Index("ix_relations_from", "from_stock_id"),
         Index("ix_relations_target", "to_target"),
