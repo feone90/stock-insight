@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.stock import Base
@@ -19,6 +20,11 @@ class Analysis(Base):
     summary: Mapped[str] = mapped_column(Text)
     feedback: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    # v2 additions — nullable for Phase A backwards compat.
+    schema_version: Mapped[str] = mapped_column(String(10), nullable=False, server_default="v1")
+    card_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    persona_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
     keywords: Mapped[list["KeywordDetail"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
     daily_keywords: Mapped[list["DailyKeyword"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")

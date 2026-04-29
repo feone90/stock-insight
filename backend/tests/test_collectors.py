@@ -586,3 +586,48 @@ async def test_sync_news_duplicate(db):
 
     # 두 번째는 0이어야 함 (중복)
     assert result2["news_synced"] == 0
+
+
+# ==================== macro ====================
+
+from contextlib import asynccontextmanager
+from unittest.mock import patch
+
+import pytest_asyncio
+
+from app.collectors.macro import sync_macro_factors
+from app.models.macro_factor import MacroFactor
+
+
+@pytest_asyncio.fixture
+async def db_for_macro(db, monkeypatch):
+    @asynccontextmanager
+    async def _session():
+        yield db
+    monkeypatch.setattr("app.collectors.macro.async_session", _session)
+    return db
+
+
+@pytest.mark.asyncio
+async def test_sync_macro_factors_writes_rows(db_for_macro):
+    db = db_for_macro
+    # Keys are raw yfinance symbols (per YF_FACTORS), not normalized factor keys.
+    # ^TNX is in tenths of a percent (Yahoo quirk) — collector divides by 10.
+    fake = {
+        "^VIX": [("2026-04-28", 18.7)],
+        "^TNX": [("2026-04-28", 46.0)],  # → US10Y 4.6 after collector normalization
+        "XLK": [("2026-04-28", 230.5)],
+    }
+
+    def fake_fetch(symbol: str, days: int):
+        return fake.get(symbol, [])
+
+    with patch("app.collectors.macro._fetch_yf", side_effect=fake_fetch):
+        with patch(
+            "app.collectors.macro._latest_fx", return_value={"USD/KRW": 1378.0}
+        ):
+            result = await sync_macro_factors()
+    assert result["macro_synced"] >= 3
+    rows = (await db.execute(select(MacroFactor))).scalars().all()
+    factors = {r.factor for r in rows}
+    assert "VIX" in factors and "US10Y" in factors and "USD/KRW" in factors

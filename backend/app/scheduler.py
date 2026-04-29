@@ -18,6 +18,9 @@ from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
 from app.collectors.exchange_rate import sync_exchange_rates
+from app.services.analyst.cost import can_proceed
+from app.services.analyst.dedup import unique_favorite_tickers
+from app.services.analyst.engine import analyze
 from app.services.llm.adapter import get_adapter
 from app.services.llm.analyzer import analyze_stock
 
@@ -113,6 +116,40 @@ async def scheduled_sync_job():
     logger.info("Scheduled sync completed: %d stocks synced (%s)", len(synced), ", ".join(synced))
 
 
+async def run_kr_analysis_batch() -> None:
+    """v2 KR market batch — analyze unique KR favorites with cost guard."""
+    if not can_proceed():
+        logger.warning("kr v2 batch skipped: daily budget exceeded")
+        return
+    tickers = await unique_favorite_tickers(markets=["KRX", "KOSPI", "KOSDAQ"])
+    logger.info("kr v2 batch: %d unique tickers", len(tickers))
+    for t in tickers:
+        if not can_proceed():
+            logger.warning("kr v2 batch halted at %s: budget exceeded", t)
+            break
+        try:
+            await analyze(t)
+        except Exception:
+            logger.exception("kr v2 batch analyze failed for %s", t)
+
+
+async def run_us_analysis_batch() -> None:
+    """v2 US market batch — analyze unique US favorites with cost guard."""
+    if not can_proceed():
+        logger.warning("us v2 batch skipped: daily budget exceeded")
+        return
+    tickers = await unique_favorite_tickers(markets=["NASDAQ", "NYSE", "AMEX"])
+    logger.info("us v2 batch: %d unique tickers", len(tickers))
+    for t in tickers:
+        if not can_proceed():
+            logger.warning("us v2 batch halted at %s: budget exceeded", t)
+            break
+        try:
+            await analyze(t)
+        except Exception:
+            logger.exception("us v2 batch analyze failed for %s", t)
+
+
 def init_scheduler():
     """스케줄러를 초기화하고 잡을 등록한다."""
     if not settings.scheduler_enabled:
@@ -121,6 +158,7 @@ def init_scheduler():
 
     tz = ZoneInfo(settings.scheduler_timezone)
 
+    # Phase A keyword sync (legacy, still active)
     morning_h, morning_m = map(int, settings.scheduler_morning.split(":"))
     evening_h, evening_m = map(int, settings.scheduler_evening.split(":"))
 
@@ -137,5 +175,40 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # v2 KR/US split — cron strings configured in .env
+    scheduler.add_job(
+        run_kr_analysis_batch,
+        CronTrigger.from_crontab(settings.schedule_kr_morning, timezone=tz),
+        id="v2_kr_morning",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_kr_analysis_batch,
+        CronTrigger.from_crontab(settings.schedule_kr_afternoon, timezone=tz),
+        id="v2_kr_afternoon",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_us_analysis_batch,
+        CronTrigger.from_crontab(settings.schedule_us_evening, timezone=tz),
+        id="v2_us_evening",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_us_analysis_batch,
+        CronTrigger.from_crontab(settings.schedule_us_night, timezone=tz),
+        id="v2_us_night",
+        replace_existing=True,
+    )
+
     scheduler.start()
-    logger.info("Scheduler started: %s/%s KST", settings.scheduler_morning, settings.scheduler_evening)
+    logger.info(
+        "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s (%s)",
+        settings.scheduler_morning,
+        settings.scheduler_evening,
+        settings.schedule_kr_morning,
+        settings.schedule_kr_afternoon,
+        settings.schedule_us_evening,
+        settings.schedule_us_night,
+        settings.scheduler_timezone,
+    )

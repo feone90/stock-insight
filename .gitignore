@@ -13,3 +13,4 @@ node_modules/
 notes/
 .gstack/
 .playwright-mcp/
+.mcp.json

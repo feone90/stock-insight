@@ -2,26 +2,36 @@
 
 import asyncio
 import os
+import sys
 
-# Override env BEFORE importing anything from `app` so settings doesn't pick up
-# real .env values (DEV_MODE bypass, real API keys, etc.) and tests stay
-# hermetic regardless of the developer's local .env.
-_TEST_ENV_OVERRIDES = {
-    "DEV_MODE": "false",
-    "DART_API_KEY": "",
-    "NAVER_CLIENT_ID": "",
-    "NAVER_CLIENT_SECRET": "",
-    "NEWSAPI_KEY": "",
-    "LLM_API_KEY": "",
-    "LLM_ENDPOINT": "",
-    "LLM_DEPLOYMENT": "",
-    "LLM_MODEL": "",
-    "ADMIN_EMAIL": "",
-    "ADMIN_PASSWORD": "",
-    "SCHEDULER_ENABLED": "false",
-}
-for _k, _v in _TEST_ENV_OVERRIDES.items():
-    os.environ[_k] = _v
+# Smoke tests (opt-in via -m smoke) need REAL .env values — they hit live LLM/Tavily.
+# All other test runs are hermetic: clear secrets so accidental real-API calls fail loudly.
+# Detect a positive `-m smoke` selector while excluding `-m "not smoke"`.
+_RUNNING_SMOKE = False
+for _i, _arg in enumerate(sys.argv):
+    if _arg == "-m" and _i + 1 < len(sys.argv):
+        _expr = sys.argv[_i + 1]
+        if "smoke" in _expr and "not smoke" not in _expr:
+            _RUNNING_SMOKE = True
+        break
+
+if not _RUNNING_SMOKE:
+    _TEST_ENV_OVERRIDES = {
+        "DEV_MODE": "false",
+        "DART_API_KEY": "",
+        "NAVER_CLIENT_ID": "",
+        "NAVER_CLIENT_SECRET": "",
+        "NEWSAPI_KEY": "",
+        "LLM_API_KEY": "",
+        "LLM_ENDPOINT": "",
+        "LLM_DEPLOYMENT": "",
+        "LLM_MODEL": "",
+        "ADMIN_EMAIL": "",
+        "ADMIN_PASSWORD": "",
+        "SCHEDULER_ENABLED": "false",
+    }
+    for _k, _v in _TEST_ENV_OVERRIDES.items():
+        os.environ[_k] = _v
 
 from collections.abc import AsyncGenerator  # noqa: E402
 
@@ -44,13 +54,6 @@ test_engine = create_async_engine(TEST_DB_URL, echo=False)
 test_session_factory = async_sessionmaker(
     test_engine, class_=AsyncSession, expire_on_commit=False
 )
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
