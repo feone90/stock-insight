@@ -65,9 +65,13 @@ async def search(q: str = "", db: AsyncSession = Depends(get_db)):
 
 async def _get_or_register_stock(ticker: str, db: AsyncSession) -> Stock:
     """DB에서 종목을 찾고, 없으면 외부 API로 자동 등록한다."""
+    from app.services.universe import promote_to_tier_2
+
     result = await db.execute(select(Stock).where(Stock.ticker == ticker))
     stock = result.scalar_one_or_none()
     if stock:
+        # P1.7 Phase B: tier 3 → 2 자동 승격 (이미 tier 1/2면 noop).
+        asyncio.create_task(promote_to_tier_2(stock.id))
         return stock
 
     try:
@@ -81,6 +85,8 @@ async def _get_or_register_stock(ticker: str, db: AsyncSession) -> Stock:
     # adapter latency never blocks the endpoint response; the task uses its own
     # session because the request session is closed when the response returns.
     asyncio.create_task(_enrich_stock_async(stock.id, stock.ticker))
+    # P1.7 Phase B: 새로 등록된 종목은 default tier=3 → tier=2로 즉시 승격.
+    asyncio.create_task(promote_to_tier_2(stock.id))
     return stock
 
 

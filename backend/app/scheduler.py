@@ -23,6 +23,7 @@ from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
 from app.services.llm.adapter import get_adapter
 from app.services.llm.analyzer import analyze_stock
+from app.services.universe import nightly_universe_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -201,9 +202,19 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # P1.7 Phase B: nightly reference universe refresh.
+    # KR 시장 open 전 06:00 KST. S&P 500 wikipedia fetch는 비용 0이라 매일 같이 실행.
+    scheduler.add_job(
+        nightly_universe_refresh,
+        CronTrigger(hour=6, minute=0, timezone=tz),
+        id="universe_refresh_daily",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
-        "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s (%s)",
+        "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s "
+        "+ universe refresh 06:00 (%s)",
         settings.scheduler_morning,
         settings.scheduler_evening,
         settings.schedule_kr_morning,
