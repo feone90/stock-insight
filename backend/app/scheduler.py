@@ -18,11 +18,19 @@ from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
 from app.collectors.exchange_rate import sync_exchange_rates
+from app.collectors.fred import sync_fred
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
 from app.services.llm.adapter import get_adapter
 from app.services.llm.analyzer import analyze_stock
+from app.services.ontology import (
+    extract_news_relations_for_universe,
+    extract_sec_contracts_for_universe,
+    universe_wide_sector_match,
+    verify_inverse_signals,
+)
+from app.services.universe import nightly_universe_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +141,95 @@ async def run_kr_analysis_batch() -> None:
             logger.exception("kr v2 batch analyze failed for %s", t)
 
 
+async def run_sec_8k_extraction() -> None:
+    """Nightly SEC 8-K Item 1.01 extraction over the US Tier 1+2 universe.
+
+    Conservative defaults — `limit=50` cap + `sleep=0.5s` SEC pacing. Density
+    measured at backfill: ~2.5 contract rows / 30 ticker / week. Daily run with
+    a 2-day window means each filing is seen ~twice (idempotent ON CONFLICT).
+
+    P1.6 v2 — plan §12 v2 step.
+    """
+    from app.services.analyst.cost import can_proceed
+
+    if not can_proceed():
+        logger.warning("sec_8k extraction skipped: daily LLM budget exceeded")
+        return
+
+    since = date.today() - timedelta(days=2)
+    try:
+        summaries = await extract_sec_contracts_for_universe(
+            since=since, limit=50, sleep_between=0.5
+        )
+    except Exception as e:  # noqa: BLE001 — never crash the scheduler loop
+        logger.exception("sec_8k extraction failed: %s", e)
+        return
+
+    filings = sum(s.get("filings_seen", 0) for s in summaries)
+    upserted = sum(s.get("upserted", 0) for s in summaries)
+    buffered = sum(s.get("buffered", 0) for s in summaries)
+    logger.info(
+        "sec_8k nightly: tickers=%d filings=%d upserted=%d buffered=%d",
+        len(summaries), filings, upserted, buffered,
+    )
+
+
+async def run_fred_macro_sync() -> None:
+    """일일 FRED snapshot — VIX, US10Y, FedFunds, 실업률 macro_factors upsert."""
+    async with async_session() as db:
+        try:
+            summary = await sync_fred(db)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("fred sync failed: %s", e)
+            return
+    logger.info("fred nightly: %s", summary)
+
+
+async def run_news_extraction() -> None:
+    """Nightly news LLM RAG over Tier 1+2 universe (P1.6 v3).
+
+    Conservative: limit=50 ticker, 5 articles each, 7-day window. Filters
+    null-content articles. Cost gate via `can_proceed()`.
+    """
+    from app.services.analyst.cost import can_proceed
+
+    if not can_proceed():
+        logger.warning("news extraction skipped: daily LLM budget exceeded")
+        return
+
+    since = date.today() - timedelta(days=7)
+    try:
+        summaries = await extract_news_relations_for_universe(
+            since=since, limit=50, articles_per_run=5, sleep_between=0.3
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("news extraction failed: %s", e)
+        return
+
+    articles = sum(s.get("articles_seen", 0) for s in summaries)
+    upserted = sum(s.get("upserted", 0) for s in summaries)
+    buffered = sum(s.get("buffered", 0) for s in summaries)
+    logger.info(
+        "news nightly: tickers=%d articles=%d upserted=%d buffered=%d",
+        len(summaries), articles, upserted, buffered,
+    )
+
+
+async def run_inverse_verification() -> None:
+    """Nightly price-correlation check on inverse-signal relations (P1.6 v3).
+
+    DB-only (no LLM cost). Boosts confidence when actual price corr confirms
+    LLM-inferred inverse, penalises when it contradicts. Idempotent up to
+    bounded confidence drift per night.
+    """
+    try:
+        summary = await verify_inverse_signals()
+    except Exception as e:  # noqa: BLE001
+        logger.exception("inverse verification failed: %s", e)
+        return
+    logger.info("inverse_verification nightly: %s", summary)
+
+
 async def run_us_analysis_batch() -> None:
     """v2 US market batch — analyze unique US favorites with cost guard."""
     if not can_proceed():
@@ -201,9 +298,64 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # P1.7 Phase B: nightly reference universe refresh.
+    # KR 시장 open 전 06:00 KST. S&P 500 wikipedia fetch는 비용 0이라 매일 같이 실행.
+    scheduler.add_job(
+        nightly_universe_refresh,
+        CronTrigger(hour=6, minute=0, timezone=tz),
+        id="universe_refresh_daily",
+        replace_existing=True,
+    )
+
+    # P1.6 v0: universe-wide sector cross-match. Runs 30 min after the
+    # universe refresh so freshly-promoted Tier 1 entrants are picked up.
+    scheduler.add_job(
+        universe_wide_sector_match,
+        CronTrigger(hour=6, minute=30, timezone=tz),
+        id="ontology_sector_match_daily",
+        replace_existing=True,
+    )
+
+    # P1.6 v2: SEC 8-K Item 1.01 extraction (LLM RAG).
+    # 06:45 KST = 17:45 ET previous day — captures all of the US trading-day's
+    # post-market 8-K filings with a 2-day rolling window for idempotency.
+    scheduler.add_job(
+        run_sec_8k_extraction,
+        CronTrigger(hour=6, minute=45, timezone=tz),
+        id="ontology_sec_8k_daily",
+        replace_existing=True,
+    )
+
+    # P1.6 v3: News-driven competitor / inverse-signal extraction (LLM RAG).
+    scheduler.add_job(
+        run_news_extraction,
+        CronTrigger(hour=6, minute=50, timezone=tz),
+        id="ontology_news_daily",
+        replace_existing=True,
+    )
+
+    # FRED 매크로 일일 snapshot (VIX, US10Y, FedFunds, UNRATE).
+    scheduler.add_job(
+        run_fred_macro_sync,
+        CronTrigger(hour=6, minute=55, timezone=tz),
+        id="macro_fred_daily",
+        replace_existing=True,
+    )
+
+    # P1.6 v3: Price correlation verification of inverse signals (DB-only).
+    # Runs after news extraction so freshly-extracted rows are also verified.
+    scheduler.add_job(
+        run_inverse_verification,
+        CronTrigger(hour=7, minute=0, timezone=tz),
+        id="ontology_inverse_verify_daily",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
-        "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s (%s)",
+        "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s "
+        "+ universe refresh 06:00 + sector_match 06:30 + sec_8k 06:45 "
+        "+ news 06:50 + inverse_verify 07:00 (%s)",
         settings.scheduler_morning,
         settings.scheduler_evening,
         settings.schedule_kr_morning,

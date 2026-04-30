@@ -23,6 +23,7 @@ dependencies = [
     "tavily-python>=0.7.24",
     "pyarrow>=24.0.0",
     "dartlab>=0.9.5",
+    "beautifulsoup4>=4.14.3",
 ]
 
 [dependency-groups]

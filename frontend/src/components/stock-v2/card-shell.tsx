@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon, Sun } from "lucide-react";
+import { Moon, RefreshCw, Sun } from "lucide-react";
 import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import { AtAGlancePanel } from "./at-a-glance-panel";
@@ -28,7 +28,8 @@ import { ThesisSection } from "./thesis-section";
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
-  const { card, state } = useStockCard(ticker);
+  const { card, state, refresh, triggerAnalyze } = useStockCard(ticker);
+  const refreshing = state === "analyzing";
 
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
@@ -39,20 +40,37 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               ? `v2 카드 · schema ${card.schema_version} · persona ${card.persona_version}`
               : `v2 카드 · ${ticker}`}
           </div>
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={mode === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
-            className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11"
-          >
-            {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
+          <div className="flex items-center gap-2">
+            {card ? (
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={refreshing}
+                aria-label="분석 다시 실행"
+                title="분석 다시 실행 (~$0.25, 1분)"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+                {refreshing ? "분석 중..." : "분석 다시"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={mode === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+              className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11"
+            >
+              {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+          </div>
         </div>
 
         {state === "loading" && !card ? (
           <SkeletonCard />
+        ) : state === "analyzing" && !card ? (
+          <AnalyzingCard ticker={ticker} />
         ) : state === "error" && !card ? (
-          <ErrorCard />
+          <ErrorCard ticker={ticker} onAnalyze={triggerAnalyze} />
         ) : card ? (
           <article
             className="rounded-2xl border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden"
@@ -64,7 +82,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               {/* Left — chart + secondary */}
               <div className="space-y-3 min-w-0">
                 <HeroChart ticker={card.ticker} />
-                <RelationsSection relations={card.relations} />
+                <RelationsSection relations={card.relations} ticker={card.ticker} />
                 <NewsSection news={card.news} />
                 <MacroSection macro={card.macro} />
                 <FundamentalsSection fundamentals={card.fundamentals} />
@@ -98,17 +116,45 @@ function SkeletonCard() {
   );
 }
 
-function ErrorCard() {
+function ErrorCard({
+  ticker,
+  onAnalyze,
+}: {
+  ticker: string;
+  onAnalyze: () => Promise<void>;
+}) {
   return (
     <div
-      className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6"
+      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6"
       style={{ boxShadow: "var(--surface-shadow)" }}
     >
-      <p className="font-medium text-red-700 dark:text-red-300">
-        최근 분석 결과를 가져오지 못했어요.
+      <p className="font-medium text-amber-700 dark:text-amber-300">
+        {ticker.toUpperCase()} 카드가 아직 분석되지 않았어요.
       </p>
       <p className="mt-1 text-sm text-[var(--surface-text-muted)]">
-        새로고침해주세요. (sub-phase E에서 재시도 버튼 추가 예정)
+        분석에 30초~1분 정도 걸려요. LLM 비용이 약간 발생합니다 (~$0.25).
+      </p>
+      <button
+        type="button"
+        onClick={onAnalyze}
+        className="mt-3 inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+      >
+        분석 시작
+      </button>
+    </div>
+  );
+}
+
+function AnalyzingCard({ ticker }: { ticker: string }) {
+  return (
+    <div
+      className="rounded-2xl border border-[var(--surface-border)] bg-[var(--surface-card)] p-12 text-center"
+      style={{ boxShadow: "var(--surface-shadow)" }}
+    >
+      <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      <p className="text-sm font-medium">{ticker.toUpperCase()} 분석 중...</p>
+      <p className="mt-1 text-xs text-[var(--surface-text-muted)]">
+        2-stage 파이프라인 (research → synthesize) — 30초~1분.
       </p>
     </div>
   );

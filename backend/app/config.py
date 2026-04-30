@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     schedule_us_evening: str = "0 7 * * 1-5"
     schedule_us_night: str = "30 22 * * 1-5"
 
+    # SEC EDGAR identifying header (P1.5 / P1.6 v2). Adapter reads via os.environ;
+    # declared here so pydantic-settings tolerates the .env line.
+    sec_user_agent: str | None = None
+
+    # FRED (Federal Reserve Economic Data) — VIX, US10Y, FedFunds, etc.
+    fred_api_key: str | None = None
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

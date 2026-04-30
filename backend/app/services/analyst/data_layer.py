@@ -44,6 +44,9 @@ NEWS_SUMMARY_MAX = 300
 RELATIONS_STALE_DAYS = 7
 _VALID_RELATION_TYPES = {
     "peer", "supply_upstream", "supply_downstream", "group", "theme", "macro",
+    # P1.6 v0+ — extracted via sector_match / sec_8k / news / dart_contract.
+    "competitor", "contract_supplier", "contract_customer",
+    "complementary", "regulatory_link",
 }
 _VALID_NEWS_IMPACTS = {"positive", "negative", "mixed", "neutral"}
 
@@ -189,6 +192,7 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
         return []
 
     impacts = await _classify_impacts(raw_items)
+    ko_summaries = await _ko_summarize_english_news(raw_items)
 
     items: list[NewsItem] = []
     for idx, it in enumerate(raw_items):
@@ -207,7 +211,9 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
             url=url,
             timestamp=published_at,
         )
-        summary = (it.get("summary") or it.get("content") or "")[:NEWS_SUMMARY_MAX]
+        # Korean translation when the body was English; otherwise keep raw.
+        raw_summary = (it.get("summary") or it.get("content") or "")
+        summary = ko_summaries.get(idx) or raw_summary[:NEWS_SUMMARY_MAX]
         items.append(
             NewsItem(
                 title=title,
@@ -249,6 +255,14 @@ def _build_relations(
         except (TypeError, ValueError):
             strength = 0.5
         strength = max(0.0, min(1.0, strength))
+        try:
+            confidence = float(r.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+        signal = r.get("signal_direction") or "positive"
+        if signal not in {"positive", "negative", "inverse"}:
+            signal = "positive"
         out.append(
             Relation(
                 target_ticker=target_ticker,
@@ -258,6 +272,12 @@ def _build_relations(
                 today_change_pct=r.get("today_change_pct"),
                 notes=None,  # filled by analyst's relations_narrative at compose
                 citation_ids=[cid],
+                signal_direction=signal,  # type: ignore[arg-type]
+                confidence=confidence,
+                source=r.get("source") or "curated_relation",
+                source_url=r.get("source_url"),
+                valid_from=r.get("valid_from"),
+                valid_until=r.get("valid_until"),
             )
         )
     return out
@@ -283,17 +303,31 @@ async def _fetch_fundamentals(ticker: str) -> dict:
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if not fin:
-            return {"error": "재무 데이터 없음"}
-        return {
-            "per": fin.per,
-            "pbr": fin.pbr,
-            "market_cap_krw": float(fin.market_cap) if fin.market_cap else None,
-            "dividend_yield": fin.dividend_yield,
-            "per_5y_z": None,  # placeholder — needs 5y series; out of scope here
-            "period": fin.period,
-            "label": f"DB · financials ({fin.period})",
-        }
+        if fin:
+            return {
+                "per": fin.per,
+                "pbr": fin.pbr,
+                "market_cap_krw": float(fin.market_cap) if fin.market_cap else None,
+                "dividend_yield": fin.dividend_yield,
+                "per_5y_z": None,  # needs 5y series
+                "period": fin.period,
+                "label": f"DB · financials ({fin.period})",
+            }
+        # Fallback: Stock.market_cap (P1.7 universe seed가 채움). PER/PBR/배당
+        # 수익률 source는 아직 없음 — 솔직하게 None으로 노출. analyst persona가
+        # "PER/PBR이 비어 있어 가격이 비싼지 싼지 숫자로 확인하기 어렵다" 식으로
+        # 가족 사용자에게 상태 설명.
+        if stock.market_cap is not None:
+            return {
+                "per": None,
+                "pbr": None,
+                "market_cap_krw": float(stock.market_cap),
+                "dividend_yield": None,
+                "per_5y_z": None,
+                "period": None,
+                "label": "DB · stocks.market_cap (재무 상세 미수집)",
+            }
+        return {"error": "재무 데이터 없음"}
 
 
 async def _fetch_recent_news(ticker: str) -> dict:
@@ -352,6 +386,7 @@ async def _fetch_relations_data(ticker: str) -> dict:
         latest_refresh: datetime | None = None
         for r in rows:
             tgt = targets.get(r.to_target)
+            metadata = r.extra_metadata or {}
             relations.append(
                 {
                     "target_ticker": r.to_target,
@@ -359,6 +394,13 @@ async def _fetch_relations_data(ticker: str) -> dict:
                     "relation_type": r.relation_type,
                     "strength": r.strength,
                     "today_change_pct": tgt.change_percent if tgt else None,
+                    # P1.6 v0+ — surface discovery signals to the card.
+                    "signal_direction": r.signal_direction or "positive",
+                    "confidence": r.confidence if r.confidence is not None else 0.5,
+                    "source": r.source,
+                    "source_url": metadata.get("source_url") if isinstance(metadata, dict) else None,
+                    "valid_from": r.valid_from.isoformat() if r.valid_from else None,
+                    "valid_until": r.valid_until.isoformat() if r.valid_until else None,
                 }
             )
             if r.refreshed_at and (
@@ -392,6 +434,70 @@ async def _classify_impacts(items: list[dict]) -> dict[int, str]:
         return out
     except Exception as e:  # noqa: BLE001 - degrade quietly
         logger.warning("data_layer news classify failed: %s", e)
+        return {}
+
+
+def _is_mostly_english(text: str) -> bool:
+    """ASCII-letter ratio ≥ 0.5 means the body is in English (or mostly so).
+    Korean / Japanese / Chinese characters all fail this check, so they're
+    served as-is."""
+    if not text:
+        return False
+    sample = text[:600]
+    letters = [c for c in sample if c.isalpha()]
+    if len(letters) < 30:
+        return False
+    ascii_letters = sum(1 for c in letters if c.isascii())
+    return ascii_letters / len(letters) >= 0.5
+
+
+async def _ko_summarize_english_news(items: list[dict]) -> dict[int, str]:
+    """For each item whose body looks English, produce a 1-2 sentence Korean
+    summary in one batch LLM call. KR-language items are skipped.
+
+    Returns {index: ko_summary}. Failures degrade quietly to {} so the news
+    section still renders with the raw body.
+    """
+    en_indices: list[int] = []
+    for i, it in enumerate(items):
+        body = (it.get("summary") or it.get("content") or "")
+        if _is_mostly_english(body):
+            en_indices.append(i)
+    if not en_indices:
+        return {}
+
+    payload_lines: list[str] = []
+    for i in en_indices:
+        body = (items[i].get("summary") or items[i].get("content") or "")[:600]
+        title = items[i].get("title", "")
+        payload_lines.append(f"[{i}] TITLE: {title}\nBODY: {body}")
+    payload = "\n\n".join(payload_lines)
+
+    prompt = (
+        "다음은 영문 뉴스 기사들이다. 각 항목을 한국어 1~2 문장으로 핵심만 요약하라. "
+        "원문 의미를 그대로 전달하되 가족 사용자(비전공자)도 이해할 수 있게 풀어 써라.\n\n"
+        f"{payload}\n\n"
+        '응답은 JSON 객체 1개. 키는 인덱스 문자열, 값은 한국어 요약:\n'
+        '{ "summaries": { "0": "...", "3": "..." } }\n'
+        "자연어 설명 / 코드펜스 X. 빠진 인덱스는 빈 응답."
+    )
+
+    try:
+        from app.services.llm.adapter import get_adapter
+        raw = await get_adapter().generate_json(prompt)
+        import json as _json
+        parsed = _json.loads(raw) if isinstance(raw, str) else raw
+        sums = parsed.get("summaries", {}) if isinstance(parsed, dict) else {}
+        out: dict[int, str] = {}
+        for k, v in sums.items():
+            if isinstance(v, str) and v.strip():
+                try:
+                    out[int(k)] = v.strip()[:NEWS_SUMMARY_MAX]
+                except (TypeError, ValueError):
+                    continue
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ko news summarize failed: %s", e)
         return {}
 
 

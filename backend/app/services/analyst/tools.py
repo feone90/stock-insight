@@ -16,6 +16,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import async_session
 from app.models import PriceHistory, Stock
+from app.models.exchange_rate import ExchangeRate
 from app.models.macro_factor import MacroFactor
 from app.models.relation import StockRelation
 from app.services.analyst import get_analyst_adapter, indicators
@@ -150,23 +151,55 @@ async def get_investor_flow(ticker: str) -> dict:
 
 
 async def get_macro_context() -> dict:
-    """Return latest snapshot of macro factors plus upcoming events placeholder."""
+    """Return latest snapshot of macro factors plus upcoming events placeholder.
+
+    Sources:
+      - `macro_factors` table — VIX, US10Y, sector ETF closes (FRED collector
+        seeds these; empty for now, fills as collector matures).
+      - `exchange_rates` table — currency_pair → rate (sync_exchange_rates
+        seeds USD/KRW, JPY/KRW etc. nightly).
+    """
     async with async_session() as db:
-        rows = (
+        macro_rows = (
             await db.execute(
                 select(MacroFactor).order_by(MacroFactor.date.desc())
             )
         ).scalars().all()
 
         latest: dict[str, tuple[float, date]] = {}
-        for r in rows:
+        for r in macro_rows:
             if r.factor not in latest:
                 latest[r.factor] = (r.value, r.date)
+
+        # ExchangeRate: latest per currency_pair (e.g. "USD/KRW").
+        fx_rows = (
+            await db.execute(
+                select(ExchangeRate).order_by(ExchangeRate.date.desc())
+            )
+        ).scalars().all()
+        latest_fx: dict[str, tuple[float, date]] = {}
+        for r in fx_rows:
+            if r.currency_pair not in latest_fx:
+                latest_fx[r.currency_pair] = (r.rate, r.date)
+
+        # Merge fx into the macro fx_pairs view. macro_factors fx entries
+        # ("USD/KRW" inside MacroFactor) lose to exchange_rates if both present.
+        fx_pairs: dict[str, float] = {
+            k: v[0] for k, v in latest.items() if "/" in k
+        }
+        for pair, (rate, _dt) in latest_fx.items():
+            fx_pairs[pair] = rate
+
+        all_dates: list[date] = [v[1] for v in latest.values()] + [
+            v[1] for v in latest_fx.values()
+        ]
+        latest_dt = max(all_dates, default=None)
+        has_data = bool(latest) or bool(latest_fx)
 
         return {
             "vix": latest.get("VIX", (None, None))[0],
             "us_10y": latest.get("US10Y", (None, None))[0],
-            "fx_pairs": {k: v[0] for k, v in latest.items() if "/" in k},
+            "fx_pairs": fx_pairs,
             "sector_etfs": {
                 k: v[0] for k, v in latest.items() if k in {"XLK", "XLF", "XLE"}
             },
@@ -176,12 +209,12 @@ async def get_macro_context() -> dict:
                     {
                         "source_type": "market_data",
                         "label": (
-                            f"DB · macro_factors (latest per factor as of "
-                            f"{max((v[1] for v in latest.values()), default='n/a')})"
+                            f"DB · macro_factors + exchange_rates (latest "
+                            f"as of {latest_dt or 'n/a'})"
                         ),
                     }
                 ]
-                if latest
+                if has_data
                 else []
             ),
         }

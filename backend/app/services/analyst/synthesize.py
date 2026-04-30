@@ -24,8 +24,8 @@ from app.services.analyst.persona import ANALYST_V1
 
 logger = logging.getLogger(__name__)
 
-RESEARCH_BLOB_MAX = 14000  # leave headroom under spec's 18KB total prompt
-PROMPT_SIZE_SOFT_LIMIT = 18000
+RESEARCH_BLOB_MAX = 14000  # leave headroom under total prompt limit
+PROMPT_SIZE_SOFT_LIMIT = 19000  # bumped from 18K to fit family-friendly copy guidelines
 
 _FIELD_INSTRUCTIONS = """\
 출력 JSON에 다음 4개 분석 필드만 포함하라. 데이터 echoing 금지.

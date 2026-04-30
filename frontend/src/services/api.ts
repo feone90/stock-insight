@@ -109,6 +109,12 @@ export async function refreshStockCard(ticker: string): Promise<StockCard> {
   return postJson(`/api/stocks/${ticker}/refresh`);
 }
 
+export async function analyzeStock(
+  ticker: string
+): Promise<{ status: string; ticker: string }> {
+  return postJson(`/api/stocks/${ticker}/analyze`);
+}
+
 // --- Chat API ---
 
 import type { ChatMessage, SseEvent, ThreadSummary } from "@/types/chat";

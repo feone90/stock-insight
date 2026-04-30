@@ -59,6 +59,20 @@ export function HeroChart({
           horzLines: { color: tokens.grid },
         },
         crosshair: { mode: CrosshairMode.Normal },
+        // 한국어 날짜 표기 — 기본 영문 ("Apr 30 '26")을 "26년 4월 30일"로.
+        localization: {
+          locale: "ko-KR",
+          dateFormat: "yy년 M월 d일",
+        },
+        // 시간축 라벨도 한국어 (월/일 단위 라벨러).
+        timeScale: {
+          tickMarkFormatter: (time: Time) => {
+            const d = typeof time === "string" ? new Date(time) : new Date((time as number) * 1000);
+            const month = d.getMonth() + 1;
+            const day = d.getDate();
+            return day === 1 ? `${month}월` : `${day}일`;
+          },
+        },
         width: node.clientWidth,
         height: window.innerWidth < 768 ? 240 : 320,
       });
@@ -106,5 +120,22 @@ export function HeroChart({
     };
   }, [ticker, days, mode]);
 
-  return <div ref={containerRef} className="w-full h-60 md:h-80" />;
+  return (
+    <div className="relative">
+      <div className="absolute z-10 top-2 left-2 flex items-center gap-3 text-[11px] text-[var(--surface-text-muted)] bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md px-2 py-1 shadow-sm">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-0.5 bg-emerald-500 dark:bg-emerald-400" />
+          종가
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block w-3 h-0 border-t border-dashed"
+            style={{ borderColor: "var(--surface-text-muted)" }}
+          />
+          20일 평균선
+        </span>
+      </div>
+      <div ref={containerRef} className="w-full h-60 md:h-80" />
+    </div>
+  );
 }

@@ -62,6 +62,10 @@ async def list_favorites(user_id: str = Depends(_get_user_id), db: AsyncSession 
 
 @router.post("/{ticker}", response_model=FavoriteActionResponse)
 async def add(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
+    import asyncio
+
+    from app.services.universe import promote_to_tier_2
+
     existing = await db.execute(
         select(Favorite).where(Favorite.user_id == user_id, Favorite.stock_id == stock.id)
     )
@@ -70,6 +74,8 @@ async def add(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_
 
     db.add(Favorite(user_id=user_id, stock_id=stock.id))
     await db.commit()
+    # P1.7 Phase B: 즐겨찾기 추가는 강한 user signal — tier 3 → 2 자동 승격.
+    asyncio.create_task(promote_to_tier_2(stock.id))
     return FavoriteActionResponse(status="added", ticker=stock.ticker)
 
 

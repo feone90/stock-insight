@@ -8,6 +8,7 @@ from app.models.financial import Financial
 from app.models.exchange_rate import ExchangeRate
 from app.models.chat import ChatMessage
 from app.models.relation import StockRelation
+from app.models.relation_candidate import RelationCandidate
 from app.models.macro_factor import MacroFactor
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "ExchangeRate",
     "ChatMessage",
     "StockRelation",
+    "RelationCandidate",
     "MacroFactor",
 ]
