@@ -55,8 +55,10 @@ async def _upsert_all(session: AsyncSession, rows: list[dict]) -> int:
 
 
 async def _upsert_chunk(session: AsyncSession, chunk: list[dict]) -> int:
+    """Insert against the Table directly to bypass ORM `metadata` reserved-name
+    conflict (rows carrying a `metadata` key crash SQLAlchemy bulk update path)."""
     table = StockRelation.__table__
-    stmt = pg_insert(StockRelation).values(chunk)
+    stmt = pg_insert(table).values(chunk)
     stmt = stmt.on_conflict_do_update(
         index_elements=["from_stock_id", "to_target", "relation_type", "source"],
         set_={
