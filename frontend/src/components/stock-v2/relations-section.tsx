@@ -42,7 +42,13 @@ const SOURCE_LABEL: Record<string, string> = {
   llm_web_search: "웹 탐색",
 };
 
-export function RelationsSection({ relations }: { relations: RelationsSummary }) {
+export function RelationsSection({
+  relations,
+  ticker,
+}: {
+  relations: RelationsSummary;
+  ticker?: string;
+}) {
   const count = relations.relations?.length ?? 0;
   const summary = summariseRelations(relations.relations ?? []);
   return (
@@ -54,7 +60,7 @@ export function RelationsSection({ relations }: { relations: RelationsSummary })
           {relations.one_line || (count > 0 ? summary : "관계 데이터 없음")}
         </span>
       }
-      expanded={<RelationsExpanded relations={relations} />}
+      expanded={<RelationsExpanded relations={relations} selfTicker={ticker} />}
     />
   );
 }
@@ -70,11 +76,21 @@ function summariseRelations(rels: Relation[]): string {
   return `${rels.length}개 · ${parts.join(", ")}`;
 }
 
-function RelationsExpanded({ relations }: { relations: RelationsSummary }) {
-  const rels = [...(relations.relations ?? [])].sort(compareRelations);
-  if (rels.length === 0) {
+function RelationsExpanded({
+  relations,
+  selfTicker,
+}: {
+  relations: RelationsSummary;
+  selfTicker?: string;
+}) {
+  const selfIsKR = selfTicker ? isKRTicker(selfTicker) : null;
+  const sorted = [...(relations.relations ?? [])].sort((a, b) =>
+    compareRelations(a, b, selfIsKR),
+  );
+  if (sorted.length === 0) {
     return <p className="text-sm text-[var(--surface-text-muted)]">등록된 관계 없음</p>;
   }
+  const CAP = 24;
   return (
     <div className="space-y-3 text-sm">
       <table className="w-full text-xs">
@@ -90,14 +106,14 @@ function RelationsExpanded({ relations }: { relations: RelationsSummary }) {
           </tr>
         </thead>
         <tbody>
-          {rels.slice(0, 12).map((r, i) => (
+          {sorted.slice(0, CAP).map((r, i) => (
             <RelationRow key={`${r.target_ticker}-${r.relation_type}-${r.source ?? i}`} rel={r} />
           ))}
         </tbody>
       </table>
-      {rels.length > 12 ? (
+      {sorted.length > CAP ? (
         <p className="text-xs text-[var(--surface-text-subtle)]">
-          + {rels.length - 12}개 더 (그래프로 보기 → P3 예정)
+          + {sorted.length - CAP}개 더 (그래프로 보기 → P3 예정)
         </p>
       ) : null}
       <a
@@ -109,6 +125,10 @@ function RelationsExpanded({ relations }: { relations: RelationsSummary }) {
       </a>
     </div>
   );
+}
+
+function isKRTicker(ticker: string): boolean {
+  return /^\d{6}$/.test(ticker);
 }
 
 function RelationRow({ rel }: { rel: Relation }) {
@@ -174,11 +194,18 @@ function SignalBadge({ direction }: { direction?: SignalDirection }) {
   return <span className="text-emerald-600 dark:text-emerald-400" title="긍정 신호">↑</span>;
 }
 
-function compareRelations(a: Relation, b: Relation): number {
+function compareRelations(a: Relation, b: Relation, selfIsKR: boolean | null): number {
   const pa = TYPE_PRIORITY[a.relation_type] ?? 9;
   const pb = TYPE_PRIORITY[b.relation_type] ?? 9;
   if (pa !== pb) return pa - pb;
-  // Tie-break: confidence × strength desc.
+  // Cross-market peer first: KR card surfaces US peers (and vice versa) before
+  // same-market — otherwise ticker ASC pushes the other side off the cap window.
+  if (selfIsKR !== null) {
+    const aCross = isKRTicker(a.target_ticker) !== selfIsKR;
+    const bCross = isKRTicker(b.target_ticker) !== selfIsKR;
+    if (aCross !== bCross) return aCross ? -1 : 1;
+  }
+  // Final tie-break: confidence × strength desc.
   const sa = (a.confidence ?? 0.5) * a.strength;
   const sb = (b.confidence ?? 0.5) * b.strength;
   return sb - sa;

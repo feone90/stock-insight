@@ -82,7 +82,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               {/* Left — chart + secondary */}
               <div className="space-y-3 min-w-0">
                 <HeroChart ticker={card.ticker} />
-                <RelationsSection relations={card.relations} />
+                <RelationsSection relations={card.relations} ticker={card.ticker} />
                 <NewsSection news={card.news} />
                 <MacroSection macro={card.macro} />
                 <FundamentalsSection fundamentals={card.fundamentals} />

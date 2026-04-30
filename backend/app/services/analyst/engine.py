@@ -215,6 +215,13 @@ def compose(
                 today_change_pct=rel.today_change_pct,
                 notes=narrative_note,
                 citation_ids=list(rel.citation_ids),  # data pool, no shift
+                # P1.6 v0+ — discovery + signal expressiveness pass-through.
+                signal_direction=rel.signal_direction,
+                confidence=rel.confidence,
+                source=rel.source,
+                source_url=rel.source_url,
+                valid_from=rel.valid_from,
+                valid_until=rel.valid_until,
             )
         )
 
