@@ -134,6 +134,10 @@ async def _route(
         else:
             candidate_payload.append(_candidate_row(rel, source, metadata))
 
+    # Same batch can hit the same (from, to, type, source) twice when multiple
+    # articles extract the same edge or when forward+reciprocal collapse.
+    # Postgres ON CONFLICT can only act on one tuple per command, so collapse.
+    upsert_payload = _dedupe_payload(upsert_payload)
     upserted = await bulk_upsert_relations(upsert_payload, session=session) if upsert_payload else 0
     buffered = await _bulk_insert_candidates(session, candidate_payload) if candidate_payload else 0
 
@@ -196,6 +200,24 @@ def _candidate_row(rel: ExtractedRelation, source: str, metadata: dict) -> dict:
         "source_url": metadata.get("source_url"),
         "metadata": metadata or None,
     }
+
+
+def _dedupe_payload(payload: list[dict]) -> list[dict]:
+    """Collapse duplicate (from_stock_id, to_target, relation_type, source) rows.
+    Last write wins — later articles / reciprocal pass typically carry the
+    higher-confidence version."""
+    by_key: dict[tuple, dict] = {}
+    for row in payload:
+        key = (
+            row.get("from_stock_id"),
+            row.get("to_target"),
+            row.get("relation_type"),
+            row.get("source"),
+        )
+        existing = by_key.get(key)
+        if existing is None or (row.get("confidence") or 0) >= (existing.get("confidence") or 0):
+            by_key[key] = row
+    return list(by_key.values())
 
 
 async def _bulk_insert_candidates(
