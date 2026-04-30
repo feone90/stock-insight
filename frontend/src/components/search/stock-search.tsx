@@ -57,7 +57,7 @@ export function StockSearch() {
   const handleSelect = (ticker: string) => {
     setOpen(false);
     setQuery("");
-    router.push(`/stock/${ticker}`);
+    router.push(`/v2/stock/${ticker}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

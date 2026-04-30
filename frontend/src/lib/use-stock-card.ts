@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useReducer } from "react";
-import { getStockCard, refreshStockCard } from "@/services/api";
+import { analyzeStock, getStockCard, refreshStockCard } from "@/services/api";
 import type { StockCard } from "@/types/card";
 
-export type CardLoadState = "loading" | "ready" | "error";
+export type CardLoadState = "loading" | "analyzing" | "ready" | "error";
+
+const POLL_INTERVAL_MS = 5000;
+const POLL_MAX_ATTEMPTS = 18; // ~90s — typical analyze pipeline finishes in 30-60s
 
 interface State {
   card: StockCard | null;
@@ -14,6 +17,7 @@ interface State {
 
 type Action =
   | { type: "loadStart" }
+  | { type: "analyzeStart" }
   | { type: "loadOk"; card: StockCard }
   | { type: "loadErr"; error: string };
 
@@ -21,6 +25,8 @@ function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "loadStart":
       return { ...state, status: "loading", error: null };
+    case "analyzeStart":
+      return { ...state, status: "analyzing", error: null };
     case "loadOk":
       return { card: action.card, status: "ready", error: null };
     case "loadErr":
@@ -45,6 +51,7 @@ export function useStockCard(ticker: string): {
   state: CardLoadState;
   error: string | null;
   refresh: () => Promise<void>;
+  triggerAnalyze: () => Promise<void>;
 } {
   const [state, dispatch] = useReducer(reducer, initialState);
 
@@ -80,10 +87,40 @@ export function useStockCard(ticker: string): {
     }
   }, [ticker]);
 
+  const triggerAnalyze = useCallback(async () => {
+    dispatch({ type: "analyzeStart" });
+    try {
+      await analyzeStock(ticker);
+    } catch (e) {
+      dispatch({
+        type: "loadErr",
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    // Poll for completion. Backend creates the Analysis row only when the
+    // pipeline finishes, so 200 from `getStockCard` means we're done.
+    for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const c = await getStockCard(ticker);
+        dispatch({ type: "loadOk", card: c });
+        return;
+      } catch {
+        // 404 expected while analysis is still running.
+      }
+    }
+    dispatch({
+      type: "loadErr",
+      error: "분석이 1분 30초 안에 끝나지 않았어요. 잠시 후 새로고침 해보세요.",
+    });
+  }, [ticker]);
+
   return {
     card: state.card,
     state: state.status,
     error: state.error,
     refresh,
+    triggerAnalyze,
   };
 }

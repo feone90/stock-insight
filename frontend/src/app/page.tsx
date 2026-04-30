@@ -36,7 +36,7 @@ export default function Home() {
           {favorites.map((stock) => (
             <Link
               key={stock.ticker}
-              href={`/stock/${stock.ticker}`}
+              href={`/v2/stock/${stock.ticker}`}
               className="group rounded-lg border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-600"
             >
               <div className="flex items-center justify-between">

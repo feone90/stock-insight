@@ -28,7 +28,7 @@ import { ThesisSection } from "./thesis-section";
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
-  const { card, state } = useStockCard(ticker);
+  const { card, state, triggerAnalyze } = useStockCard(ticker);
 
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
@@ -51,8 +51,10 @@ export function StockCardPage({ ticker }: { ticker: string }) {
 
         {state === "loading" && !card ? (
           <SkeletonCard />
+        ) : state === "analyzing" && !card ? (
+          <AnalyzingCard ticker={ticker} />
         ) : state === "error" && !card ? (
-          <ErrorCard />
+          <ErrorCard ticker={ticker} onAnalyze={triggerAnalyze} />
         ) : card ? (
           <article
             className="rounded-2xl border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden"
@@ -98,17 +100,45 @@ function SkeletonCard() {
   );
 }
 
-function ErrorCard() {
+function ErrorCard({
+  ticker,
+  onAnalyze,
+}: {
+  ticker: string;
+  onAnalyze: () => Promise<void>;
+}) {
   return (
     <div
-      className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6"
+      className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6"
       style={{ boxShadow: "var(--surface-shadow)" }}
     >
-      <p className="font-medium text-red-700 dark:text-red-300">
-        최근 분석 결과를 가져오지 못했어요.
+      <p className="font-medium text-amber-700 dark:text-amber-300">
+        {ticker.toUpperCase()} 카드가 아직 분석되지 않았어요.
       </p>
       <p className="mt-1 text-sm text-[var(--surface-text-muted)]">
-        새로고침해주세요. (sub-phase E에서 재시도 버튼 추가 예정)
+        분석에 30초~1분 정도 걸려요. LLM 비용이 약간 발생합니다 (~$0.25).
+      </p>
+      <button
+        type="button"
+        onClick={onAnalyze}
+        className="mt-3 inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+      >
+        분석 시작
+      </button>
+    </div>
+  );
+}
+
+function AnalyzingCard({ ticker }: { ticker: string }) {
+  return (
+    <div
+      className="rounded-2xl border border-[var(--surface-border)] bg-[var(--surface-card)] p-12 text-center"
+      style={{ boxShadow: "var(--surface-shadow)" }}
+    >
+      <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      <p className="text-sm font-medium">{ticker.toUpperCase()} 분석 중...</p>
+      <p className="mt-1 text-xs text-[var(--surface-text-muted)]">
+        2-stage 파이프라인 (research → synthesize) — 30초~1분.
       </p>
     </div>
   );
