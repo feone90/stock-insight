@@ -57,6 +57,8 @@ class Settings(BaseSettings):
 
     # FRED (Federal Reserve Economic Data) — VIX, US10Y, FedFunds, etc.
     fred_api_key: str | None = None
+    # 기존 `cors_origins: list[str]` (line 14)이 origin allow-list. Vercel 배포 시
+    # Railway env에 CORS_ORIGINS=["https://your-app.vercel.app"] JSON 형식으로 설정.
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

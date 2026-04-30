@@ -113,16 +113,17 @@ function RelationsExpanded({
       </table>
       {sorted.length > CAP ? (
         <p className="text-xs text-[var(--surface-text-subtle)]">
-          + {sorted.length - CAP}개 더 (그래프로 보기 → P3 예정)
+          + {sorted.length - CAP}개 더 — 아래 그래프에서 모두 보기
         </p>
       ) : null}
-      <a
-        href="#"
-        onClick={(e) => e.preventDefault()}
-        className="inline-block text-xs text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
-      >
-        그래프로 보기 → <span className="text-[var(--surface-text-subtle)]">(P3 예정)</span>
-      </a>
+      {selfTicker ? (
+        <a
+          href={`/v2/stock/${selfTicker}/graph`}
+          className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          그래프로 보기 →
+        </a>
+      ) : null}
     </div>
   );
 }

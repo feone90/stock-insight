@@ -62,14 +62,14 @@ export function TopNav() {
   };
 
   return (
-    <nav className="flex items-center justify-between border-b border-slate-800 bg-slate-950 px-6 py-3">
-      <div className="flex items-center gap-4">
-        <Link href="/" className="text-lg font-bold text-slate-50">
+    <nav className="flex flex-wrap items-center justify-between gap-y-2 border-b border-slate-800 bg-slate-950 px-3 py-2 md:px-6 md:py-3">
+      <div className="flex items-center gap-2 md:gap-4">
+        <Link href="/" className="text-base md:text-lg font-bold text-slate-50">
           StockInsight
         </Link>
         <StockSearch />
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
         {isAdmin() && (
           <button
             onClick={handleSyncAll}

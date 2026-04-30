@@ -115,6 +115,22 @@ export async function analyzeStock(
   return postJson(`/api/stocks/${ticker}/analyze`);
 }
 
+// --- Ontology graph (P3) ---
+
+import type { GraphPayload } from "@/types/ontology";
+
+export async function getOntologyGraph(
+  ticker: string,
+  options: { depth?: number; cap?: number; sources?: string; minConfidence?: number } = {},
+): Promise<GraphPayload> {
+  const params = new URLSearchParams({ ticker });
+  if (options.depth) params.set("depth", String(options.depth));
+  if (options.cap) params.set("cap", String(options.cap));
+  if (options.sources) params.set("sources", options.sources);
+  if (options.minConfidence != null) params.set("min_confidence", String(options.minConfidence));
+  return fetchJson(`/api/ontology/graph?${params.toString()}`);
+}
+
 // --- Chat API ---
 
 import type { ChatMessage, SseEvent, ThreadSummary } from "@/types/chat";
