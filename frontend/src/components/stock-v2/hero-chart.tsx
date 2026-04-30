@@ -120,5 +120,22 @@ export function HeroChart({
     };
   }, [ticker, days, mode]);
 
-  return <div ref={containerRef} className="w-full h-60 md:h-80" />;
+  return (
+    <div className="relative">
+      <div className="absolute z-10 top-2 left-2 flex items-center gap-3 text-[11px] text-[var(--surface-text-muted)] bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md px-2 py-1 shadow-sm">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block w-3 h-0.5 bg-emerald-500 dark:bg-emerald-400" />
+          종가
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block w-3 h-0 border-t border-dashed"
+            style={{ borderColor: "var(--surface-text-muted)" }}
+          />
+          20일 평균선
+        </span>
+      </div>
+      <div ref={containerRef} className="w-full h-60 md:h-80" />
+    </div>
+  );
 }
