@@ -75,22 +75,21 @@ def _normalize_kr_row(rec: dict[str, Any]) -> UniverseRow | None:
     if not isinstance(name, str) or not name:
         return None
 
-    sector = rec.get("업종")
-    if not isinstance(sector, str) or not sector:
-        sector = "Unknown"
-
-    products = rec.get("주요제품")
-    industry_group = products if isinstance(products, str) and products else None
+    sector_raw = rec.get("업종")
+    sector = sector_raw if isinstance(sector_raw, str) and sector_raw else "Unknown"
 
     listing_date = rec.get("상장일")
     listing_date_str = listing_date if isinstance(listing_date, str) and listing_date else None
 
+    # 주요제품 (product list) is dropped — not a GICS-style sub-industry, and
+    # often >100 chars (column width). KR Tier 1 rows leave industry_group=None
+    # until P1.6 LLM RAG enriches it.
     return UniverseRow(
-        ticker=ticker,
-        name=name,
+        ticker=ticker[:20],
+        name=name[:100],
         market=market,
-        sector=sector,
-        industry_group=industry_group,
+        sector=sector[:100],
+        industry_group=None,
         listing_date=listing_date_str,
         universe_source=_SOURCE_BY_MARKET[market],
     )

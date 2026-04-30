@@ -77,7 +77,8 @@ async def _bulk_upsert(rows: list[UniverseRow]) -> int:
       - user-touched (tier=2) → preserved
       - reference (tier=1) → preserved
     """
-    now = datetime.now(timezone.utc)
+    # Stock model uses naive DateTime (matching existing `created_at`); store UTC naive.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     total = 0
     async with async_session() as session:
         for chunk in _chunked(rows, _BATCH_SIZE):
