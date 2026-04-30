@@ -192,6 +192,7 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
         return []
 
     impacts = await _classify_impacts(raw_items)
+    ko_summaries = await _ko_summarize_english_news(raw_items)
 
     items: list[NewsItem] = []
     for idx, it in enumerate(raw_items):
@@ -210,7 +211,9 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
             url=url,
             timestamp=published_at,
         )
-        summary = (it.get("summary") or it.get("content") or "")[:NEWS_SUMMARY_MAX]
+        # Korean translation when the body was English; otherwise keep raw.
+        raw_summary = (it.get("summary") or it.get("content") or "")
+        summary = ko_summaries.get(idx) or raw_summary[:NEWS_SUMMARY_MAX]
         items.append(
             NewsItem(
                 title=title,
@@ -417,6 +420,70 @@ async def _classify_impacts(items: list[dict]) -> dict[int, str]:
         return out
     except Exception as e:  # noqa: BLE001 - degrade quietly
         logger.warning("data_layer news classify failed: %s", e)
+        return {}
+
+
+def _is_mostly_english(text: str) -> bool:
+    """ASCII-letter ratio ≥ 0.5 means the body is in English (or mostly so).
+    Korean / Japanese / Chinese characters all fail this check, so they're
+    served as-is."""
+    if not text:
+        return False
+    sample = text[:600]
+    letters = [c for c in sample if c.isalpha()]
+    if len(letters) < 30:
+        return False
+    ascii_letters = sum(1 for c in letters if c.isascii())
+    return ascii_letters / len(letters) >= 0.5
+
+
+async def _ko_summarize_english_news(items: list[dict]) -> dict[int, str]:
+    """For each item whose body looks English, produce a 1-2 sentence Korean
+    summary in one batch LLM call. KR-language items are skipped.
+
+    Returns {index: ko_summary}. Failures degrade quietly to {} so the news
+    section still renders with the raw body.
+    """
+    en_indices: list[int] = []
+    for i, it in enumerate(items):
+        body = (it.get("summary") or it.get("content") or "")
+        if _is_mostly_english(body):
+            en_indices.append(i)
+    if not en_indices:
+        return {}
+
+    payload_lines: list[str] = []
+    for i in en_indices:
+        body = (items[i].get("summary") or items[i].get("content") or "")[:600]
+        title = items[i].get("title", "")
+        payload_lines.append(f"[{i}] TITLE: {title}\nBODY: {body}")
+    payload = "\n\n".join(payload_lines)
+
+    prompt = (
+        "다음은 영문 뉴스 기사들이다. 각 항목을 한국어 1~2 문장으로 핵심만 요약하라. "
+        "원문 의미를 그대로 전달하되 가족 사용자(비전공자)도 이해할 수 있게 풀어 써라.\n\n"
+        f"{payload}\n\n"
+        '응답은 JSON 객체 1개. 키는 인덱스 문자열, 값은 한국어 요약:\n'
+        '{ "summaries": { "0": "...", "3": "..." } }\n'
+        "자연어 설명 / 코드펜스 X. 빠진 인덱스는 빈 응답."
+    )
+
+    try:
+        from app.services.llm.adapter import get_adapter
+        raw = await get_adapter().generate_json(prompt)
+        import json as _json
+        parsed = _json.loads(raw) if isinstance(raw, str) else raw
+        sums = parsed.get("summaries", {}) if isinstance(parsed, dict) else {}
+        out: dict[int, str] = {}
+        for k, v in sums.items():
+            if isinstance(v, str) and v.strip():
+                try:
+                    out[int(k)] = v.strip()[:NEWS_SUMMARY_MAX]
+                except (TypeError, ValueError):
+                    continue
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ko news summarize failed: %s", e)
         return {}
 
 
