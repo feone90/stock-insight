@@ -18,6 +18,7 @@ from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
 from app.collectors.exchange_rate import sync_exchange_rates
+from app.collectors.fred import sync_fred
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
@@ -173,6 +174,17 @@ async def run_sec_8k_extraction() -> None:
     )
 
 
+async def run_fred_macro_sync() -> None:
+    """일일 FRED snapshot — VIX, US10Y, FedFunds, 실업률 macro_factors upsert."""
+    async with async_session() as db:
+        try:
+            summary = await sync_fred(db)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("fred sync failed: %s", e)
+            return
+    logger.info("fred nightly: %s", summary)
+
+
 async def run_news_extraction() -> None:
     """Nightly news LLM RAG over Tier 1+2 universe (P1.6 v3).
 
@@ -319,6 +331,14 @@ def init_scheduler():
         run_news_extraction,
         CronTrigger(hour=6, minute=50, timezone=tz),
         id="ontology_news_daily",
+        replace_existing=True,
+    )
+
+    # FRED 매크로 일일 snapshot (VIX, US10Y, FedFunds, UNRATE).
+    scheduler.add_job(
+        run_fred_macro_sync,
+        CronTrigger(hour=6, minute=55, timezone=tz),
+        id="macro_fred_daily",
         replace_existing=True,
     )
 

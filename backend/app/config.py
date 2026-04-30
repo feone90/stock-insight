@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     # declared here so pydantic-settings tolerates the .env line.
     sec_user_agent: str | None = None
 
+    # FRED (Federal Reserve Economic Data) — VIX, US10Y, FedFunds, etc.
+    fred_api_key: str | None = None
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
