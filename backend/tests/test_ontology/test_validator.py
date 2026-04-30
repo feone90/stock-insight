@@ -35,10 +35,11 @@ async def test_both_sides_universe_persists_to_stock_relations(db) -> None:
         session=db,
     )
 
-    assert summary["upserted"] == 1
+    # 1 forward + 1 reciprocal = 2 stock_relations rows
+    assert summary["upserted"] == 2
     assert summary["buffered"] == 0
 
-    rel = (
+    forward = (
         await db.execute(
             select(StockRelation).where(
                 StockRelation.from_stock_id == a.id,
@@ -46,8 +47,20 @@ async def test_both_sides_universe_persists_to_stock_relations(db) -> None:
             )
         )
     ).scalar_one()
-    assert rel.to_target == "999802"
-    assert rel.relation_type == "contract_supplier"
+    assert forward.to_target == "999802"
+    assert forward.relation_type == "contract_supplier"
+
+    reverse = (
+        await db.execute(
+            select(StockRelation).where(
+                StockRelation.from_stock_id == b.id,
+                StockRelation.source == "dart_contract",
+            )
+        )
+    ).scalar_one()
+    assert reverse.to_target == "999801"
+    # contract_supplier ↔ contract_customer
+    assert reverse.relation_type == "contract_customer"
 
 
 @pytest.mark.asyncio
@@ -111,7 +124,7 @@ async def test_dedup_within_batch_keeps_higher_confidence(db) -> None:
 
     assert summary["received"] == 2
     assert summary["deduped"] == 1
-    assert summary["upserted"] == 1
+    assert summary["upserted"] == 2  # forward + reciprocal
 
     rel = (
         await db.execute(

@@ -109,12 +109,22 @@ class Relation(BaseModel):
     target_ticker: str
     target_name: str
     relation_type: Literal[
-        "peer", "supply_upstream", "supply_downstream", "group", "theme", "macro"
+        "peer", "supply_upstream", "supply_downstream", "group", "theme", "macro",
+        "competitor", "contract_supplier", "contract_customer",
+        "complementary", "regulatory_link",
     ]
     strength: float = Field(..., ge=0, le=1)
     today_change_pct: float | None = None
     notes: str | None = None
     citation_ids: list[int]
+
+    # P1.6 v0+ — discovery + signal expressiveness
+    signal_direction: Literal["positive", "negative", "inverse"] = "positive"
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    source: str = "curated_relation"  # sector_match / sec_8k / news / dart_contract / ...
+    source_url: str | None = None
+    valid_from: str | None = None  # ISO date
+    valid_until: str | None = None
 
 
 class RelationsSummary(BaseModel):

@@ -55,15 +55,18 @@ async def test_news_extracts_competitor_relation(db) -> None:
     )
 
     assert summary["articles_seen"] == 1
-    assert summary["upserted"] == 1
+    assert summary["upserted"] == 2  # forward + reciprocal (competitor symmetric)
     assert len(llm.calls) == 1
 
-    rel = (
+    rels = (
         await db.execute(
             select(StockRelation).where(StockRelation.source == "news")
         )
-    ).scalar_one()
-    assert rel.signal_direction == "inverse"
+    ).scalars().all()
+    assert len(rels) == 2
+    # Both directions get inverse — competitor is symmetric.
+    assert all(r.signal_direction == "inverse" for r in rels)
+    assert all(r.relation_type == "competitor" for r in rels)
 
 
 @pytest.mark.asyncio

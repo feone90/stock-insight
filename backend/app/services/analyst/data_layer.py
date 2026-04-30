@@ -44,6 +44,9 @@ NEWS_SUMMARY_MAX = 300
 RELATIONS_STALE_DAYS = 7
 _VALID_RELATION_TYPES = {
     "peer", "supply_upstream", "supply_downstream", "group", "theme", "macro",
+    # P1.6 v0+ — extracted via sector_match / sec_8k / news / dart_contract.
+    "competitor", "contract_supplier", "contract_customer",
+    "complementary", "regulatory_link",
 }
 _VALID_NEWS_IMPACTS = {"positive", "negative", "mixed", "neutral"}
 
@@ -249,6 +252,14 @@ def _build_relations(
         except (TypeError, ValueError):
             strength = 0.5
         strength = max(0.0, min(1.0, strength))
+        try:
+            confidence = float(r.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
+        signal = r.get("signal_direction") or "positive"
+        if signal not in {"positive", "negative", "inverse"}:
+            signal = "positive"
         out.append(
             Relation(
                 target_ticker=target_ticker,
@@ -258,6 +269,12 @@ def _build_relations(
                 today_change_pct=r.get("today_change_pct"),
                 notes=None,  # filled by analyst's relations_narrative at compose
                 citation_ids=[cid],
+                signal_direction=signal,  # type: ignore[arg-type]
+                confidence=confidence,
+                source=r.get("source") or "curated_relation",
+                source_url=r.get("source_url"),
+                valid_from=r.get("valid_from"),
+                valid_until=r.get("valid_until"),
             )
         )
     return out
@@ -352,6 +369,7 @@ async def _fetch_relations_data(ticker: str) -> dict:
         latest_refresh: datetime | None = None
         for r in rows:
             tgt = targets.get(r.to_target)
+            metadata = r.extra_metadata or {}
             relations.append(
                 {
                     "target_ticker": r.to_target,
@@ -359,6 +377,13 @@ async def _fetch_relations_data(ticker: str) -> dict:
                     "relation_type": r.relation_type,
                     "strength": r.strength,
                     "today_change_pct": tgt.change_percent if tgt else None,
+                    # P1.6 v0+ — surface discovery signals to the card.
+                    "signal_direction": r.signal_direction or "positive",
+                    "confidence": r.confidence if r.confidence is not None else 0.5,
+                    "source": r.source,
+                    "source_url": metadata.get("source_url") if isinstance(metadata, dict) else None,
+                    "valid_from": r.valid_from.isoformat() if r.valid_from else None,
+                    "valid_until": r.valid_until.isoformat() if r.valid_until else None,
                 }
             )
             if r.refreshed_at and (

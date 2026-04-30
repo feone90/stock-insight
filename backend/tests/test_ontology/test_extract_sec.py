@@ -60,7 +60,7 @@ async def test_one_filing_extracts_and_persists_relation(db) -> None:
     )
 
     assert summary["filings_seen"] == 1
-    assert summary["upserted"] == 1
+    assert summary["upserted"] == 2  # forward + reciprocal
     assert summary["buffered"] == 0
 
     rel = (
@@ -126,7 +126,7 @@ async def test_body_fetch_failure_continues_to_next_filing(db) -> None:
         "NVDA", since=date(2025, 1, 1), adapter=sec, llm_adapter=llm, session=db
     )
     assert summary["filings_seen"] == 2
-    assert summary["upserted"] == 1
+    assert summary["upserted"] == 2  # forward + reciprocal
     assert len(llm.calls) == 1  # only the successful body went to LLM
 
 

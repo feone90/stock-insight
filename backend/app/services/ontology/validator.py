@@ -31,6 +31,22 @@ _TIER_USER_TOUCHED = 2
 _REVIEW_FLOOR = 0.3  # below this → drop (too noisy to keep)
 _REVIEW_THRESHOLD = 0.6  # below this → flagged in metadata for admin review
 
+# Reciprocal type for the reverse direction. supply / contract are asymmetric
+# (supplier ↔ customer); peer / competitor / complementary are symmetric.
+_RECIPROCAL_TYPE: dict[str, str] = {
+    "peer": "peer",
+    "supply_upstream": "supply_downstream",
+    "supply_downstream": "supply_upstream",
+    "group": "group",
+    "theme": "theme",
+    "macro": "macro",
+    "competitor": "competitor",
+    "contract_supplier": "contract_customer",
+    "contract_customer": "contract_supplier",
+    "complementary": "complementary",
+    "regulatory_link": "regulatory_link",
+}
+
 
 async def validate_and_route(
     relations: list[ExtractedRelation],
@@ -97,6 +113,24 @@ async def _route(
 
         if from_id is not None and to_in_universe:
             upsert_payload.append(_relation_row(rel, from_id, source, metadata))
+            # Reciprocal — so the *other* card surfaces this edge too. Type
+            # swaps for asymmetric relations (supplier ↔ customer); identity
+            # for symmetric ones (peer / competitor / complementary / ...).
+            reverse_type = _RECIPROCAL_TYPE.get(rel.relation_type, rel.relation_type)
+            to_id = universe_ids[rel.to_ticker]
+            upsert_payload.append({
+                "from_stock_id": to_id,
+                "to_target": rel.from_ticker,
+                "to_kind": "stock",
+                "relation_type": reverse_type,
+                "strength": rel.strength,
+                "source": source,
+                "signal_direction": rel.signal_direction,
+                "confidence": rel.confidence,
+                "valid_from": rel.valid_from,
+                "valid_until": rel.valid_until,
+                "metadata": metadata or None,
+            })
         else:
             candidate_payload.append(_candidate_row(rel, source, metadata))
 

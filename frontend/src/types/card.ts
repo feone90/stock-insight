@@ -45,7 +45,14 @@ export type RelationType =
   | "supply_downstream"
   | "group"
   | "theme"
-  | "macro";
+  | "macro"
+  | "competitor"
+  | "contract_supplier"
+  | "contract_customer"
+  | "complementary"
+  | "regulatory_link";
+
+export type SignalDirection = "positive" | "negative" | "inverse";
 export type NewsImpact = "positive" | "negative" | "mixed" | "neutral";
 export type CatalystDirection = "positive" | "negative" | "mixed";
 export type ScenarioName = "BULL" | "BASE" | "BEAR";
@@ -83,6 +90,13 @@ export interface Relation {
   today_change_pct?: number | null;
   notes?: string | null;
   citation_ids: number[];
+  // P1.6 v0+ — discovery + signal expressiveness.
+  signal_direction?: SignalDirection;
+  confidence?: number;
+  source?: string;
+  source_url?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
 }
 
 export interface RelationsSummary {
