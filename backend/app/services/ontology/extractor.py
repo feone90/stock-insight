@@ -27,8 +27,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Soft cap on body size to keep token usage predictable; chunk if larger.
-_BODY_TOKEN_BUDGET = 5000  # ~ chars cap (Korean is ~1 char/token)
+# Soft cap on body size. SEC 8-K Item 1.01 본문 + signatures가 평균 ~6-12K chars.
+# 한국어는 약 1 char/token, 영어 ~0.25 char/token. 12K → ~4.5K tokens (영어).
+_BODY_TOKEN_BUDGET = 12000
 _MAX_RETRIES = 1
 
 
