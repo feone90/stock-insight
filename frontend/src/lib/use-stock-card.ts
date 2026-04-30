@@ -75,16 +75,31 @@ export function useStockCard(ticker: string): {
   }, [ticker]);
 
   const refresh = useCallback(async () => {
-    dispatch({ type: "loadStart" });
+    dispatch({ type: "analyzeStart" });
     try {
-      const c = await refreshStockCard(ticker);
-      dispatch({ type: "loadOk", card: c });
+      // Backend returns `{status, ticker}` (background task), not a card.
+      await refreshStockCard(ticker);
     } catch (e) {
       dispatch({
         type: "loadErr",
         error: e instanceof Error ? e.message : String(e),
       });
+      return;
     }
+    for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const c = await getStockCard(ticker);
+        dispatch({ type: "loadOk", card: c });
+        return;
+      } catch {
+        // Old row may still be returned briefly — accept any non-error read.
+      }
+    }
+    dispatch({
+      type: "loadErr",
+      error: "재분석이 1분 30초 안에 끝나지 않았어요. 잠시 후 새로고침 해보세요.",
+    });
   }, [ticker]);
 
   const triggerAnalyze = useCallback(async () => {

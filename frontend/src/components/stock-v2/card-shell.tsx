@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon, Sun } from "lucide-react";
+import { Moon, RefreshCw, Sun } from "lucide-react";
 import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import { AtAGlancePanel } from "./at-a-glance-panel";
@@ -28,7 +28,8 @@ import { ThesisSection } from "./thesis-section";
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
-  const { card, state, triggerAnalyze } = useStockCard(ticker);
+  const { card, state, refresh, triggerAnalyze } = useStockCard(ticker);
+  const refreshing = state === "analyzing";
 
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
@@ -39,14 +40,29 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               ? `v2 카드 · schema ${card.schema_version} · persona ${card.persona_version}`
               : `v2 카드 · ${ticker}`}
           </div>
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={mode === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
-            className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11"
-          >
-            {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
+          <div className="flex items-center gap-2">
+            {card ? (
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={refreshing}
+                aria-label="분석 다시 실행"
+                title="분석 다시 실행 (~$0.25, 1분)"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+                {refreshing ? "분석 중..." : "분석 다시"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={mode === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+              className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11"
+            >
+              {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+          </div>
         </div>
 
         {state === "loading" && !card ? (
