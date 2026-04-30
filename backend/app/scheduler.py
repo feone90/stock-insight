@@ -23,7 +23,10 @@ from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
 from app.services.llm.adapter import get_adapter
 from app.services.llm.analyzer import analyze_stock
-from app.services.ontology import universe_wide_sector_match
+from app.services.ontology import (
+    extract_sec_contracts_for_universe,
+    universe_wide_sector_match,
+)
 from app.services.universe import nightly_universe_refresh
 
 logger = logging.getLogger(__name__)
@@ -135,6 +138,39 @@ async def run_kr_analysis_batch() -> None:
             logger.exception("kr v2 batch analyze failed for %s", t)
 
 
+async def run_sec_8k_extraction() -> None:
+    """Nightly SEC 8-K Item 1.01 extraction over the US Tier 1+2 universe.
+
+    Conservative defaults — `limit=50` cap + `sleep=0.5s` SEC pacing. Density
+    measured at backfill: ~2.5 contract rows / 30 ticker / week. Daily run with
+    a 2-day window means each filing is seen ~twice (idempotent ON CONFLICT).
+
+    P1.6 v2 — plan §12 v2 step.
+    """
+    from app.services.analyst.cost import can_proceed
+
+    if not can_proceed():
+        logger.warning("sec_8k extraction skipped: daily LLM budget exceeded")
+        return
+
+    since = date.today() - timedelta(days=2)
+    try:
+        summaries = await extract_sec_contracts_for_universe(
+            since=since, limit=50, sleep_between=0.5
+        )
+    except Exception as e:  # noqa: BLE001 — never crash the scheduler loop
+        logger.exception("sec_8k extraction failed: %s", e)
+        return
+
+    filings = sum(s.get("filings_seen", 0) for s in summaries)
+    upserted = sum(s.get("upserted", 0) for s in summaries)
+    buffered = sum(s.get("buffered", 0) for s in summaries)
+    logger.info(
+        "sec_8k nightly: tickers=%d filings=%d upserted=%d buffered=%d",
+        len(summaries), filings, upserted, buffered,
+    )
+
+
 async def run_us_analysis_batch() -> None:
     """v2 US market batch — analyze unique US favorites with cost guard."""
     if not can_proceed():
@@ -221,10 +257,20 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # P1.6 v2: SEC 8-K Item 1.01 extraction (LLM RAG).
+    # 06:45 KST = 17:45 ET previous day — captures all of the US trading-day's
+    # post-market 8-K filings with a 2-day rolling window for idempotency.
+    scheduler.add_job(
+        run_sec_8k_extraction,
+        CronTrigger(hour=6, minute=45, timezone=tz),
+        id="ontology_sec_8k_daily",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s "
-        "+ universe refresh 06:00 + ontology sector_match 06:30 (%s)",
+        "+ universe refresh 06:00 + sector_match 06:30 + sec_8k 06:45 (%s)",
         settings.scheduler_morning,
         settings.scheduler_evening,
         settings.schedule_kr_morning,

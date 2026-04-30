@@ -145,8 +145,8 @@ class TestInitScheduler:
         mock_settings.schedule_us_evening = "0 7 * * 1-5"
         mock_settings.schedule_us_night = "30 22 * * 1-5"
         init_scheduler()
-        # 2 phase A + 4 v2 + 1 universe refresh + 1 sector match (P1.6 v0) = 8 jobs
-        assert mock_sched.add_job.call_count == 8
+        # 2 phase A + 4 v2 + 1 universe refresh + 1 sector match + 1 sec 8-K = 9 jobs
+        assert mock_sched.add_job.call_count == 9
         mock_sched.start.assert_called_once()
 
 
