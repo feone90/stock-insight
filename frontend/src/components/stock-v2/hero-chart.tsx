@@ -59,6 +59,20 @@ export function HeroChart({
           horzLines: { color: tokens.grid },
         },
         crosshair: { mode: CrosshairMode.Normal },
+        // 한국어 날짜 표기 — 기본 영문 ("Apr 30 '26")을 "26년 4월 30일"로.
+        localization: {
+          locale: "ko-KR",
+          dateFormat: "yy년 M월 d일",
+        },
+        // 시간축 라벨도 한국어 (월/일 단위 라벨러).
+        timeScale: {
+          tickMarkFormatter: (time: Time) => {
+            const d = typeof time === "string" ? new Date(time) : new Date((time as number) * 1000);
+            const month = d.getMonth() + 1;
+            const day = d.getDate();
+            return day === 1 ? `${month}월` : `${day}일`;
+          },
+        },
         width: node.clientWidth,
         height: window.innerWidth < 768 ? 240 : 320,
       });
