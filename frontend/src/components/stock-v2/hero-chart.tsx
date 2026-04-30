@@ -2,10 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import {
+  CandlestickSeries,
   ColorType,
   CrosshairMode,
   LineSeries,
   LineStyle,
+  type CandlestickData,
   type IChartApi,
   type LineData,
   type Time,
@@ -16,14 +18,12 @@ import { useTheme } from "@/lib/use-theme";
 import { getStockPrices } from "@/services/api";
 
 /**
- * Hero chart — close line + MA20 dashed. Volume bars deferred to sub-phase E.
- *
- * Spec §3.1 layout. Plan §7.2 (reuse lightweight-charts setup) + §17.6 (mobile
- * 240px / desktop 320px). Theme-aware via `chartTokens`.
+ * Hero chart — 캔들 (상승=emerald, 하락=rose) + MA20 (옅은 점선).
+ * Plan §7.2 + §17.6 (mobile 240px / desktop 320px). 다크/라이트 토큰 인지.
  */
 export function HeroChart({
   ticker,
-  days = 30,
+  days = 60,
 }: {
   ticker: string;
   days?: number;
@@ -44,11 +44,21 @@ export function HeroChart({
       try {
         prices = await getStockPrices(ticker, days);
       } catch {
-        return; // Sub-phase E will surface fetch failures explicitly
+        return;
       }
       if (cancelled || !node || prices.length === 0) return;
 
+      // PriceHistory는 desc일 수도 — 캔들은 ascending 시간 필요.
+      const sorted = [...prices].sort((a, b) => a.date.localeCompare(b.date));
+
       const tokens = pick(chartTokens, mode);
+      const isDark = mode === "dark";
+      const upColor = isDark ? "#34d399" : "#059669"; // emerald 400/600
+      const downColor = isDark ? "#fb7185" : "#e11d48"; // rose 400/600
+      const ma20Color = isDark
+        ? "rgba(148, 163, 184, 0.55)"
+        : "rgba(100, 116, 139, 0.45)";
+
       chart = createChart(node, {
         layout: {
           background: { type: ColorType.Solid, color: "transparent" },
@@ -59,46 +69,58 @@ export function HeroChart({
           horzLines: { color: tokens.grid },
         },
         crosshair: { mode: CrosshairMode.Normal },
-        // 한국어 날짜 표기 — 기본 영문 ("Apr 30 '26")을 "26년 4월 30일"로.
+        // 모든 시간 표시(축 + tooltip + crosshair) 한국어 통일.
         localization: {
           locale: "ko-KR",
-          dateFormat: "yy년 M월 d일",
+          timeFormatter: (t: Time) => formatKoreanDate(t, true),
         },
-        // 시간축 라벨도 한국어 (월/일 단위 라벨러).
         timeScale: {
-          tickMarkFormatter: (time: Time) => {
-            const d = typeof time === "string" ? new Date(time) : new Date((time as number) * 1000);
-            const month = d.getMonth() + 1;
-            const day = d.getDate();
-            return day === 1 ? `${month}월` : `${day}일`;
-          },
+          tickMarkFormatter: (t: Time) => formatTickKorean(t),
+          rightOffset: 5,
+          barSpacing: 8,
         },
         width: node.clientWidth,
-        height: window.innerWidth < 768 ? 240 : 320,
+        height: window.innerWidth < 768 ? 260 : 340,
       });
 
-      const closeSeries = chart.addSeries(LineSeries, {
-        color: tokens.close,
-        lineWidth: 2,
-        priceLineVisible: false,
+      // 메인 캔들 시리즈 — 상승/하락 한눈에.
+      const candle = chart.addSeries(CandlestickSeries, {
+        upColor,
+        downColor,
+        borderUpColor: upColor,
+        borderDownColor: downColor,
+        wickUpColor: upColor,
+        wickDownColor: downColor,
+        priceLineVisible: true,
+        priceLineWidth: 1,
+        priceLineStyle: LineStyle.Dotted,
       });
-      closeSeries.setData(
-        prices.map((p) => ({ time: p.date as Time, value: p.close })),
+      candle.setData(
+        sorted.map<CandlestickData<Time>>((p) => ({
+          time: p.date as Time,
+          open: p.open,
+          high: p.high,
+          low: p.low,
+          close: p.close,
+        })),
       );
 
-      if (prices.length >= 20) {
+      // MA20 — 옅은 회색 점선. 단기·장기 추세 비교용 (정배열/역배열).
+      if (sorted.length >= 20) {
         const ma20Series = chart.addSeries(LineSeries, {
-          color: tokens.ma20,
+          color: ma20Color,
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
         });
         const ma20: LineData<Time>[] = [];
-        for (let i = 19; i < prices.length; i++) {
-          const slice = prices.slice(i - 19, i + 1);
+        for (let i = 19; i < sorted.length; i++) {
+          const slice = sorted.slice(i - 19, i + 1);
           const avg = slice.reduce((s, d) => s + d.close, 0) / 20;
           ma20.push({
-            time: prices[i].date as Time,
+            time: sorted[i].date as Time,
             value: Math.round(avg * 100) / 100,
           });
         }
@@ -124,18 +146,49 @@ export function HeroChart({
     <div className="relative">
       <div className="absolute z-10 top-2 left-2 flex items-center gap-3 text-[11px] text-[var(--surface-text-muted)] bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md px-2 py-1 shadow-sm">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-3 h-0.5 bg-emerald-500 dark:bg-emerald-400" />
-          종가
+          <span className="inline-block w-2 h-3 bg-emerald-500 dark:bg-emerald-400" />
+          상승
         </span>
         <span className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-3 bg-rose-500 dark:bg-rose-400" />
+          하락
+        </span>
+        <span
+          className="flex items-center gap-1.5"
+          title="20일 평균 가격. 현재가(캔들)가 점선 위면 단기 추세 우상향, 아래면 약세."
+        >
           <span
             className="inline-block w-3 h-0 border-t border-dashed"
             style={{ borderColor: "var(--surface-text-muted)" }}
           />
-          20일 평균선
+          20일 평균
         </span>
       </div>
-      <div ref={containerRef} className="w-full h-60 md:h-80" />
+      <div ref={containerRef} className="w-full h-[260px] md:h-[340px]" />
     </div>
   );
+}
+
+function formatKoreanDate(t: Time, includeYear: boolean): string {
+  const d = toDate(t);
+  const y = d.getFullYear() % 100;
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return includeYear ? `${y}년 ${m}월 ${day}일` : `${m}월 ${day}일`;
+}
+
+function formatTickKorean(t: Time): string {
+  const d = toDate(t);
+  const day = d.getDate();
+  const month = d.getMonth() + 1;
+  // 월 첫째 주(1~3일)면 "M월" 라벨, 그 외 "D일"만 — 컴팩트.
+  return day <= 3 ? `${month}월` : `${day}일`;
+}
+
+function toDate(t: Time): Date {
+  if (typeof t === "string") return new Date(t);
+  if (typeof t === "number") return new Date(t * 1000);
+  // BusinessDay
+  const bd = t as { year: number; month: number; day: number };
+  return new Date(bd.year, bd.month - 1, bd.day);
 }
