@@ -8,6 +8,14 @@ v1 (LLM RAG common): schemas / prompts / extractor / validator — 본 chunk.
 v1 DART adapter / v2 SEC adapter는 별도 chunk.
 """
 
+from app.services.ontology.correlation import (
+    compute_pairwise_correlation,
+    verify_inverse_signals,
+)
+from app.services.ontology.extract_news import (
+    extract_news_relations_for_ticker,
+    extract_news_relations_for_universe,
+)
 from app.services.ontology.extract_sec import (
     extract_sec_contracts,
     extract_sec_contracts_for_universe,
@@ -32,10 +40,14 @@ __all__ = [
     "RelationType",
     "SignalDirection",
     "bulk_upsert_relations",
+    "compute_pairwise_correlation",
+    "extract_news_relations_for_ticker",
+    "extract_news_relations_for_universe",
     "extract_relations",
     "extract_sec_contracts",
     "extract_sec_contracts_for_universe",
     "scan_pending_candidates",
     "universe_wide_sector_match",
     "validate_and_route",
+    "verify_inverse_signals",
 ]
