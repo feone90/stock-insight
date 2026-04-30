@@ -23,6 +23,7 @@ from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
 from app.services.llm.adapter import get_adapter
 from app.services.llm.analyzer import analyze_stock
+from app.services.ontology import universe_wide_sector_match
 from app.services.universe import nightly_universe_refresh
 
 logger = logging.getLogger(__name__)
@@ -211,10 +212,19 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # P1.6 v0: universe-wide sector cross-match. Runs 30 min after the
+    # universe refresh so freshly-promoted Tier 1 entrants are picked up.
+    scheduler.add_job(
+        universe_wide_sector_match,
+        CronTrigger(hour=6, minute=30, timezone=tz),
+        id="ontology_sector_match_daily",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s "
-        "+ universe refresh 06:00 (%s)",
+        "+ universe refresh 06:00 + ontology sector_match 06:30 (%s)",
         settings.scheduler_morning,
         settings.scheduler_evening,
         settings.schedule_kr_morning,
