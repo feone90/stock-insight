@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 SEC_DATA_BASE = "https://data.sec.gov"
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
 
 _DATA_DIR = Path(__file__).parent.parent.parent / "data"
 _GICS_PATH = _DATA_DIR / "sic_to_gics.json"
@@ -169,6 +170,71 @@ class SecEdgarAdapter(ExternalAdapter):
         async with self._sem:
             r = await _retry_get(client, url)
         return r.json()
+
+    async def fetch_8k_filings(
+        self,
+        ticker: str,
+        *,
+        since,
+        item_code: str = "1.01",
+    ) -> list[dict]:
+        """List 8-K filings whose `items` include `item_code` and filed >= `since`.
+
+        Returns dicts: {accession, filing_date, primary_document, items, cik}.
+        Item 1.01 = "Entry into a Material Definitive Agreement" — the canonical
+        contract source for P1.6 v2.
+
+        Spec §6 / Plan P1.6 v2 §6.3.
+        """
+        cik = await self._ticker_to_cik(ticker)
+        sub = await self._fetch_submissions(cik)
+        recent = sub.get("filings", {}).get("recent", {})
+
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        accs = recent.get("accessionNumber", [])
+        items_arr = recent.get("items", [])
+        docs = recent.get("primaryDocument", [])
+        since_str = since.isoformat() if hasattr(since, "isoformat") else str(since)
+
+        out: list[dict] = []
+        for i, f in enumerate(forms):
+            if f != "8-K":
+                continue
+            if dates[i] < since_str:
+                continue
+            row_items = items_arr[i] if i < len(items_arr) else ""
+            if item_code and item_code not in str(row_items):
+                continue
+            out.append(
+                {
+                    "cik": cik,
+                    "accession": accs[i],
+                    "filing_date": dates[i],
+                    "primary_document": docs[i] if i < len(docs) else None,
+                    "items": str(row_items),
+                }
+            )
+        return out
+
+    async def fetch_filing_body(
+        self, *, cik: str, accession: str, primary_document: str
+    ) -> str:
+        """Fetch a filing's primary document HTML/text from SEC Archives.
+
+        URL pattern: `Archives/edgar/data/{cik_int}/{acc_no_dashes}/{primary_doc}`.
+        Returns plain text (HTML stripped) — caller passes to LLM.
+        """
+        if not primary_document:
+            return ""
+        cik_int = str(int(cik))
+        acc_no_dashes = accession.replace("-", "")
+        url = f"{SEC_ARCHIVES_BASE}/{cik_int}/{acc_no_dashes}/{primary_document}"
+
+        client = await self._get_client()
+        async with self._sem:
+            r = await _retry_get(client, url)
+        return _strip_html(r.text)
 
     async def _ticker_to_cik(self, ticker: str) -> str:
         if self._ticker_cik_map is None:
@@ -310,3 +376,23 @@ def _collect_fy(fact: Any, accumulator: dict[str, dict], key: str) -> None:
             row = accumulator.setdefault(period, {"period": period})
             row.setdefault(key, e.get("val"))  # first match per FY wins
         break  # one unit (USD) per fact is enough; ignore USD-per-share variants
+
+
+def _strip_html(html: str) -> str:
+    """HTML/XBRL → plain text. Used for 8-K filing bodies before LLM extraction.
+
+    SEC 8-K HTML는 inline XBRL 태그가 많고, header/footer가 본문보다 길 때도
+    있다. BeautifulSoup으로 script/style 제거 후 text 뽑고 whitespace 정리.
+    """
+    if not html:
+        return ""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(("script", "style", "head", "meta", "link")):
+        tag.decompose()
+    text = soup.get_text(separator=" ")
+    # Collapse runs of whitespace; preserve paragraph breaks via double newline.
+    lines = [line.strip() for line in text.splitlines()]
+    cleaned = "\n".join(line for line in lines if line)
+    return cleaned
