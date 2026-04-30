@@ -303,17 +303,31 @@ async def _fetch_fundamentals(ticker: str) -> dict:
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if not fin:
-            return {"error": "재무 데이터 없음"}
-        return {
-            "per": fin.per,
-            "pbr": fin.pbr,
-            "market_cap_krw": float(fin.market_cap) if fin.market_cap else None,
-            "dividend_yield": fin.dividend_yield,
-            "per_5y_z": None,  # placeholder — needs 5y series; out of scope here
-            "period": fin.period,
-            "label": f"DB · financials ({fin.period})",
-        }
+        if fin:
+            return {
+                "per": fin.per,
+                "pbr": fin.pbr,
+                "market_cap_krw": float(fin.market_cap) if fin.market_cap else None,
+                "dividend_yield": fin.dividend_yield,
+                "per_5y_z": None,  # needs 5y series
+                "period": fin.period,
+                "label": f"DB · financials ({fin.period})",
+            }
+        # Fallback: Stock.market_cap (P1.7 universe seed가 채움). PER/PBR/배당
+        # 수익률 source는 아직 없음 — 솔직하게 None으로 노출. analyst persona가
+        # "PER/PBR이 비어 있어 가격이 비싼지 싼지 숫자로 확인하기 어렵다" 식으로
+        # 가족 사용자에게 상태 설명.
+        if stock.market_cap is not None:
+            return {
+                "per": None,
+                "pbr": None,
+                "market_cap_krw": float(stock.market_cap),
+                "dividend_yield": None,
+                "per_5y_z": None,
+                "period": None,
+                "label": "DB · stocks.market_cap (재무 상세 미수집)",
+            }
+        return {"error": "재무 데이터 없음"}
 
 
 async def _fetch_recent_news(ticker: str) -> dict:
