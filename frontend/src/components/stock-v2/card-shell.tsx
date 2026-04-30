@@ -48,10 +48,12 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                 disabled={refreshing}
                 aria-label="분석 다시 실행"
                 title="분석 다시 실행 (~$0.25, 1분)"
-                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
-                {refreshing ? "분석 중..." : "분석 다시"}
+                <span className="hidden sm:inline">
+                  {refreshing ? "분석 중..." : "분석 다시"}
+                </span>
               </button>
             ) : null}
             <button
