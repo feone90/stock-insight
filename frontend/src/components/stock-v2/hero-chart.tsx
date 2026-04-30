@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CandlestickSeries,
   ColorType,
@@ -21,15 +21,25 @@ import { getStockPrices } from "@/services/api";
  * Hero chart — 캔들 (상승=emerald, 하락=rose) + MA20 (옅은 점선).
  * Plan §7.2 + §17.6 (mobile 240px / desktop 320px). 다크/라이트 토큰 인지.
  */
+const PERIOD_OPTIONS: Array<{ label: string; days: number }> = [
+  { label: "10일", days: 10 },
+  { label: "30일", days: 30 },
+  { label: "60일", days: 60 },
+  { label: "3개월", days: 90 },
+  { label: "6개월", days: 180 },
+  { label: "1년", days: 365 },
+];
+
 export function HeroChart({
   ticker,
-  days = 60,
+  days: initialDays = 60,
 }: {
   ticker: string;
   days?: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { mode } = useTheme();
+  const [days, setDays] = useState(initialDays);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -163,6 +173,22 @@ export function HeroChart({
           />
           20일 평균
         </span>
+      </div>
+      <div className="absolute z-10 top-2 right-2 flex items-center gap-1 bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md p-0.5 shadow-sm">
+        {PERIOD_OPTIONS.map((opt) => (
+          <button
+            key={opt.days}
+            type="button"
+            onClick={() => setDays(opt.days)}
+            className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
+              days === opt.days
+                ? "bg-blue-600 text-white"
+                : "text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
       <div ref={containerRef} className="w-full h-[260px] md:h-[340px]" />
     </div>
