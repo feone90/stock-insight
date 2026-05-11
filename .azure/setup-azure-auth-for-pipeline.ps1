@@ -1,4 +1,4 @@
-# GitHub Actions OIDC 인증 setup.
+﻿# GitHub Actions OIDC 인증 setup.
 #
 # 1회 실행 후 main push마다 자동 deploy.
 # Environment 사용 안 함 (admin 권한 불필요) — federated credential은
