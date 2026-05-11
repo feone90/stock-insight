@@ -25,19 +25,18 @@ $SUBSCRIPTION_ID = "여기에-MPN-sub-id"
 
 ## 2. Secrets 파일 채우기
 
+LLM / DART / FRED / TAVILY / JWT_SECRET / ADMIN_* / SEC_USER_AGENT는 `backend/.env`에서 deploy-infra.ps1이 자동 로드. `.azure/secrets.env`엔 **Azure 배포 전용 2개**만 입력.
+
 ```powershell
 Copy-Item .azure/secrets.env.example .azure/secrets.env
-# 에디터에서 .azure/secrets.env 열고 각 값 입력
+notepad .azure/secrets.env
 ```
 
-필수:
-- `POSTGRES_ADMIN_PASSWORD` — ≥12자 강한 비밀번호
-- `GHCR_TOKEN` — github.com/settings/tokens 에서 `read:packages`+`write:packages` scope로 발급
-- `LLM_ENDPOINT`, `LLM_API_KEY`, `LLM_DEPLOYMENT` — 기존 `backend/.env`에서 복사
-- `JWT_SECRET`, `ADMIN_PASSWORD`
+입력 (2개):
+- `POSTGRES_ADMIN_PASSWORD` — 사용자가 직접 정함 (≥12자, 대소문자+숫자+기호). PowerShell로 자동 생성: `[Convert]::ToBase64String((1..16 | %{Get-Random -Maximum 256}))`
+- `GHCR_TOKEN` — github.com/settings/tokens → "Generate new token (classic)" → scope `read:packages`+`write:packages` → 생성 후 1번만 보이니 즉시 복사
 
-선택 (없으면 빈 값):
-- `DART_API_KEY`, `FRED_API_KEY`, `TAVILY_API_KEY`
+backend/.env 미설치 시: 먼저 `cp backend/.env.example backend/.env` + 값 채움 (기존 dev 환경이면 이미 있을 것).
 
 ## 3. 인프라 배포 (App Service + Postgres + App Insights)
 

@@ -2,15 +2,17 @@
 #
 # 사전:
 #   - az login 완료
-#   - .azure/secrets.env 채워짐
+#   - backend/.env 작성 (LLM_* / DART / FRED / TAVILY / JWT / ADMIN / SEC_USER_AGENT)
+#   - .azure/secrets.env 작성 (POSTGRES_ADMIN_PASSWORD / GHCR_TOKEN — 2개만)
 #
 # 작동:
-#   1. App RG 생성 (idempotent)
-#   2. what-if 검증 (사용자 확인)
-#   3. main.bicep deploy
-#   4. 다음 step 안내 출력
+#   1. backend/.env + .azure/secrets.env union 로드
+#   2. App RG 생성 (idempotent)
+#   3. what-if 검증 (사용자 y 확인)
+#   4. main.bicep deploy
+#   5. 다음 step 안내
 #
-# Idempotent — 다시 돌려도 안전 (Bicep 자체가 declarative).
+# Idempotent — 다시 돌려도 안전 (Bicep declarative).
 
 param(
     [Parameter(Mandatory=$true)][string]$SubscriptionId,
@@ -21,27 +23,80 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ─── secrets.env 로드 ────────────────────────────────────────
+# ─── 헬퍼: dotenv 형식 파일 로드 ──────────────────────────────
+function Read-EnvFile([string]$path) {
+    $result = @{}
+    if (-not (Test-Path $path)) { return $result }
+    Get-Content $path | ForEach-Object {
+        if ($_ -match "^([^=#]+)=(.*)$") {
+            $key = $Matches[1].Trim()
+            $val = $Matches[2].Trim()
+            if ($val -match '^"(.*)"$' -or $val -match "^'(.*)'$") {
+                $val = $Matches[1]
+            }
+            $result[$key] = $val
+        }
+    }
+    return $result
+}
+
+# ─── backend/.env + secrets.env union ───────────────────────
+$backendEnvFile = "backend/.env"
 $secretsFile = ".azure/secrets.env"
+
+if (-not (Test-Path $backendEnvFile)) {
+    Write-Error "Missing $backendEnvFile. backend/.env에 LLM_ENDPOINT / LLM_API_KEY / LLM_DEPLOYMENT 등 설정 필요."
+    exit 1
+}
 if (-not (Test-Path $secretsFile)) {
-    Write-Error "Missing $secretsFile. Copy from .azure/secrets.env.example and fill in."
+    Write-Error "Missing $secretsFile. Copy from .azure/secrets.env.example and fill in 2 values (POSTGRES_ADMIN_PASSWORD, GHCR_TOKEN)."
     exit 1
 }
 
-$secrets = @{}
-Get-Content $secretsFile | ForEach-Object {
-    if ($_ -match "^([^=#]+)=(.*)$") {
-        $secrets[$Matches[1].Trim()] = $Matches[2].Trim()
+$config = @{}
+(Read-EnvFile $backendEnvFile).GetEnumerator() | ForEach-Object { $config[$_.Key] = $_.Value }
+# secrets.env가 backend/.env를 override 가능 (둘 다 있으면 secrets.env 우선)
+(Read-EnvFile $secretsFile).GetEnumerator() | ForEach-Object { $config[$_.Key] = $_.Value }
+
+# ─── 필수 값 검증 ────────────────────────────────────────────
+$required = @(
+    @{ Key = "POSTGRES_ADMIN_PASSWORD"; Source = $secretsFile },
+    @{ Key = "GHCR_TOKEN"; Source = $secretsFile },
+    @{ Key = "LLM_ENDPOINT"; Source = $backendEnvFile },
+    @{ Key = "LLM_API_KEY"; Source = $backendEnvFile },
+    @{ Key = "LLM_DEPLOYMENT"; Source = $backendEnvFile },
+    @{ Key = "JWT_SECRET"; Source = $backendEnvFile },
+    @{ Key = "ADMIN_PASSWORD"; Source = $backendEnvFile }
+)
+$missing = @()
+foreach ($r in $required) {
+    if (-not $config.ContainsKey($r.Key) -or [string]::IsNullOrWhiteSpace($config[$r.Key])) {
+        $missing += "$($r.Key) (in $($r.Source))"
     }
+}
+if ($missing.Count -gt 0) {
+    Write-Host "Missing required values:" -ForegroundColor Red
+    $missing | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+    exit 1
 }
 
-$required = @("POSTGRES_ADMIN_PASSWORD","GHCR_TOKEN","LLM_ENDPOINT","LLM_API_KEY","LLM_DEPLOYMENT","JWT_SECRET","ADMIN_PASSWORD")
-foreach ($key in $required) {
-    if (-not $secrets.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($secrets[$key])) {
-        Write-Error "Missing required secret: $key (in $secretsFile)"
-        exit 1
-    }
+# 빈 값 default (Bicep optional params)
+foreach ($k in @("DART_API_KEY", "FRED_API_KEY", "TAVILY_API_KEY", "LLM_MODEL")) {
+    if (-not $config.ContainsKey($k)) { $config[$k] = "" }
 }
+if (-not $config.ContainsKey("SEC_USER_AGENT") -or [string]::IsNullOrWhiteSpace($config["SEC_USER_AGENT"])) {
+    $config["SEC_USER_AGENT"] = "StockInsight family-use yohan1422@gmail.com"
+}
+if (-not $config.ContainsKey("ADMIN_EMAIL") -or [string]::IsNullOrWhiteSpace($config["ADMIN_EMAIL"])) {
+    $config["ADMIN_EMAIL"] = "admin@stockinsight.local"
+}
+
+Write-Host "Loaded values:"
+Write-Host "  backend/.env       : LLM/DART/FRED/TAVILY/JWT/ADMIN/SEC_USER_AGENT"
+Write-Host "  .azure/secrets.env : POSTGRES_ADMIN_PASSWORD, GHCR_TOKEN"
+Write-Host "  LLM_ENDPOINT       : $($config.LLM_ENDPOINT.Substring(0, [Math]::Min(40, $config.LLM_ENDPOINT.Length)))..."
+Write-Host "  LLM_DEPLOYMENT     : $($config.LLM_DEPLOYMENT)"
+Write-Host ""
 
 # ─── subscription 설정 ──────────────────────────────────────
 Write-Host "[1/4] Setting subscription..."
@@ -59,21 +114,27 @@ if (-not $rgShow) {
     Write-Host "  Exists."
 }
 
+# ─── deploy params 구성 ──────────────────────────────────────
+$secretParams = @(
+    "postgresAdminPassword=$($config.POSTGRES_ADMIN_PASSWORD)",
+    "ghcrToken=$($config.GHCR_TOKEN)",
+    "llmEndpoint=$($config.LLM_ENDPOINT)",
+    "llmApiKey=$($config.LLM_API_KEY)",
+    "llmDeployment=$($config.LLM_DEPLOYMENT)",
+    "dartApiKey=$($config.DART_API_KEY)",
+    "fredApiKey=$($config.FRED_API_KEY)",
+    "tavilyApiKey=$($config.TAVILY_API_KEY)",
+    "secUserAgent=$($config.SEC_USER_AGENT)",
+    "adminEmail=$($config.ADMIN_EMAIL)",
+    "jwtSecret=$($config.JWT_SECRET)",
+    "adminPassword=$($config.ADMIN_PASSWORD)"
+)
+if (-not [string]::IsNullOrWhiteSpace($config.LLM_MODEL)) {
+    $secretParams += "llmModel=$($config.LLM_MODEL)"
+}
+
 # ─── what-if 검증 ────────────────────────────────────────────
 Write-Host "[3/4] Running what-if validation..."
-$secretParams = @(
-    "postgresAdminPassword=$($secrets.POSTGRES_ADMIN_PASSWORD)",
-    "ghcrToken=$($secrets.GHCR_TOKEN)",
-    "llmEndpoint=$($secrets.LLM_ENDPOINT)",
-    "llmApiKey=$($secrets.LLM_API_KEY)",
-    "llmDeployment=$($secrets.LLM_DEPLOYMENT)",
-    "dartApiKey=$($secrets.DART_API_KEY ?? '')",
-    "fredApiKey=$($secrets.FRED_API_KEY ?? '')",
-    "tavilyApiKey=$($secrets.TAVILY_API_KEY ?? '')",
-    "jwtSecret=$($secrets.JWT_SECRET)",
-    "adminPassword=$($secrets.ADMIN_PASSWORD)"
-)
-
 az deployment group what-if `
     --resource-group $AppResourceGroup `
     --template-file "infra/main.bicep" `
@@ -117,6 +178,7 @@ Write-Host "   gh variable set AZURE_RESOURCE_GROUP --body '$AppResourceGroup' -
 Write-Host ""
 Write-Host "3) 첫 이미지 push (이후 GitHub Actions가 자동):"
 Write-Host "   docker build -t ghcr.io/feone90/stock-insight-backend:latest backend/"
+Write-Host "   `$env:GHCR_TOKEN | docker login ghcr.io -u feone90 --password-stdin"
 Write-Host "   docker push ghcr.io/feone90/stock-insight-backend:latest"
 Write-Host "   az webapp restart --name $webAppName --resource-group $AppResourceGroup"
 Write-Host ""
