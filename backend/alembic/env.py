@@ -1,3 +1,4 @@
+import re
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,12 +14,10 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # asyncpg URL → psycopg2 sync URL (Alembic은 sync 드라이버 필요)
-# Also strip ?ssl=disable (asyncpg param) and replace with sslmode=disable for psycopg2
+# asyncpg는 query string에 `ssl=<value>` 받는데 psycopg2는 `sslmode=<value>`만
+# 인식. 어떤 값(`disable` / `require` / `prefer` 등)이든 변환.
 _url = settings.database_url.replace("+asyncpg", "")
-if "?ssl=disable" in _url:
-    _url = _url.replace("?ssl=disable", "") + "?sslmode=disable"
-elif "&ssl=disable" in _url:
-    _url = _url.replace("&ssl=disable", "") + "&sslmode=disable"
+_url = re.sub(r"\bssl=(\w+)", r"sslmode=\1", _url)
 sync_url = _url
 
 
