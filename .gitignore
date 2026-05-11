@@ -14,3 +14,5 @@ notes/
 .gstack/
 .playwright-mcp/
 .mcp.json
+.azure/secrets.env
+backend/app/data/sec_company_tickers.json

@@ -1,0 +1,104 @@
+name: Azure Deploy (backend)
+
+# main push마다 자동 build + deploy.
+# OIDC 인증 — secret 없이 federated credential로 Azure 로그인.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/azure-deploy.yml'
+      - 'infra/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/stock-insight-backend
+
+jobs:
+  build:
+    name: Build & push to ghcr.io
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      sha: ${{ steps.meta.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag (lowercase repo owner)
+        id: meta
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          SHA="${{ github.sha }}"
+          IMAGE="ghcr.io/${OWNER_LC}/stock-insight-backend"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "Image: ${IMAGE}:${SHA}"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha }}
+            ${{ steps.meta.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-dev:
+    name: Deploy to Azure (dev)
+    runs-on: ubuntu-latest
+    needs: build
+    environment: dev
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set Web App container image
+        run: |
+          az webapp config container set \
+            --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --container-image-name "${{ needs.build.outputs.image }}:${{ needs.build.outputs.sha }}"
+
+      - name: Restart Web App
+        run: |
+          az webapp restart \
+            --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}"
+
+      - name: Health check
+        run: |
+          URL="https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health"
+          echo "Waiting for app to come up..."
+          for i in $(seq 1 24); do
+            sleep 10
+            CODE=$(curl -o /dev/null -s -w "%{http_code}" "$URL" || echo "000")
+            echo "  attempt $i: HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              echo "Health check passed."
+              exit 0
+            fi
+          done
+          echo "Health check failed after 4 minutes."
+          exit 1

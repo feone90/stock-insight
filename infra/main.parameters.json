@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "dev"
+    },
+    "containerImage": {
+      "value": "ghcr.io/feone90/stock-insight-backend:latest"
+    },
+    "ghcrUsername": {
+      "value": "feone90"
+    },
+    "postgresAdminLogin": {
+      "value": "stockadmin"
+    },
+    "postgresDbName": {
+      "value": "stockinsight"
+    },
+    "llmModel": {
+      "value": "gpt-5"
+    },
+    "secUserAgent": {
+      "value": "StockInsight family-use yohan1422@gmail.com"
+    },
+    "adminEmail": {
+      "value": "admin@stockinsight.local"
+    },
+    "corsOrigins": {
+      "value": [
+        "http://localhost:3000"
+      ]
+    }
+  }
+}
