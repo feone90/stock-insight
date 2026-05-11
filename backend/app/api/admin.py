@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,3 +120,48 @@ async def sync_all(db: AsyncSession = Depends(get_db), _admin: UserInfo = Depend
         "total_synced": total,
         "errors": errors,
     }
+
+
+@router.post("/jobs/run/{job_id}")
+async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
+    """스케줄러의 cron 잡을 수동으로 즉시 실행. 첫 deploy 직후 cron 한 번도
+    안 돈 상태에서 데이터 채우기 용도. 잡은 idempotent — 반복 호출 안전.
+
+    Available job_id:
+      - fred                : FRED 매크로 (VIX/US10Y/FedFunds/실업률) snapshot
+      - sector_match        : universe-wide KSIC→GICS sector_match
+      - news_extraction     : 뉴스 LLM RAG competitor/inverse 추출
+      - sec_8k              : SEC 8-K Item 1.01 contract 추출
+      - inverse_verify      : inverse signal 가격 상관관계 검증
+      - universe_refresh    : reference universe (KOSPI + S&P 500) refresh
+      - sync_favorites      : 즐겨찾기 종목 가격/재무/뉴스/공시 동기화
+    """
+    from app.scheduler import (
+        run_fred_macro_sync,
+        run_inverse_verification,
+        run_news_extraction,
+        run_sec_8k_extraction,
+        scheduled_sync_job,
+    )
+    from app.services.ontology import universe_wide_sector_match
+    from app.services.universe import nightly_universe_refresh
+
+    jobs = {
+        "fred": run_fred_macro_sync,
+        "sector_match": universe_wide_sector_match,
+        "news_extraction": run_news_extraction,
+        "sec_8k": run_sec_8k_extraction,
+        "inverse_verify": run_inverse_verification,
+        "universe_refresh": nightly_universe_refresh,
+        "sync_favorites": scheduled_sync_job,
+    }
+    if job_id not in jobs:
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown job_id '{job_id}'. Available: {sorted(jobs.keys())}",
+        )
+    try:
+        await jobs[job_id]()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"job '{job_id}' failed: {e}")
+    return {"status": "ok", "job": job_id}
