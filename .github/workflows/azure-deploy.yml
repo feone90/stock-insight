@@ -65,7 +65,6 @@ jobs:
     name: Deploy to Azure (dev)
     runs-on: ubuntu-latest
     needs: build
-    environment: dev
     steps:
       - name: Azure login (OIDC)
         uses: azure/login@v2

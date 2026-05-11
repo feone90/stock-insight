@@ -33,7 +33,7 @@ resource fedCredEnvironment 'Microsoft.ManagedIdentity/userAssignedIdentities/fe
   name: 'github-${environmentName}'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepo}:environment:${environmentName}'
+    subject: 'repo:${githubRepo}:ref:refs/heads/main'
     audiences: [
       'api://AzureADTokenExchange'
     ]

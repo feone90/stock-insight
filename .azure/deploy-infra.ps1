@@ -1,4 +1,4 @@
-# StockInsight Azure 인프라 배포 스크립트.
+﻿# StockInsight Azure 인프라 배포 스크립트.
 #
 # 사전:
 #   - az login 완료
@@ -172,9 +172,8 @@ Write-Host ""
 Write-Host "1) (한 번만) Pipeline 인증 setup:"
 Write-Host "   ./.azure/setup-azure-auth-for-pipeline.ps1 -SubscriptionId $SubscriptionId -GithubRepo feone90/stock-insight"
 Write-Host ""
-Write-Host "2) GitHub variable에 Web App 이름 등록:"
-Write-Host "   gh variable set AZURE_WEBAPP_NAME --body '$webAppName' --env $EnvironmentName --repo feone90/stock-insight"
-Write-Host "   gh variable set AZURE_RESOURCE_GROUP --body '$AppResourceGroup' --env $EnvironmentName --repo feone90/stock-insight"
+Write-Host "2) GitHub variable에 Web App 이름 등록 (AZURE_RESOURCE_GROUP은 setup ps1이 자동 등록):"
+Write-Host "   gh variable set AZURE_WEBAPP_NAME --body '$webAppName' --repo feone90/stock-insight"
 Write-Host ""
 Write-Host "3) 첫 이미지 push (이후 GitHub Actions가 자동):"
 Write-Host "   docker build -t ghcr.io/feone90/stock-insight-backend:latest backend/"
