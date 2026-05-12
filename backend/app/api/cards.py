@@ -13,6 +13,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.collectors.disclosure import sync_disclosures
+from app.collectors.financials import sync_financials
+from app.collectors.news import sync_news
 from app.collectors.stock_price import sync_prices
 from app.config import settings
 from app.database import async_session, get_db
@@ -45,11 +48,16 @@ async def _ensure_analyzable(
     if ok:
         return True, None
     if reason in ("no price history", "current_price <= 0"):
-        logger.info("self-heal: syncing prices for %s (reason=%s)", ticker, reason)
+        logger.info("self-heal: syncing all collectors for %s (reason=%s)", ticker, reason)
+        # 4 collector를 한 번에 호출 — 모두 idempotent. collector는 외부 API
+        # 실패 시 dict에 'error' 필드만 담아 반환하므로 exception 거의 없음.
         try:
             await sync_prices(db, stock)
+            await sync_news(db, stock)
+            await sync_financials(db, stock)
+            await sync_disclosures(db, stock)
         except Exception as e:  # noqa: BLE001
-            logger.exception("self-heal sync_prices failed for %s: %s", ticker, e)
+            logger.exception("self-heal failed for %s: %s", ticker, e)
             return False, f"self-heal failed: {e}"
         ok, reason = await is_analyzable(ticker)
     return ok, reason
