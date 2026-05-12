@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,60 @@ class TickerImpact(BaseModel):
     expected_window: Literal["minutes", "hours", "1-3days", "1-2weeks"]
     reasoning: str = Field(description="왜 이 종목에 영향? 한국어 1~3문장.")
     sector_impact: str | None = Field(default=None)
+
+    @field_validator("expected_window", mode="before")
+    @classmethod
+    def _normalize_window(cls, v):
+        """LLM이 '즉시 반응(minutes/hours)' 같이 한국어 설명+enum 섞어 보내면
+        정확한 enum value로 정규화."""
+        if not isinstance(v, str):
+            return v
+        s = v.lower()
+        if "minute" in s:
+            return "minutes"
+        if "hour" in s:
+            return "hours"
+        if "week" in s:
+            return "1-2weeks"
+        if "day" in s or "1-3" in s:
+            return "1-3days"
+        return v
+
+    @field_validator("sentiment", mode="before")
+    @classmethod
+    def _normalize_sentiment(cls, v):
+        """impacts.sentiment는 mixed 불가 (overall만 허용). neutral로 강등."""
+        if v == "mixed":
+            return "neutral"
+        return v
+
+    @field_validator("strength", mode="before")
+    @classmethod
+    def _normalize_strength(cls, v):
+        if not isinstance(v, str):
+            return v
+        s = v.lower()
+        if "high" in s or "강" in v:
+            return "high"
+        if "low" in s or "약" in v:
+            return "low"
+        if "medium" in s or "중" in v:
+            return "medium"
+        return v
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, v):
+        if not isinstance(v, str):
+            return v
+        s = v.lower()
+        if "long" in s or "매수" in v:
+            return "long"
+        if "short" in s or "매도" in v:
+            return "short"
+        if "avoid" in s or "관망" in v:
+            return "avoid"
+        return v
 
 
 class TruthSocialAnalysis(BaseModel):
@@ -84,7 +138,12 @@ US 주요 종목: {us_hint}
    - 명확한 호재 + bullish → long
    - 명확한 악재 + bearish → short
    - 양방향 또는 불확실 → avoid
-5. expected_window: 즉시 반응(minutes/hours) vs 정책 lag(1-2weeks)
+5. expected_window는 다음 4개 enum 값 중 하나만 (한국어 설명 X, 정확한 값만):
+   - "minutes" (수 분 안 반응)
+   - "hours" (수 시간 안 반응)
+   - "1-3days" (1~3일)
+   - "1-2weeks" (정책 lag)
+8. impacts[].sentiment는 "bullish" / "bearish" / "neutral" 셋만. ("mixed"는 overall_sentiment에만 허용)
 6. reasoning: 한국어 1~3문장 (가족 친화)
 7. macro_themes 예: "관세", "지정학", "금리", "AI/반도체", "에너지", "이민"
 
