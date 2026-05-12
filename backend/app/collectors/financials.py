@@ -1,4 +1,17 @@
+"""재무 데이터 동기화.
+
+KR (KOSPI/KOSDAQ/KRX) : dartlab `analysis("financial", "수익성")` 로
+  matrintTrend + returnTrend annual history 파싱 → 매출/영업이익/순이익/자본/총자산.
+  PER/PBR/ROE 는 market_cap 과 결합해 직접 계산.
+
+US (NYSE/NASDAQ/NMS/NYQ/AMEX) : yfinance `Ticker(symbol).info` TTM.
+
+"latest fully-populated" 연도를 골라 한 row 쓴다 — 2025/2024 사업보고서가
+아직 제출되지 않은 시점에는 2023이 가장 최근 완성치.
+"""
+
 import asyncio
+import logging
 from datetime import date
 
 from sqlalchemy.dialects.postgresql import insert
@@ -8,68 +21,153 @@ from app.markets import is_kr
 from app.models import Stock
 from app.models.financial import Financial
 
+logger = logging.getLogger(__name__)
 
-def _yf_suffixes_for_market(market: str | None) -> tuple[str, ...]:
-    if market == "KOSPI":
-        return (".KS",)
-    if market == "KOSDAQ":
-        return (".KQ",)
-    if is_kr(market):
-        return (".KS", ".KQ")
-    return ("",)
+# DART rawFinance/analysis 모두 "백만원" 단위. 우리 Financial 테이블은 원 단위로
+# 저장 (yfinance US 와 일관성 유지).
+_KR_UNIT_TO_WON = 1_000_000
 
 
-def fetch_yfinance_financials(ticker: str, suffixes: tuple[str, ...]) -> dict:  # pragma: no cover
-    """yfinance로 재무지표 조회. KR은 .KS/.KQ suffix 순차 시도."""
+# ---------- US: yfinance ----------
+
+
+def fetch_us_financials(ticker: str) -> dict:  # pragma: no cover
     import yfinance as yf
 
-    for suffix in suffixes:
-        symbol = f"{ticker}{suffix}"
-        try:
-            info = yf.Ticker(symbol).info
-        except Exception:
-            continue
-        if info and (info.get("marketCap") or info.get("totalRevenue")):
-            return info
-    return {}
+    try:
+        info = yf.Ticker(ticker).info
+    except Exception:
+        return {}
+    if not info:
+        return {}
+    return info
+
+
+def _us_values(stock: Stock, info: dict, period: str) -> dict | None:
+    if not info.get("marketCap") and not info.get("totalRevenue"):
+        return None
+    roe = info.get("returnOnEquity")
+    div_yield = info.get("dividendYield")
+    return {
+        "stock_id": stock.id,
+        "period": period,
+        "period_type": "ttm",
+        "revenue": int(info["totalRevenue"]) if info.get("totalRevenue") else None,
+        "operating_profit": int(info["operatingIncome"]) if info.get("operatingIncome") else None,
+        "net_income": int(info["netIncome"]) if info.get("netIncome") else None,
+        "per": info.get("trailingPE"),
+        "pbr": info.get("priceToBook"),
+        "roe": round(roe * 100, 2) if roe else None,
+        "dividend_yield": round(div_yield * 100, 2) if div_yield else None,
+        "market_cap": info.get("marketCap"),
+    }
+
+
+# ---------- KR: dartlab DART ----------
+
+
+def fetch_kr_financials_raw(ticker: str) -> dict:  # pragma: no cover
+    """dartlab analysis('financial', '수익성') → marginTrend + returnTrend."""
+    import dartlab
+
+    try:
+        c = dartlab.Company(ticker)
+    except Exception as e:
+        logger.warning("dartlab Company('%s') failed: %s", ticker, e)
+        return {}
+    if c.market != "KR":
+        return {}
+    try:
+        prof = c.analysis("financial", "수익성") or {}
+    except Exception as e:
+        logger.warning("dartlab analysis 수익성 for %s failed: %s", ticker, e)
+        return {}
+    margin = (prof.get("marginTrend") or {}).get("history") or []
+    ret = (prof.get("returnTrend") or {}).get("history") or []
+    return {"margin": margin, "return": ret}
+
+
+def _latest_fully_populated(rows: list[dict], required: tuple[str, ...]) -> dict | None:
+    """가장 최신 연도 중 required 필드가 모두 채워진 row. 없으면 None."""
+    # rows 는 dartlab 이 desc 정렬 (2025, 2024, 2023, ...) — 그대로 순회.
+    for r in rows:
+        if all(r.get(k) is not None for k in required):
+            return r
+    return None
+
+
+def _kr_values(stock: Stock, raw: dict) -> dict | None:
+    margin_rows = raw.get("margin") or []
+    return_rows = raw.get("return") or []
+    margin = _latest_fully_populated(
+        margin_rows, ("revenue", "operatingIncome", "netIncome")
+    )
+    if not margin:
+        return None
+    period = margin.get("period")
+    # 같은 period 의 returnTrend row 매칭 — equity / totalAssets / roe 가져온다.
+    ret = next((r for r in return_rows if r.get("period") == period), {})
+
+    revenue_won = int(margin["revenue"] * _KR_UNIT_TO_WON)
+    op_won = int(margin["operatingIncome"] * _KR_UNIT_TO_WON)
+    net_won = int(margin["netIncome"] * _KR_UNIT_TO_WON)
+    equity_won = int(ret.get("equity") * _KR_UNIT_TO_WON) if ret.get("equity") else None
+
+    # market_cap 은 Stock.market_cap (universe seed / yfinance fallback) 사용.
+    market_cap = int(stock.market_cap) if stock.market_cap else None
+
+    per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
+    pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
+    # dartlab ROE 우선, 없으면 직접 계산.
+    roe = ret.get("roe")
+    if roe is None and equity_won and equity_won > 0:
+        roe = round(net_won / equity_won * 100, 2)
+    elif roe is not None:
+        roe = round(roe, 2)
+
+    return {
+        "stock_id": stock.id,
+        "period": f"{period}A",
+        "period_type": "annual",
+        "revenue": revenue_won,
+        "operating_profit": op_won,
+        "net_income": net_won,
+        "per": per,
+        "pbr": pbr,
+        "roe": roe,
+        "dividend_yield": None,  # dartlab analysis 에 표면화 안 됨 — Phase B 에서 capital() 사용
+        "market_cap": market_cap,
+    }
+
+
+# ---------- 통합 ----------
 
 
 async def sync_financials(db: AsyncSession, stock: Stock) -> dict:
-    """종목의 재무지표를 동기화한다. US/KR 공통 yfinance 경로."""
-    period = f"{date.today().year}Q0"  # 최신 (TTM)
-
+    """종목 시장에 따라 DART(KR) 또는 yfinance(US) 로 재무지표 동기화."""
     try:
-        suffixes = _yf_suffixes_for_market(stock.market)
-        info = await asyncio.to_thread(fetch_yfinance_financials, stock.ticker, suffixes)
-        if not info:
-            return {"financials_synced": 0, "error": "재무 데이터 없음 (yfinance)"}
+        if is_kr(stock.market):
+            raw = await asyncio.to_thread(fetch_kr_financials_raw, stock.ticker)
+            values = _kr_values(stock, raw)
+            label = "DART"
+        else:
+            info = await asyncio.to_thread(fetch_us_financials, stock.ticker)
+            values = _us_values(stock, info, f"{date.today().year}Q0")
+            label = "yfinance"
 
-        roe = info.get("returnOnEquity")
-        div_yield = info.get("dividendYield")
+        if not values:
+            return {"financials_synced": 0, "error": f"재무 데이터 없음 ({label})"}
 
-        values = {
-            "stock_id": stock.id,
-            "period": period,
-            "period_type": "ttm",
-            "revenue": int(info["totalRevenue"]) if info.get("totalRevenue") else None,
-            "operating_profit": int(info["operatingIncome"]) if info.get("operatingIncome") else None,
-            "net_income": int(info["netIncome"]) if info.get("netIncome") else None,
-            "per": info.get("trailingPE"),
-            "pbr": info.get("priceToBook"),
-            "roe": round(roe * 100, 2) if roe else None,
-            "dividend_yield": round(div_yield * 100, 2) if div_yield else None,
-            "market_cap": info.get("marketCap"),
+        update_values = {
+            k: v for k, v in values.items() if k not in ("stock_id", "period", "period_type")
         }
-
-        update_values = {k: v for k, v in values.items() if k not in ("stock_id", "period", "period_type")}
-
         stmt = insert(Financial).values(**values).on_conflict_do_update(
             constraint="uq_financial_stock_period",
             set_=update_values,
         )
         await db.execute(stmt)
         await db.commit()
-        return {"financials_synced": 1}
+        return {"financials_synced": 1, "source": label, "period": values["period"]}
 
     except Exception as e:
         return {"financials_synced": 0, "error": f"재무지표 동기화 실패: {e}"}

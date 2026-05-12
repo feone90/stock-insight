@@ -1,16 +1,18 @@
 """v2 card endpoints: GET card / POST analyze / POST refresh (with cooldown).
 
 가족 dev 환경 self-heal:
-  - `is_analyzable` fail 사유가 'no price history'면 즉시 sync_prices를
-    1회 호출 후 재체크. 사용자는 admin endpoint 의식할 필요 없음.
+  - `is_analyzable` fail 사유가 'no price history'면 즉시 sync_prices 호출.
+  - analyzable 이라도 Financial row 없거나 News 가 5건 미만이면 보강 sync.
+  - analyze 트리거 시 ontology news extraction 도 같이 background 실행.
 """
 from __future__ import annotations
 
 import logging
 import time
+from datetime import date, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.collectors.disclosure import sync_disclosures
@@ -20,10 +22,12 @@ from app.collectors.stock_price import sync_prices
 from app.config import settings
 from app.database import async_session, get_db
 from app.dependencies import get_stock_or_404
-from app.models import Stock
+from app.models import News, Stock
 from app.models.analysis import Analysis
+from app.models.financial import Financial
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.engine import analyze, is_analyzable
+from app.services.ontology import extract_news_relations_for_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -33,24 +37,48 @@ router = APIRouter(prefix="/api/stocks", tags=["cards"])
 _last_refresh: dict[str, float] = {}
 
 
+_MIN_NEWS_FOR_ANALYZE = 5
+
+
 async def _ensure_analyzable(
     ticker: str, stock: Stock, db: AsyncSession
 ) -> tuple[bool, str | None]:
-    """`is_analyzable` 체크. fail 사유가 'no price history' 또는
-    'current_price <= 0'이면 sync_prices 1회 호출 후 재체크 (self-heal).
+    """`is_analyzable` 체크 + 데이터 stale 여부 검사.
 
-    sync_prices는 handler가 넘긴 `db` 세션을 그대로 재사용해야 stock object
-    가 detach되지 않음. exception은 graceful 처리.
+    self-heal 트리거 조건:
+      1. is_analyzable fail (no price history / current_price <= 0)
+      2. Financial row 없음 (PER/PBR/매출 비어있는 카드 방지)
+      3. News 5건 미만 (한 줄 요약이라도 LLM 이 만들 만한 input 보장)
 
-    Returns (ok, reason). 자가 치유 후에도 fail이면 reason 반환.
+    handler 의 `db` 세션을 그대로 재사용해야 stock object detach 안 됨.
     """
     ok, reason = await is_analyzable(ticker)
-    if ok:
-        return True, None
-    if reason in ("no price history", "current_price <= 0"):
-        logger.info("self-heal: syncing all collectors for %s (reason=%s)", ticker, reason)
-        # 4 collector를 한 번에 호출 — 모두 idempotent. collector는 외부 API
-        # 실패 시 dict에 'error' 필드만 담아 반환하므로 exception 거의 없음.
+
+    needs_sync = False
+    sync_reason = reason
+    if not ok and reason in ("no price history", "current_price <= 0"):
+        needs_sync = True
+    elif ok:
+        fin_count = (
+            await db.execute(
+                select(func.count()).select_from(Financial).where(
+                    Financial.stock_id == stock.id
+                )
+            )
+        ).scalar() or 0
+        news_count = (
+            await db.execute(
+                select(func.count()).select_from(News).where(
+                    News.stock_id == stock.id
+                )
+            )
+        ).scalar() or 0
+        if fin_count == 0 or news_count < _MIN_NEWS_FOR_ANALYZE:
+            needs_sync = True
+            sync_reason = f"stale (fin={fin_count} news={news_count})"
+
+    if needs_sync:
+        logger.info("self-heal sync for %s (reason=%s)", ticker, sync_reason)
         try:
             await sync_prices(db, stock)
             await sync_news(db, stock)
@@ -61,6 +89,23 @@ async def _ensure_analyzable(
             return False, f"self-heal failed: {e}"
         ok, reason = await is_analyzable(ticker)
     return ok, reason
+
+
+async def _extract_relations_safe(ticker: str) -> None:
+    """analyze 와 같이 background 에서 도는 ontology 추출. budget/실패는 swallow.
+
+    가족 환경 — 새로 본 종목이면 analyze 직후 supply-chain/competitor 관계도
+    당일치 뉴스에서 한 번 채워줘야 사용자가 카드 다시 안 열어도 됨.
+    """
+    if not can_proceed():
+        logger.info("ontology extract skipped for %s: budget", ticker)
+        return
+    try:
+        await extract_news_relations_for_ticker(
+            ticker, since=date.today() - timedelta(days=7)
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ontology extract failed for %s: %s", ticker, e)
 
 
 @router.get("/{ticker}/card")
@@ -102,6 +147,7 @@ async def trigger_analyze(
     if not ok:
         raise HTTPException(422, f"not analyzable: {reason}")
     bg.add_task(analyze, ticker)
+    bg.add_task(_extract_relations_safe, ticker)
     return {"status": "queued", "ticker": ticker.upper()}
 
 
@@ -126,4 +172,5 @@ async def force_refresh(
         raise HTTPException(422, f"not analyzable: {reason}")
     _last_refresh[key] = now
     bg.add_task(analyze, ticker)
+    bg.add_task(_extract_relations_safe, ticker)
     return {"status": "refresh_queued", "ticker": key}

@@ -146,7 +146,7 @@ async def test_sync_prices_updates_stock(db):
 
 @pytest.mark.asyncio
 async def test_sync_financials_us_stock(db):
-    """US 종목 재무지표 동기화"""
+    """US 종목 — yfinance TTM 경로"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalar_one()
 
@@ -161,7 +161,7 @@ async def test_sync_financials_us_stock(db):
         "netIncome": 95000000000,
     }
 
-    with patch("app.collectors.financials.fetch_yfinance_financials", return_value=mock_info):
+    with patch("app.collectors.financials.fetch_us_financials", return_value=mock_info):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 1
@@ -169,12 +169,12 @@ async def test_sync_financials_us_stock(db):
 
 
 @pytest.mark.asyncio
-async def test_sync_financials_empty_info(db):
-    """빈 info dict 반환 시"""
+async def test_sync_financials_us_empty_info(db):
+    """US — 빈 info dict 반환 시"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalar_one()
 
-    with patch("app.collectors.financials.fetch_yfinance_financials", return_value={}):
+    with patch("app.collectors.financials.fetch_us_financials", return_value={}):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 0
@@ -182,59 +182,74 @@ async def test_sync_financials_empty_info(db):
 
 
 @pytest.mark.asyncio
-async def test_sync_financials_none_info(db):
-    """None 반환 시"""
-    result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
-    stock = result.scalar_one()
-
-    with patch("app.collectors.financials.fetch_yfinance_financials", return_value=None):
-        result = await sync_financials(db, stock)
-
-    assert result["financials_synced"] == 0
-    assert "error" in result
-
-
-@pytest.mark.asyncio
-async def test_sync_financials_kr_yfinance(db):
-    """KR 종목 — yfinance .KS/.KQ 경로"""
+async def test_sync_financials_kr_dart(db):
+    """KR 종목 — dartlab annual analysis('financial', '수익성') 경로"""
     result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
     stock = result.scalar_one()
+    stock.market_cap = 400_000_000_000_000  # 400조원
 
-    mock_info = {
-        "trailingPE": 12.5,
-        "priceToBook": 1.2,
-        "returnOnEquity": 0.085,
-        "marketCap": 400000000000000,
-        "totalRevenue": 300000000000000,
+    mock_raw = {
+        "margin": [
+            {"period": "2024", "revenue": None, "operatingIncome": None, "netIncome": None},
+            {"period": "2023", "revenue": 300_000_000.0, "operatingIncome": 50_000_000.0, "netIncome": 40_000_000.0},
+        ],
+        "return": [
+            {"period": "2024", "netIncome": None, "equity": None, "roe": None},
+            {"period": "2023", "netIncome": 40_000_000.0, "equity": 200_000_000.0, "roe": 20.0},
+        ],
     }
 
-    with patch("app.collectors.financials.fetch_yfinance_financials", return_value=mock_info):
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 1
-    assert "error" not in result
+    assert result.get("source") == "DART"
+    assert result.get("period") == "2023A"
 
 
 @pytest.mark.asyncio
-async def test_sync_financials_kr_yfinance_empty(db):
-    """KR 종목 — yfinance에서 데이터 없음"""
+async def test_sync_financials_kr_no_data(db):
+    """KR — dartlab 이 빈 dict 반환 시"""
     result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
     stock = result.scalar_one()
 
-    with patch("app.collectors.financials.fetch_yfinance_financials", return_value={}):
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value={}):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 0
     assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_kr_partial_history(db):
+    """KR — 최신 연도들이 모두 None 이면 가장 최근 fully-populated 연도 선택"""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.market_cap = 400_000_000_000_000
+
+    mock_raw = {
+        "margin": [
+            {"period": "2025", "revenue": None, "operatingIncome": None, "netIncome": None},
+            {"period": "2024", "revenue": 100.0, "operatingIncome": 20.0, "netIncome": None},  # net 빠짐
+            {"period": "2023", "revenue": 90.0, "operatingIncome": 18.0, "netIncome": 12.0},  # 채택
+        ],
+        "return": [{"period": "2023", "equity": 100.0, "roe": 12.0}],
+    }
+
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 1
+    assert result["period"] == "2023A"
 
 
 @pytest.mark.asyncio
 async def test_sync_financials_exception(db):
-    """yfinance 예외 시"""
+    """US fetch 예외 시 graceful fail"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalar_one()
 
-    with patch("app.collectors.financials.fetch_yfinance_financials", side_effect=Exception("API error")):
+    with patch("app.collectors.financials.fetch_us_financials", side_effect=Exception("API error")):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 0
@@ -242,8 +257,8 @@ async def test_sync_financials_exception(db):
 
 
 @pytest.mark.asyncio
-async def test_sync_financials_partial_data(db):
-    """일부 필드만 있는 경우"""
+async def test_sync_financials_us_partial_data(db):
+    """US — 일부 필드만 있는 경우"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
     stock = result.scalar_one()
 
@@ -253,7 +268,7 @@ async def test_sync_financials_partial_data(db):
         # 나머지 필드 없음
     }
 
-    with patch("app.collectors.financials.fetch_yfinance_financials", return_value=mock_info):
+    with patch("app.collectors.financials.fetch_us_financials", return_value=mock_info):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 1
