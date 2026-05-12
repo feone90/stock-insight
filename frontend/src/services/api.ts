@@ -12,7 +12,10 @@ function authHeaders(): Record<string, string> {
 function userHeader(): Record<string, string> {
   if (typeof window === "undefined") return {};
   const user = localStorage.getItem("stockinsight.activeUser");
-  return user ? { "X-User-Id": user } : {};
+  if (!user) return {};
+  // HTTP header는 ASCII만 허용 — 한국어 이름은 fetch가 TypeError로 거부.
+  // encodeURIComponent로 ASCII 변환. backend가 unquote로 복원.
+  return { "X-User-Id": encodeURIComponent(user) };
 }
 
 function combinedHeaders(): Record<string, string> {

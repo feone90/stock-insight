@@ -1,3 +1,5 @@
+from urllib.parse import unquote
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
@@ -27,7 +29,8 @@ async def _get_user_id(
     """
     header_user = request.headers.get("X-User-Id")
     if header_user and header_user.strip():
-        return header_user.strip()[:64]
+        # frontend가 encodeURIComponent로 ASCII 변환 → 여기서 복원.
+        return unquote(header_user.strip())[:64]
     if not credentials:
         return DEFAULT_USER
     try:
