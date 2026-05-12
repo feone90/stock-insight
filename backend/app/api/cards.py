@@ -31,15 +31,16 @@ _last_refresh: dict[str, float] = {}
 
 
 async def _ensure_analyzable(ticker: str, stock: Stock) -> tuple[bool, str | None]:
-    """`is_analyzable` 체크. 'no price history'면 sync_prices 1회 호출 후 재체크.
+    """`is_analyzable` 체크. fail 사유가 'no price history' 또는
+    'current_price <= 0'이면 sync_prices 1회 호출 후 재체크 (self-heal).
 
     Returns (ok, reason). 자가 치유 후에도 fail이면 reason 반환.
     """
     ok, reason = await is_analyzable(ticker)
     if ok:
         return True, None
-    if reason == "no price history":
-        logger.info("self-heal: syncing prices for %s before analyze", ticker)
+    if reason in ("no price history", "current_price <= 0"):
+        logger.info("self-heal: syncing prices for %s (reason=%s)", ticker, reason)
         async with async_session() as db:
             await sync_prices(db, stock)
         ok, reason = await is_analyzable(ticker)
