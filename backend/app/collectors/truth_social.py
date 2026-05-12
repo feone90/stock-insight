@@ -1,13 +1,13 @@
-"""정치 발언 crawler — 트럼프 X (Twitter) via nitter mirror.
+"""정치 발언 crawler — trumpstruth.org RSS feed.
 
-Truth Social 직접 API는 403 Forbidden (Cloudflare). X (Twitter)가 더
-활성 + nitter는 anonymous RSS mirror라 인증 불필요.
+이전 시도 fail:
+  - truthsocial.com API: 403 (Cloudflare 차단)
+  - nitter (X mirror): instances 다 down
 
-nitter instances는 자주 down → fallback chain (4개 instance). 첫 200 OK +
-valid RSS 응답 사용.
+현재: trumpstruth.org — Truth Social 게시물을 추적/아카이브하는 3rd party.
+정상 RSS 2.0 feed 제공 + 인증 불필요 + fresh (실시간 mirror).
 
-DB source value는 "x_trump_nitter" (truth_social.py 파일 이름은 호환성
-유지 — admin job_id "truth_social"도 그대로).
+DB source value: "trumpstruth_org". source_post_id는 link URL의 statuses/{id}.
 """
 from __future__ import annotations
 
@@ -26,19 +26,9 @@ from app.models.political_signal import PoliticalSignal
 
 logger = logging.getLogger(__name__)
 
-NITTER_USER = "realDonaldTrump"
-
-# Fallback chain — public nitter instances. 자주 down하니 여러 개 시도.
-NITTER_INSTANCES = [
-    "https://nitter.net",
-    "https://nitter.poast.org",
-    "https://nitter.privacydev.net",
-    "https://nitter.cz",
-    "https://nitter.unixfox.eu",
-    "https://nitter.tiekoetter.com",
-]
-
-SOURCE_LABEL = "x_trump_nitter"
+TRUMPSTRUTH_RSS_URL = "https://trumpstruth.org/feed"
+TRUMPSTRUTH_USER = "realDonaldTrump"
+SOURCE_LABEL = "trumpstruth_org"
 
 HEADERS = {
     "User-Agent": (
@@ -50,19 +40,25 @@ HEADERS = {
 
 
 async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
-    """nitter mirror에서 트럼프 X 최근 게시물 fetch + dedup INSERT.
+    """trumpstruth.org RSS feed에서 fetch + dedup INSERT.
 
     Returns:
-        {"fetched": int, "inserted": int, "skipped": int,
-         "instance": str?, "error": str?}
+        {"fetched": int, "inserted": int, "skipped": int, "error": str?}
     """
-    rss_text, used_instance = await _fetch_with_fallback()
-    if not rss_text:
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0, headers=HEADERS, follow_redirects=True
+        ) as client:
+            resp = await client.get(TRUMPSTRUTH_RSS_URL)
+            resp.raise_for_status()
+            rss_text = resp.text
+    except Exception as e:  # noqa: BLE001
+        logger.warning("trumpstruth fetch failed: %s", e)
         return {
             "fetched": 0,
             "inserted": 0,
             "skipped": 0,
-            "error": "모든 nitter instance fail (403/timeout/down)",
+            "error": f"fetch failed: {e}",
         }
 
     items = _parse_rss(rss_text)
@@ -71,7 +67,6 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
             "fetched": 0,
             "inserted": 0,
             "skipped": 0,
-            "instance": used_instance,
             "error": "RSS parse 결과 0건",
         }
 
@@ -88,7 +83,7 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
             .values(
                 source=SOURCE_LABEL,
                 source_post_id=str(post_id)[:128],
-                author=NITTER_USER,
+                author=TRUMPSTRUTH_USER,
                 posted_at=item["posted_at"],
                 content=content[:4000],
                 content_lang="en",
@@ -106,8 +101,7 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
 
     await db.commit()
     logger.info(
-        "x_trump_nitter sync: instance=%s fetched=%d inserted=%d skipped=%d",
-        used_instance,
+        "trumpstruth sync: fetched=%d inserted=%d skipped=%d",
         len(items),
         inserted,
         skipped,
@@ -116,28 +110,7 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
         "fetched": len(items),
         "inserted": inserted,
         "skipped": skipped,
-        "instance": used_instance,
     }
-
-
-async def _fetch_with_fallback() -> tuple[str | None, str | None]:
-    """nitter 4-6 instance 순차 시도. 첫 valid RSS 응답 사용."""
-    async with httpx.AsyncClient(timeout=10.0, headers=HEADERS, follow_redirects=True) as client:
-        for instance in NITTER_INSTANCES:
-            url = f"{instance}/{NITTER_USER}/rss"
-            try:
-                resp = await client.get(url)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("nitter %s fail: %s", instance, e)
-                continue
-            if resp.status_code != 200:
-                logger.debug("nitter %s status %d", instance, resp.status_code)
-                continue
-            body = resp.text
-            if "<rss" not in body and "<feed" not in body:
-                continue
-            return body, instance
-    return None, None
 
 
 def _parse_rss(rss_text: str) -> list[dict]:
