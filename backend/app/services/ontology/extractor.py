@@ -39,11 +39,14 @@ async def extract_relations(
     prompt_template: str,
     source_url: str | None = None,
     adapter: "LLMAdapter | None" = None,
+    prompt_kwargs: dict | None = None,
 ) -> list[ExtractedRelation]:
     """Run one body through the LLM and return validated relations.
 
     Empty / very short body → [] (no LLM call).
     Body longer than _BODY_TOKEN_BUDGET → truncate (chunking deferred to v2+).
+    `prompt_kwargs` is merged into `prompt_template.format(body=..., **kwargs)` so
+    callers can inject focal_ticker / focal_name etc into the prompt.
     """
     if not body or len(body.strip()) < 50:
         return []
@@ -51,7 +54,9 @@ async def extract_relations(
     truncated = body[:_BODY_TOKEN_BUDGET]
     adapter = adapter or get_adapter()
 
-    relations = await _call_with_retry(adapter, prompt_template, truncated)
+    relations = await _call_with_retry(
+        adapter, prompt_template, truncated, prompt_kwargs or {}
+    )
     if source_url:
         for rel in relations:
             rel.extra_metadata.setdefault("source_url", source_url)
@@ -59,11 +64,11 @@ async def extract_relations(
 
 
 async def _call_with_retry(
-    adapter: "LLMAdapter", prompt_template: str, body: str
+    adapter: "LLMAdapter", prompt_template: str, body: str, prompt_kwargs: dict
 ) -> list[ExtractedRelation]:
     last_error: str | None = None
     for attempt in range(_MAX_RETRIES + 1):
-        prompt = prompt_template.format(body=body)
+        prompt = prompt_template.format(body=body, **prompt_kwargs)
         if attempt > 0:
             prompt += SCHEMA_REMINDER
         try:

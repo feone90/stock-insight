@@ -100,6 +100,10 @@ async def _run_for_ticker(
             prompt_template=NEWS_COMPETITOR_PROMPT,
             source_url=art.url,
             adapter=llm_adapter,
+            prompt_kwargs={
+                "focal_ticker": ticker,
+                "focal_name": stock.name or ticker,
+            },
         )
         relations.extend(rels)
 
