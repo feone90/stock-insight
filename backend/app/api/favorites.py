@@ -40,6 +40,22 @@ async def _get_user_id(
         return DEFAULT_USER
 
 
+@router.get("/users", response_model=list[str])
+async def list_known_users(db: AsyncSession = Depends(get_db)):
+    """즐겨찾기 1건이라도 추가한 user_id 전체 리스트.
+
+    가족 dev: localStorage user는 device별이라 sync 안 됨. backend가 알고 있는
+    user list를 frontend가 fetch → 본인 localStorage list와 merge → 모든 device
+    에 가족 user list 자동 노출.
+    """
+    from sqlalchemy import distinct
+
+    rows = (
+        await db.execute(select(distinct(Favorite.user_id)).order_by(Favorite.user_id))
+    ).scalars().all()
+    return [u for u in rows if u and u != DEFAULT_USER]
+
+
 @router.get("", response_model=list[StockResponse])
 async def list_favorites(user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
     # 로그인 사용자의 즐겨찾기가 비어있으면 default 즐겨찾기를 복사

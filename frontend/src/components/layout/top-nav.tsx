@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { StockSearch } from "@/components/search/stock-search";
-import { syncAll } from "@/services/api";
+import { getKnownUsers, syncAll } from "@/services/api";
 import { getStoredAuth, isAdmin, login, logout, type AuthUser } from "@/services/auth";
 import {
   addUser,
@@ -30,11 +30,24 @@ export function TopNav() {
 
   useEffect(() => {
     setUser(getStoredAuth());
-    setUsers(getUsers());
     setActive(getActiveUser());
+
+    // localStorage user list + backend known users merge
+    const loadUsers = async () => {
+      const local = getUsers();
+      try {
+        const remote = await getKnownUsers();
+        const merged = Array.from(new Set([...local, ...remote])).sort();
+        setUsers(merged);
+      } catch {
+        setUsers(local);
+      }
+    };
+    loadUsers();
+
     return onUserChanged(() => {
-      setUsers(getUsers());
       setActive(getActiveUser());
+      loadUsers();
     });
   }, []);
 

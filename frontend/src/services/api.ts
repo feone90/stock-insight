@@ -75,6 +75,10 @@ export async function addFavorite(ticker: string): Promise<void> {
   await postJson(`/api/favorites/${ticker}`);
 }
 
+export async function getKnownUsers(): Promise<string[]> {
+  return fetchJson("/api/favorites/users");
+}
+
 export async function removeFavorite(ticker: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/favorites/${ticker}`, {
     method: "DELETE",
