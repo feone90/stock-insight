@@ -176,6 +176,23 @@ export interface Decision {
   interpretation?: Interpretation | null;
 }
 
+export interface PoliticalSignalCard {
+  posted_at: string;
+  author: string;
+  source: string;
+  url: string | null;
+  summary_ko: string;
+  overall_sentiment: "bullish" | "bearish" | "neutral" | "mixed";
+  macro_themes: string[];
+  sentiment: "bullish" | "bearish" | "neutral";
+  direction: "long" | "short" | "avoid";
+  strength: "high" | "medium" | "low";
+  confidence: number;
+  expected_window: "minutes" | "hours" | "1-3days" | "1-2weeks";
+  reasoning: string;
+  sector_impact: string | null;
+}
+
 export interface StockCard {
   // Stock metadata
   ticker: string;
@@ -195,6 +212,7 @@ export interface StockCard {
   technical: TechMomentum;
   relations: RelationsSummary;
   news: NewsItem[];
+  political_signals: PoliticalSignalCard[];
   macro: MacroContext;
   fundamentals: Fundamentals;
   decision: Decision;
