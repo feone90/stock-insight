@@ -46,12 +46,22 @@ export function StockSearch() {
       setResults([]);
       return;
     }
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
-      const data = await searchStocks(query);
-      setResults(data);
-      setSelectedIndex(0);
+      try {
+        const data = await searchStocks(query, controller.signal);
+        if (!controller.signal.aborted) {
+          setResults(data);
+          setSelectedIndex(0);
+        }
+      } catch {
+        // aborted or network error — ignore
+      }
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
   const handleSelect = (ticker: string) => {

@@ -9,9 +9,10 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
+async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: authHeaders(),
+    signal,
   });
   if (!res.ok) {
     throw new Error(`API error: ${res.status}`);
@@ -28,8 +29,11 @@ async function postJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
-export async function searchStocks(query: string): Promise<Stock[]> {
-  return fetchJson(`/api/stocks/search?q=${encodeURIComponent(query)}`);
+export async function searchStocks(
+  query: string,
+  signal?: AbortSignal
+): Promise<Stock[]> {
+  return fetchJson(`/api/stocks/search?q=${encodeURIComponent(query)}`, signal);
 }
 
 export async function getStock(ticker: string): Promise<Stock> {
