@@ -83,12 +83,20 @@ async def _run_for_ticker(
     ).scalars().all()
 
     relations: list[ExtractedRelation] = []
+    skipped_short = 0
     for art in articles:
         body = (art.content or "").strip()
-        if len(body) < 100:
+        # 50자 임계 — 기존 100자는 Naver API description(~150자)이 trafilatura
+        # 본문 스크래핑 실패해서 끝부분만 남는 케이스에서 KR 종목 전부 skip.
+        # "한미반도체, 삼성전자에 HBM 본더 공급" 같은 한 줄짜리도 supply
+        # signal 자체는 살려 LLM 에게 일단 넘긴다.
+        if len(body) < 50:
+            skipped_short += 1
             continue
+        # title 도 prompt 에 같이 넣어줘 short-body 케이스에서 LLM 이 entity 식별.
+        enriched = f"제목: {art.title}\n\n{body}"
         rels = await extract_relations(
-            body=body,
+            body=enriched,
             prompt_template=NEWS_COMPETITOR_PROMPT,
             source_url=art.url,
             adapter=llm_adapter,
@@ -98,6 +106,8 @@ async def _run_for_ticker(
     summary = await validate_and_route(relations, source=_SOURCE, session=session)
     summary["ticker"] = ticker
     summary["articles_seen"] = len(articles)
+    summary["articles_skipped_short"] = skipped_short
+    summary["llm_relations_returned"] = len(relations)
     return summary
 
 

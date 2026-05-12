@@ -188,17 +188,19 @@ async def run_fred_macro_sync() -> None:
     logger.info("fred nightly: %s", summary)
 
 
-async def run_news_extraction() -> None:
+async def run_news_extraction() -> dict:
     """Nightly news LLM RAG over Tier 1+2 universe (P1.6 v3).
 
     Conservative: limit=50 ticker, 5 articles each, 7-day window. Filters
     null-content articles. Cost gate via `can_proceed()`.
+    Returns a summary dict so admin endpoint can surface results to the
+    operator without scraping logs.
     """
     from app.services.analyst.cost import can_proceed
 
     if not can_proceed():
         logger.warning("news extraction skipped: daily LLM budget exceeded")
-        return
+        return {"skipped": "budget exceeded", "tickers": 0}
 
     since = date.today() - timedelta(days=7)
     try:
@@ -207,7 +209,7 @@ async def run_news_extraction() -> None:
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("news extraction failed: %s", e)
-        return
+        return {"error": str(e), "tickers": 0}
 
     articles = sum(s.get("articles_seen", 0) for s in summaries)
     upserted = sum(s.get("upserted", 0) for s in summaries)
@@ -216,6 +218,15 @@ async def run_news_extraction() -> None:
         "news nightly: tickers=%d articles=%d upserted=%d buffered=%d",
         len(summaries), articles, upserted, buffered,
     )
+    per_ticker_nonzero = [s for s in summaries if s.get("articles_seen", 0) > 0]
+    return {
+        "tickers_processed": len(summaries),
+        "tickers_with_articles": len(per_ticker_nonzero),
+        "articles_seen_total": articles,
+        "upserted_total": upserted,
+        "buffered_total": buffered,
+        "sample_summaries": per_ticker_nonzero[:5],  # first 5 nonzero for inspection
+    }
 
 
 async def run_truth_social_pipeline() -> None:

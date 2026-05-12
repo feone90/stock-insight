@@ -186,6 +186,76 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
     return {"status": "ok", "job": job_id, "result": result if result is not None else {}}
 
 
+@router.post("/extract_relations/{ticker}")
+async def extract_relations_for_one(
+    ticker: str, _admin: UserInfo = Depends(require_admin)
+):
+    """한 ticker에 대해 LLM news relation extraction 강제 실행 + 결과 dict 반환.
+
+    universe-wide news_extraction 잡이 빈 result 만 보여줘서 진단이 어렵기 때문에
+    per-ticker 진입점을 따로 둔다. articles_seen/upserted/buffered + (있다면)
+    LLM 이 만든 first relation 예시를 노출.
+    """
+    from datetime import date, timedelta
+    from app.services.ontology import extract_news_relations_for_ticker
+
+    try:
+        summary = await extract_news_relations_for_ticker(
+            ticker, since=date.today() - timedelta(days=14), articles_per_run=10
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, detail=f"extract failed: {e}")
+    return {"status": "ok", "ticker": ticker, "summary": summary}
+
+
+@router.get("/inspect/news/{ticker}")
+async def inspect_news(
+    ticker: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: UserInfo = Depends(require_admin),
+):
+    """ticker의 최근 뉴스 본문 길이 분포 + 샘플 5건. 본문 scraping 확인용."""
+    from sqlalchemy import func
+    from app.models.news import News
+
+    stock = (
+        await db.execute(select(Stock).where(Stock.ticker == ticker.upper()))
+    ).scalar_one_or_none()
+    if not stock:
+        raise HTTPException(404, detail=f"ticker '{ticker}' not in DB")
+    total = (
+        await db.execute(
+            select(func.count()).select_from(News).where(News.stock_id == stock.id)
+        )
+    ).scalar() or 0
+    long_count = (
+        await db.execute(
+            select(func.count()).select_from(News).where(
+                News.stock_id == stock.id,
+                func.length(News.content) >= 200,
+            )
+        )
+    ).scalar() or 0
+    samples = (
+        await db.execute(
+            select(News.title, News.source, News.url, func.length(News.content).label("len"))
+            .where(News.stock_id == stock.id)
+            .order_by(News.published_at.desc())
+            .limit(5)
+        )
+    ).all()
+    return {
+        "ticker": ticker.upper(),
+        "stock_id": stock.id,
+        "total_news": total,
+        "with_long_body": long_count,
+        "samples": [
+            {"title": s.title, "source": s.source, "url": s.url, "content_len": s.len}
+            for s in samples
+        ],
+    }
+
+
 @router.post("/political/seed_sample")
 async def seed_political_sample(
     db: AsyncSession = Depends(get_db),
