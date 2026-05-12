@@ -19,6 +19,8 @@ from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
 from app.collectors.exchange_rate import sync_exchange_rates
 from app.collectors.fred import sync_fred
+from app.collectors.truth_social import sync_truth_social
+from app.services.political.analyzer import analyze_pending_signals
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
@@ -215,6 +217,36 @@ async def run_news_extraction() -> None:
     )
 
 
+async def run_truth_social_pipeline() -> None:
+    """Hourly Truth Social fetch + LLM analyze.
+
+    1. truth_social crawler — Mastodon API에서 트럼프 statuses fetch
+    2. analyze_pending_signals — analyzed_at IS NULL 인 signal LLM 분석
+       (universe filter + cache hit 시 재호출 X)
+
+    cost guard: can_proceed() 체크. budget 초과 시 fetch만 하고 analyze skip.
+    """
+    async with async_session() as db:
+        try:
+            crawl_result = await sync_truth_social(db)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("truth_social fetch failed: %s", e)
+            return
+    logger.info("truth_social hourly fetch: %s", crawl_result)
+
+    if not can_proceed():
+        logger.warning("truth_social analyze skipped: daily LLM budget exceeded")
+        return
+
+    async with async_session() as db:
+        try:
+            analyze_result = await analyze_pending_signals(db, limit=20)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("political analyze failed: %s", e)
+            return
+    logger.info("political hourly analyze: %s", analyze_result)
+
+
 async def run_inverse_verification() -> None:
     """Nightly price-correlation check on inverse-signal relations (P1.6 v3).
 
@@ -348,6 +380,16 @@ def init_scheduler():
         run_inverse_verification,
         CronTrigger(hour=7, minute=0, timezone=tz),
         id="ontology_inverse_verify_daily",
+        replace_existing=True,
+    )
+
+    # Truth Social hourly pipeline (트럼프 발언 fetch + LLM 영향 종목 매핑).
+    # 매시 정각 — 트럼프 게시물 빈도 (~10-30/day) 고려 hourly 충분. 비용 보호는
+    # can_proceed() (daily LLM budget cap)이 처리.
+    scheduler.add_job(
+        run_truth_social_pipeline,
+        CronTrigger(minute=0, timezone=tz),  # 매시 정각
+        id="political_truth_social_hourly",
         replace_existing=True,
     )
 
