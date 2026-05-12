@@ -148,10 +148,15 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
 
     from app.collectors.truth_social import sync_truth_social
     from app.database import async_session as _async_session
+    from app.services.political.analyzer import analyze_pending_signals
 
     async def _truth_social_job():
         async with _async_session() as db:
             return await sync_truth_social(db)
+
+    async def _political_analyze_job():
+        async with _async_session() as db:
+            return await analyze_pending_signals(db)
 
     jobs = {
         "fred": run_fred_macro_sync,
@@ -162,6 +167,7 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
         "universe_refresh": nightly_universe_refresh,
         "sync_favorites": scheduled_sync_job,
         "truth_social": _truth_social_job,
+        "political_analyze": _political_analyze_job,
     }
     if job_id not in jobs:
         raise HTTPException(
