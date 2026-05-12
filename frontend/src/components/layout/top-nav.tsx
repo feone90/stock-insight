@@ -5,6 +5,14 @@ import { useEffect, useState } from "react";
 import { StockSearch } from "@/components/search/stock-search";
 import { syncAll } from "@/services/api";
 import { getStoredAuth, isAdmin, login, logout, type AuthUser } from "@/services/auth";
+import {
+  addUser,
+  getActiveUser,
+  getUsers,
+  onUserChanged,
+  removeUser,
+  setActiveUser,
+} from "@/services/user";
 import { showToast } from "@/components/ui/toast";
 
 export function TopNav() {
@@ -14,8 +22,20 @@ export function TopNav() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  // 가족 user picker (localStorage 기반)
+  const [users, setUsers] = useState<string[]>([]);
+  const [active, setActive] = useState<string | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [newUserName, setNewUserName] = useState("");
+
   useEffect(() => {
     setUser(getStoredAuth());
+    setUsers(getUsers());
+    setActive(getActiveUser());
+    return onUserChanged(() => {
+      setUsers(getUsers());
+      setActive(getActiveUser());
+    });
   }, []);
 
   const handleSyncAll = async () => {
@@ -61,6 +81,29 @@ export function TopNav() {
     showToast("로그아웃 완료", "info");
   };
 
+  const handleAddUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newUserName.trim();
+    if (!name) return;
+    addUser(name);
+    setActiveUser(name);
+    setNewUserName("");
+    setShowPicker(false);
+    showToast(`사용자 '${name}'으로 전환됨`, "success");
+  };
+
+  const handleSwitchUser = (name: string) => {
+    setActiveUser(name);
+    setShowPicker(false);
+    showToast(`'${name}'으로 전환됨`, "success");
+  };
+
+  const handleRemoveUser = (name: string, ev: React.MouseEvent) => {
+    ev.stopPropagation();
+    if (!confirm(`'${name}' 사용자를 삭제하시겠어요? 즐겨찾기 데이터는 서버에 남습니다.`)) return;
+    removeUser(name);
+  };
+
   return (
     <nav className="flex flex-wrap items-center justify-between gap-y-2 border-b border-slate-800 bg-slate-950 px-3 py-2 md:px-6 md:py-3">
       <div className="flex items-center gap-2 md:gap-4">
@@ -91,6 +134,64 @@ export function TopNav() {
         >
           즐겨찾기
         </Link>
+
+        {/* 가족 user picker — 인증 없이 즐겨찾기 분리 */}
+        <div className="relative">
+          <button
+            onClick={() => setShowPicker((v) => !v)}
+            className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200 hover:bg-slate-700"
+          >
+            <span>👤</span>
+            <span>{active || "사용자 선택"}</span>
+            <span className="text-xs text-slate-500">▼</span>
+          </button>
+          {showPicker && (
+            <div className="absolute right-0 top-9 z-50 w-56 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl">
+              {users.length === 0 ? (
+                <p className="px-2 py-2 text-xs text-slate-500">
+                  사용자 없음 — 아래에 이름 입력해 추가
+                </p>
+              ) : (
+                <ul className="mb-2 max-h-40 overflow-y-auto">
+                  {users.map((u) => (
+                    <li
+                      key={u}
+                      onClick={() => handleSwitchUser(u)}
+                      className={`group flex cursor-pointer items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-slate-800 ${
+                        u === active ? "text-yellow-300" : "text-slate-200"
+                      }`}
+                    >
+                      <span>{u === active ? "✓ " : ""}{u}</span>
+                      <button
+                        onClick={(ev) => handleRemoveUser(u, ev)}
+                        className="invisible text-xs text-slate-500 hover:text-red-400 group-hover:visible"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form onSubmit={handleAddUser} className="flex gap-1 border-t border-slate-800 pt-2">
+                <input
+                  type="text"
+                  placeholder="새 사용자 이름"
+                  value={newUserName}
+                  onChange={(e) => setNewUserName(e.target.value)}
+                  className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1 text-sm text-slate-200 outline-none focus:border-blue-500"
+                  maxLength={32}
+                />
+                <button
+                  type="submit"
+                  className="rounded bg-blue-600 px-2 py-1 text-sm text-white hover:bg-blue-500"
+                >
+                  +
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+
         {user ? (
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">{user.email}</span>

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select
@@ -17,9 +17,17 @@ DEFAULT_USER = "default"
 
 
 async def _get_user_id(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
 ) -> str:
-    """인증된 경우 이메일, 아니면 'default' 반환."""
+    """우선순위: X-User-Id header (가족 별 user) > JWT > 'default'.
+
+    가족 dev에서는 로그인 없이 frontend localStorage 기반 user switcher가
+    'X-User-Id: <name>'을 자동 첨부 → 사용자별 즐겨찾기 분리.
+    """
+    header_user = request.headers.get("X-User-Id")
+    if header_user and header_user.strip():
+        return header_user.strip()[:64]
     if not credentials:
         return DEFAULT_USER
     try:

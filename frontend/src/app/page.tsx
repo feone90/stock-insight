@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getFavorites } from "@/services/api";
+import { onUserChanged } from "@/services/user";
 import type { Stock } from "@/types/stock";
 
 export default function Home() {
@@ -10,10 +11,15 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getFavorites()
-      .then(setFavorites)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    const reload = () => {
+      setLoading(true);
+      getFavorites()
+        .then(setFavorites)
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    };
+    reload();
+    return onUserChanged(reload);
   }, []);
 
   return (

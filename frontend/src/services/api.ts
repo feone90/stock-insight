@@ -9,9 +9,19 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function userHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const user = localStorage.getItem("stockinsight.activeUser");
+  return user ? { "X-User-Id": user } : {};
+}
+
+function combinedHeaders(): Record<string, string> {
+  return { ...authHeaders(), ...userHeader() };
+}
+
 async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: authHeaders(),
+    headers: combinedHeaders(),
     signal,
   });
   if (!res.ok) {
@@ -23,7 +33,7 @@ async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 async function postJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: authHeaders(),
+    headers: combinedHeaders(),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
