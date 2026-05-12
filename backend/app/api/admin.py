@@ -182,6 +182,107 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
     return {"status": "ok", "job": job_id, "result": result if result is not None else {}}
 
 
+@router.post("/political/seed_sample")
+async def seed_political_sample(
+    db: AsyncSession = Depends(get_db),
+    _admin: UserInfo = Depends(require_admin),
+):
+    """Demo/검증용 — 실제 트럼프 매크로 발언 sample 5개 seed.
+
+    trumpstruth.org/feed의 RT 다수로 substantive content 부족 + pagination
+    제한이라 historical backfill 어려움. demo + UI 검증을 위해 매크로
+    영향 명확한 sample 5개를 직접 insert. analyzer가 ticker 매핑.
+
+    실제 트럼프가 최근 1년 사이 했던 발언의 paraphrase. demo source 명시
+    (source='sample_macro'). 운영 시점에는 매시 cron이 자연 축적.
+    """
+    from datetime import datetime, timedelta
+    from app.models.political_signal import PoliticalSignal
+
+    samples = [
+        {
+            "id": "sample_tariff_china_2026_05_10",
+            "posted_at": datetime.utcnow() - timedelta(days=2),
+            "content": (
+                "China is going to pay a 60% TARIFF on ALL goods coming into our "
+                "Country. This will protect American Semiconductor, Auto, and Steel "
+                "industries. Make America Great Again!"
+            ),
+            "url": "https://example.com/sample/tariff",
+        },
+        {
+            "id": "sample_ai_infra_2026_05_09",
+            "posted_at": datetime.utcnow() - timedelta(days=3),
+            "content": (
+                "MASSIVE new AI infrastructure deal — $500 BILLION investment in "
+                "American semiconductors and data centers. NVIDIA, AMD will benefit "
+                "tremendously. This is the future!"
+            ),
+            "url": "https://example.com/sample/ai",
+        },
+        {
+            "id": "sample_iran_sanctions_2026_05_08",
+            "posted_at": datetime.utcnow() - timedelta(days=4),
+            "content": (
+                "Iran will face the toughest SANCTIONS ever. Oil prices will surge. "
+                "We will not allow them to have nuclear weapons. American energy "
+                "independence FIRST!"
+            ),
+            "url": "https://example.com/sample/iran",
+        },
+        {
+            "id": "sample_fed_rate_2026_05_07",
+            "posted_at": datetime.utcnow() - timedelta(days=5),
+            "content": (
+                "The Federal Reserve must CUT rates immediately. The economy is "
+                "STRONG but high rates are hurting American businesses and homeowners. "
+                "We need lower rates NOW!"
+            ),
+            "url": "https://example.com/sample/fed",
+        },
+        {
+            "id": "sample_korea_chip_2026_05_06",
+            "posted_at": datetime.utcnow() - timedelta(days=6),
+            "content": (
+                "South Korea is taking advantage of our trade deals. We will impose "
+                "TARIFFS on Korean semiconductor and auto imports. Samsung, Hyundai "
+                "must build factories in America!"
+            ),
+            "url": "https://example.com/sample/korea",
+        },
+    ]
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    inserted = 0
+    for s in samples:
+        stmt = (
+            pg_insert(PoliticalSignal)
+            .values(
+                source="sample_macro",
+                source_post_id=s["id"],
+                author="realDonaldTrump",
+                posted_at=s["posted_at"],
+                content=s["content"],
+                content_lang="en",
+                url=s["url"],
+            )
+            .on_conflict_do_nothing(
+                index_elements=["source", "source_post_id"],
+            )
+        )
+        result = await db.execute(stmt)
+        if result.rowcount and result.rowcount > 0:
+            inserted += 1
+    await db.commit()
+    return {
+        "status": "ok",
+        "inserted": inserted,
+        "total_samples": len(samples),
+        "next_step": "POST /api/admin/jobs/run/political_analyze",
+    }
+
+
 @router.get("/political/status")
 async def political_status(
     db: AsyncSession = Depends(get_db),
