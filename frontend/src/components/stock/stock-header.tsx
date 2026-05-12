@@ -82,7 +82,7 @@ export function StockHeader({ stock, onSyncComplete }: Props) {
         </div>
         <div
           className={`text-sm font-medium ${
-            stock.change_percent >= 0 ? "text-green-400" : "text-red-400"
+            stock.change_percent >= 0 ? "text-red-400" : "text-blue-400"
           }`}
         >
           {stock.change_percent >= 0 ? "▲" : "▼"}{" "}

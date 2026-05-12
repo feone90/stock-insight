@@ -4,10 +4,10 @@ import type { StockCard } from "@/types/card";
 
 const GRADE_FG = {
   S: "text-violet-600 dark:text-violet-400",
-  A: "text-emerald-600 dark:text-emerald-400",
+  A: "text-red-600 dark:text-red-400",
   B: "text-cyan-600 dark:text-cyan-400",
   C: "text-amber-600 dark:text-amber-400",
-  D: "text-rose-600 dark:text-rose-400",
+  D: "text-blue-600 dark:text-blue-400",
 } as const;
 
 const STANCE_LABEL = {

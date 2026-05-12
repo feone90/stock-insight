@@ -41,12 +41,12 @@ function ThesisExpanded({ thesis }: { thesis: Thesis }) {
 
       <ClaimList
         label="긍정 근거"
-        labelClass="text-emerald-700 dark:text-emerald-400"
+        labelClass="text-red-700 dark:text-red-400"
         claims={thesis.supports.map((c) => c.text)}
       />
       <ClaimList
         label="반대 근거"
-        labelClass="text-rose-700 dark:text-rose-400"
+        labelClass="text-blue-700 dark:text-blue-400"
         claims={thesis.opposes.map((c) => c.text)}
       />
 

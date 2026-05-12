@@ -63,8 +63,8 @@ export function HeroChart({
 
       const tokens = pick(chartTokens, mode);
       const isDark = mode === "dark";
-      const upColor = isDark ? "#34d399" : "#059669"; // emerald 400/600
-      const downColor = isDark ? "#fb7185" : "#e11d48"; // rose 400/600
+      const upColor = isDark ? "#f87171" : "#dc2626"; // 한국 관습: 상승=빨강 (red 400/600)
+      const downColor = isDark ? "#60a5fa" : "#2563eb"; // 한국 관습: 하락=파랑 (blue 400/600)
       const ma20Color = isDark
         ? "rgba(148, 163, 184, 0.55)"
         : "rgba(100, 116, 139, 0.45)";
@@ -156,11 +156,11 @@ export function HeroChart({
     <div className="relative">
       <div className="absolute z-10 top-2 left-2 flex items-center gap-3 text-[11px] text-[var(--surface-text-muted)] bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md px-2 py-1 shadow-sm">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-3 bg-emerald-500 dark:bg-emerald-400" />
+          <span className="inline-block w-2 h-3 bg-red-500 dark:bg-red-400" />
           상승
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-3 bg-rose-500 dark:bg-rose-400" />
+          <span className="inline-block w-2 h-3 bg-blue-500 dark:bg-blue-400" />
           하락
         </span>
         <span

@@ -9,10 +9,10 @@ const STANCE_LABEL = {
 } as const;
 
 const STANCE_BG = {
-  BUY: "bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300 border-emerald-500/30",
+  BUY: "bg-red-500/15 text-red-700 dark:bg-red-500/20 dark:text-red-300 border-red-500/30",
   WATCH:
     "bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 border-amber-500/30",
-  REJECT: "bg-rose-500/15 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 border-rose-500/30",
+  REJECT: "bg-blue-500/15 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300 border-blue-500/30",
 } as const;
 
 /**
@@ -25,9 +25,9 @@ export function CardHeader({ card }: { card: StockCard }) {
   const sign = change > 0 ? "+" : "";
   const changeColor =
     change > 0
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? "text-red-600 dark:text-red-400"
       : change < 0
-        ? "text-rose-600 dark:text-rose-400"
+        ? "text-blue-600 dark:text-blue-400"
         : "text-[var(--surface-text-muted)]";
   const currencyMark = card.market === "KR" ? "₩" : card.market === "US" ? "$" : "";
 

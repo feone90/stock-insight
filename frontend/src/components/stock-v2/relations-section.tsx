@@ -138,9 +138,9 @@ function RelationRow({ rel }: { rel: Relation }) {
     change == null
       ? "text-[var(--surface-text-muted)]"
       : change > 0
-        ? "text-emerald-600 dark:text-emerald-400"
+        ? "text-red-600 dark:text-red-400"
         : change < 0
-          ? "text-rose-600 dark:text-rose-400"
+          ? "text-blue-600 dark:text-blue-400"
           : "text-[var(--surface-text-muted)]";
 
   const confidence = rel.confidence ?? 0.5;
@@ -187,12 +187,12 @@ function RelationRow({ rel }: { rel: Relation }) {
 
 function SignalBadge({ direction }: { direction?: SignalDirection }) {
   if (direction === "inverse") {
-    return <span className="text-rose-600 dark:text-rose-400" title="역(zero-sum) 신호">⇄</span>;
+    return <span className="text-blue-600 dark:text-blue-400" title="역(zero-sum) 신호">⇄</span>;
   }
   if (direction === "negative") {
     return <span className="text-amber-600 dark:text-amber-400" title="부정 신호">↓</span>;
   }
-  return <span className="text-emerald-600 dark:text-emerald-400" title="긍정 신호">↑</span>;
+  return <span className="text-red-600 dark:text-red-400" title="긍정 신호">↑</span>;
 }
 
 function compareRelations(a: Relation, b: Relation, selfIsKR: boolean | null): number {

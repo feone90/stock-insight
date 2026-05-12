@@ -11,15 +11,15 @@ const IMPACT_EMOJI: Record<NewsItem["impact"], string> = {
 };
 
 const IMPACT_COLOR: Record<NewsItem["impact"], string> = {
-  positive: "text-emerald-600 dark:text-emerald-400",
-  negative: "text-rose-600 dark:text-rose-400",
+  positive: "text-red-600 dark:text-red-400",
+  negative: "text-blue-600 dark:text-blue-400",
   mixed: "text-amber-600 dark:text-amber-400",
   neutral: "text-[var(--surface-text-muted)]",
 };
 
 const DIRECTION_BADGE: Record<PoliticalSignalCard["direction"], { label: string; cls: string }> = {
-  long: { label: "📈 매수 시그널", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40" },
-  short: { label: "📉 매도/회피 시그널", cls: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/40" },
+  long: { label: "📈 매수 시그널", cls: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/40" },
+  short: { label: "📉 매도/회피 시그널", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/40" },
   avoid: { label: "⏸ 관망", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40" },
 };
 
