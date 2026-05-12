@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.collectors.scraper import scrape_news_content
+from app.markets import is_us
 from app.models import Stock
 from app.models.news import News
 
@@ -231,7 +232,7 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
 
 async def sync_news(db: AsyncSession, stock: Stock) -> dict:
     """종목 시장에 따라 적절한 뉴스 소스로 동기화한다."""
-    if stock.market in ("NYSE", "NASDAQ"):
+    if is_us(stock.market):
         yf_result = await _sync_yfinance_news(db, stock)
         api_result = await _sync_newsapi(db, stock)
         total = yf_result.get("news_synced", 0) + api_result.get("news_synced", 0)

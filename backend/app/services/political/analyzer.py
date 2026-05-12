@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.markets import KR_MARKETS, US_MARKETS
 from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.stock import Stock
 from app.services.analyst import get_analyst_adapter
@@ -179,7 +180,7 @@ async def _universe_hint(db: AsyncSession) -> tuple[list[str], list[str], set[st
     kr_rows = (
         await db.execute(
             select(Stock.ticker, Stock.name)
-            .where(Stock.tier.in_([1, 2]), Stock.market.in_(["KOSPI", "KOSDAQ", "KRX"]))
+            .where(Stock.tier.in_([1, 2]), Stock.market.in_(KR_MARKETS))
             .order_by(Stock.tier.asc())
             .limit(MAX_HINT_TICKERS_PER_MARKET)
         )
@@ -187,7 +188,7 @@ async def _universe_hint(db: AsyncSession) -> tuple[list[str], list[str], set[st
     us_rows = (
         await db.execute(
             select(Stock.ticker, Stock.name)
-            .where(Stock.tier.in_([1, 2]), Stock.market.in_(["NASDAQ", "NYSE", "US", "NMS"]))
+            .where(Stock.tier.in_([1, 2]), Stock.market.in_(US_MARKETS))
             .order_by(Stock.tier.asc())
             .limit(MAX_HINT_TICKERS_PER_MARKET)
         )

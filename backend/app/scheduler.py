@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 
 from app.config import settings
 from app.database import async_session
+from app.markets import KR_MARKETS, US_MARKETS
 from app.models import Favorite, Stock
 from app.models.news import News
 from app.collectors.stock_price import sync_prices
@@ -131,7 +132,7 @@ async def run_kr_analysis_batch() -> None:
     if not can_proceed():
         logger.warning("kr v2 batch skipped: daily budget exceeded")
         return
-    tickers = await unique_favorite_tickers(markets=["KRX", "KOSPI", "KOSDAQ"])
+    tickers = await unique_favorite_tickers(markets=list(KR_MARKETS))
     logger.info("kr v2 batch: %d unique tickers", len(tickers))
     for t in tickers:
         if not can_proceed():
@@ -267,7 +268,7 @@ async def run_us_analysis_batch() -> None:
     if not can_proceed():
         logger.warning("us v2 batch skipped: daily budget exceeded")
         return
-    tickers = await unique_favorite_tickers(markets=["NASDAQ", "NYSE", "AMEX"])
+    tickers = await unique_favorite_tickers(markets=list(US_MARKETS))
     logger.info("us v2 batch: %d unique tickers", len(tickers))
     for t in tickers:
         if not can_proceed():

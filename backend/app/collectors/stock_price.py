@@ -6,6 +6,7 @@ import pandas as pd
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.markets import is_kr
 from app.models import PriceHistory, Stock
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,10 @@ async def sync_prices(db: AsyncSession, stock: Stock, days: int = 365) -> dict:
     start = (date.today() - timedelta(days=days)).isoformat()
 
     try:
-        if stock.market in ("NYSE", "NASDAQ"):
-            df = await asyncio.to_thread(fetch_us_prices, stock.ticker, start)
-        else:
+        if is_kr(stock.market):
             df = await asyncio.to_thread(fetch_kr_prices, stock.ticker, start)
+        else:
+            df = await asyncio.to_thread(fetch_us_prices, stock.ticker, start)
     except Exception as e:
         return {"prices_synced": 0, "error": f"주가 조회 실패: {e}"}
 

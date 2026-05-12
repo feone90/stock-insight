@@ -4,6 +4,7 @@ from datetime import date
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.markets import is_kr
 from app.models import Stock
 from app.models.financial import Financial
 
@@ -13,7 +14,7 @@ def _yf_suffixes_for_market(market: str | None) -> tuple[str, ...]:
         return (".KS",)
     if market == "KOSDAQ":
         return (".KQ",)
-    if market == "KRX":
+    if is_kr(market):
         return (".KS", ".KQ")
     return ("",)
 

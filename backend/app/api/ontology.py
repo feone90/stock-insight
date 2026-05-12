@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
+from app.markets import KR_MARKETS, US_MARKETS
 from app.models import Stock, StockRelation
 
 logger = logging.getLogger(__name__)
@@ -93,14 +94,10 @@ async def get_subgraph(
     return {"center": center.ticker, "nodes": nodes, "links": edges}
 
 
-_KR_MARKETS = {"KOSPI", "KOSDAQ", "KRX"}
-_US_MARKETS = {"NASDAQ", "NYSE", "US", "NMS", "NYQ", "AMEX"}
-
-
 def _market_region(market: str | None) -> str:
-    if market in _KR_MARKETS:
+    if market in KR_MARKETS:
         return "KR"
-    if market in _US_MARKETS:
+    if market in US_MARKETS:
         return "US"
     return "OTHER"
 
@@ -120,8 +117,8 @@ async def _outgoing(
         await session.execute(select(Stock.market).where(Stock.id == from_id))
     ).scalar_one_or_none()
     from_region = _market_region(from_market)
-    cross_targets = _US_MARKETS if from_region == "KR" else _KR_MARKETS
-    same_targets = _KR_MARKETS if from_region == "KR" else _US_MARKETS
+    cross_targets = US_MARKETS if from_region == "KR" else KR_MARKETS
+    same_targets = KR_MARKETS if from_region == "KR" else US_MARKETS
 
     def _base():
         q = (
