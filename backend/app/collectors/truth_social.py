@@ -39,11 +39,30 @@ HEADERS = {
 }
 
 
-async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
-    """trumpstruth.org RSS feed에서 fetch + dedup INSERT.
+def _is_retweet_only(content: str) -> bool:
+    """trumpstruth.org는 RT(retweet) description에 원본 link만 넣고 본문 X.
+    LLM 분석 불가 → DB 저장 skip하는 게 비용/품질 둘 다 이득.
+    """
+    s = (content or "").strip()
+    if not s:
+        return True
+    # "RT:" / "RT @" / "ReTruth" 시작 + 본문 100자 미만이면 link only
+    if s.startswith(("RT:", "RT @", "ReTruth", "Re-Truth")) and len(s) < 100:
+        return True
+    # truthsocial.com link만 있고 다른 text 거의 없으면 retweet
+    if "truthsocial.com" in s and len(s.replace("https://", "").strip()) < 80:
+        return True
+    return False
+
+
+async def sync_truth_social(db: AsyncSession, limit: int = 50) -> dict:
+    """trumpstruth.org RSS feed에서 fetch + RT skip + dedup INSERT.
+
+    limit=50 — RT 다수 skip되므로 substantive content 충분히 잡힐 만큼.
 
     Returns:
-        {"fetched": int, "inserted": int, "skipped": int, "error": str?}
+        {"fetched": int, "inserted": int, "skipped_rt": int,
+         "skipped_dup": int, "error": str?}
     """
     try:
         async with httpx.AsyncClient(
@@ -57,7 +76,8 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
         return {
             "fetched": 0,
             "inserted": 0,
-            "skipped": 0,
+            "skipped_rt": 0,
+            "skipped_dup": 0,
             "error": f"fetch failed: {e}",
         }
 
@@ -66,17 +86,21 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
         return {
             "fetched": 0,
             "inserted": 0,
-            "skipped": 0,
+            "skipped_rt": 0,
+            "skipped_dup": 0,
             "error": "RSS parse 결과 0건",
         }
 
     inserted = 0
-    skipped = 0
+    skipped_rt = 0
+    skipped_dup = 0
     for item in items[:limit]:
         post_id = item.get("id")
         content = item.get("content") or ""
-        if not post_id or not content.strip():
-            skipped += 1
+        if not post_id:
+            continue
+        if _is_retweet_only(content):
+            skipped_rt += 1
             continue
         stmt = (
             pg_insert(PoliticalSignal)
@@ -97,19 +121,21 @@ async def sync_truth_social(db: AsyncSession, limit: int = 20) -> dict:
         if result.rowcount and result.rowcount > 0:
             inserted += 1
         else:
-            skipped += 1
+            skipped_dup += 1
 
     await db.commit()
     logger.info(
-        "trumpstruth sync: fetched=%d inserted=%d skipped=%d",
+        "trumpstruth sync: fetched=%d inserted=%d skipped_rt=%d skipped_dup=%d",
         len(items),
         inserted,
-        skipped,
+        skipped_rt,
+        skipped_dup,
     )
     return {
         "fetched": len(items),
         "inserted": inserted,
-        "skipped": skipped,
+        "skipped_rt": skipped_rt,
+        "skipped_dup": skipped_dup,
     }
 
 
