@@ -93,6 +93,18 @@ async def get_subgraph(
     return {"center": center.ticker, "nodes": nodes, "links": edges}
 
 
+_KR_MARKETS = {"KOSPI", "KOSDAQ", "KRX"}
+_US_MARKETS = {"NASDAQ", "NYSE", "US", "NMS", "NYQ", "AMEX"}
+
+
+def _market_region(market: str | None) -> str:
+    if market in _KR_MARKETS:
+        return "KR"
+    if market in _US_MARKETS:
+        return "US"
+    return "OTHER"
+
+
 async def _outgoing(
     session: AsyncSession,
     from_id: int,
@@ -100,21 +112,43 @@ async def _outgoing(
     min_conf: float,
     top_n: int,
 ) -> list[StockRelation]:
-    """confidence × strength DESC 순으로 top_n. 약한 sector_match로 그래프가
-    쿠킹 도우(="구름") 모양 되는 걸 막음."""
-    q = (
-        select(StockRelation)
-        .where(
-            StockRelation.from_stock_id == from_id,
-            StockRelation.is_active.is_(True),
-            StockRelation.confidence >= min_conf,
+    """cross-market 우선 + same-market 보완으로 top_n. 그래프가 KR/US 균형있게
+    표시되도록. (이전: confidence × strength DESC만 → KR sector_match가
+    top_n을 다 차지하고 cross-market US 노드가 0개 되는 버그)
+    """
+    from_market = (
+        await session.execute(select(Stock.market).where(Stock.id == from_id))
+    ).scalar_one_or_none()
+    from_region = _market_region(from_market)
+    cross_targets = _US_MARKETS if from_region == "KR" else _KR_MARKETS
+    same_targets = _KR_MARKETS if from_region == "KR" else _US_MARKETS
+
+    def _base():
+        q = (
+            select(StockRelation)
+            .join(Stock, Stock.ticker == StockRelation.to_target)
+            .where(
+                StockRelation.from_stock_id == from_id,
+                StockRelation.is_active.is_(True),
+                StockRelation.confidence >= min_conf,
+            )
+            .order_by((StockRelation.confidence * StockRelation.strength).desc())
         )
-        .order_by((StockRelation.confidence * StockRelation.strength).desc())
-        .limit(top_n)
-    )
-    if source_filter:
-        q = q.where(StockRelation.source.in_(source_filter))
-    return (await session.execute(q)).scalars().all()
+        if source_filter:
+            q = q.where(StockRelation.source.in_(source_filter))
+        return q
+
+    # cross-market relations 먼저 (절반 + 1 reserved)
+    cross_cap = max(1, top_n // 2)
+    cross_q = _base().where(Stock.market.in_(cross_targets)).limit(cross_cap)
+    cross = list((await session.execute(cross_q)).scalars().all())
+
+    remaining = top_n - len(cross)
+    if remaining <= 0:
+        return cross
+    same_q = _base().where(Stock.market.in_(same_targets)).limit(remaining)
+    same = list((await session.execute(same_q)).scalars().all())
+    return cross + same
 
 
 def _node_dict(s: Stock, *, is_center: bool) -> dict:
