@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models import Financial, News, Stock
+from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.relation import StockRelation
 from app.schemas.card import (
     Citation,
@@ -27,6 +28,7 @@ from app.schemas.card import (
     Fundamentals,
     MacroContext,
     NewsItem,
+    PoliticalSignalCard,
     Relation,
     TechMomentum,
 )
@@ -85,12 +87,13 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     """
     ticker = ticker.strip().upper()
 
-    indicators_co, macro_co, fund_co, news_co, rel_co = await asyncio.gather(
+    indicators_co, macro_co, fund_co, news_co, rel_co, pol_co = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
         _fetch_fundamentals(ticker),
         _fetch_recent_news(ticker),
         _fetch_relations_data(ticker),
+        _fetch_political_signals(ticker),
         return_exceptions=True,
     )
 
@@ -101,6 +104,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     fundamentals = _build_fundamentals(fund_co, pool)
     news = await _build_news(news_co, pool)
     relations_data = _build_relations(rel_co, ticker, pool)
+    political_signals = _build_political_signals(pol_co)
 
     if isinstance(rel_co, dict) and rel_co.get("is_stale"):
         # Fire-and-forget background refresh — do NOT await
@@ -111,6 +115,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         macro=macro,
         fundamentals=fundamentals,
         news=news,
+        political_signals=political_signals,
         relations_data=relations_data,
         data_citations=pool.items,
     )
@@ -328,6 +333,69 @@ async def _fetch_fundamentals(ticker: str) -> dict:
                 "label": "DB · stocks.market_cap (재무 상세 미수집)",
             }
         return {"error": "재무 데이터 없음"}
+
+
+async def _fetch_political_signals(ticker: str) -> dict:
+    """이 ticker에 매핑된 political_signals (최근 14일, market_relevant만).
+
+    Returns {"items": list[dict]} or {"error": str}.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=NEWS_WINDOW_DAYS)
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(PoliticalSignal, PoliticalSignalTicker)
+                .join(
+                    PoliticalSignalTicker,
+                    PoliticalSignalTicker.signal_id == PoliticalSignal.id,
+                )
+                .where(
+                    PoliticalSignalTicker.ticker == ticker,
+                    PoliticalSignal.analyzed_at.isnot(None),
+                    PoliticalSignal.is_market_relevant.is_(True),
+                    PoliticalSignal.posted_at >= cutoff,
+                )
+                .order_by(PoliticalSignal.posted_at.desc())
+                .limit(10)
+            )
+        ).all()
+    items: list[dict] = []
+    for signal, impact in rows:
+        items.append(
+            {
+                "posted_at": signal.posted_at,
+                "author": signal.author,
+                "source": signal.source,
+                "url": signal.url,
+                "summary_ko": signal.summary_ko or "",
+                "overall_sentiment": signal.overall_sentiment or "neutral",
+                "macro_themes": signal.macro_themes or [],
+                "sentiment": impact.sentiment,
+                "direction": impact.direction,
+                "strength": impact.strength,
+                "confidence": impact.confidence,
+                "expected_window": impact.expected_window,
+                "reasoning": impact.reasoning,
+                "sector_impact": impact.sector_impact,
+            }
+        )
+    return {"items": items}
+
+
+def _build_political_signals(res: Any) -> list[PoliticalSignalCard]:
+    """political_signals raw → PoliticalSignalCard list. fail 시 빈 list."""
+    if isinstance(res, Exception) or not isinstance(res, dict) or res.get("error"):
+        if isinstance(res, Exception):
+            logger.warning("data_layer political signals failed: %s", res)
+        return []
+    items = res.get("items") or []
+    out: list[PoliticalSignalCard] = []
+    for it in items:
+        try:
+            out.append(PoliticalSignalCard.model_validate(it))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("political signal validation skip: %s", e)
+    return out
 
 
 async def _fetch_recent_news(ticker: str) -> dict:

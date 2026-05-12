@@ -265,6 +265,7 @@ def compose(
         technical=technical,
         relations=relations,
         news=news,
+        political_signals=data.political_signals,
         macro=macro,
         fundamentals=fundamentals,
         decision=decision,

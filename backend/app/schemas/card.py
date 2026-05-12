@@ -168,6 +168,28 @@ class Fundamentals(BaseModel):
     citations: list[int] = []
 
 
+class PoliticalSignalCard(BaseModel):
+    """카드의 뉴스/이슈 섹션에 별도 highlight되는 정치 발언. 미래 자동매매
+    trigger row의 read-only view. ticker별로 영향 metadata 포함."""
+
+    posted_at: datetime
+    author: str = "realDonaldTrump"
+    source: str = "truth_social"
+    url: str | None = None
+    summary_ko: str
+    overall_sentiment: Literal["bullish", "bearish", "neutral", "mixed"]
+    macro_themes: list[str] = []
+
+    # 이 ticker에 매핑된 분석 결과 (PoliticalSignalTicker 1 row)
+    sentiment: Literal["bullish", "bearish", "neutral"]
+    direction: Literal["long", "short", "avoid"]
+    strength: Literal["high", "medium", "low"]
+    confidence: float
+    expected_window: Literal["minutes", "hours", "1-3days", "1-2weeks"]
+    reasoning: str
+    sector_impact: str | None = None
+
+
 class Catalyst(BaseModel):
     when: str
     event: str
@@ -224,6 +246,7 @@ class StockCard(BaseModel):
     technical: TechMomentum
     relations: RelationsSummary
     news: list[NewsItem] = []
+    political_signals: list[PoliticalSignalCard] = []
     macro: MacroContext
     fundamentals: Fundamentals
     decision: Decision
@@ -252,6 +275,7 @@ class DataLayer(BaseModel):
     macro: MacroContext | None = None
     fundamentals: Fundamentals | None = None
     news: list[NewsItem] = []
+    political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []
     data_citations: list[Citation] = []
 
