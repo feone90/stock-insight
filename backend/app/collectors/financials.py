@@ -132,8 +132,20 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
     net_won = int(margin["netIncome"] * _KR_UNIT_TO_WON)
     equity_won = int(ret.get("equity") * _KR_UNIT_TO_WON) if ret.get("equity") else None
 
-    # market_cap: stock 테이블 우선, 없으면 raw 의 yfinance fallback.
-    market_cap = int(stock.market_cap) if stock.market_cap else raw.get("market_cap")
+    # market_cap: fresh yfinance > stock 테이블. write-back 으로 stock 의 시총
+    # 컬럼도 갱신해 다음 sync 호출에서 재활용.
+    fresh_mc = raw.get("market_cap")
+    if fresh_mc:
+        stock.market_cap = fresh_mc
+        market_cap = fresh_mc
+    elif stock.market_cap:
+        market_cap = int(stock.market_cap)
+    else:
+        market_cap = None
+    logger.info(
+        "kr_values[%s] period=%s fresh_mc=%s stock_mc=%s net=%s equity=%s",
+        stock.ticker, period, fresh_mc, stock.market_cap, net_won, equity_won,
+    )
 
     per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
     pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
@@ -188,7 +200,17 @@ async def sync_financials(db: AsyncSession, stock: Stock) -> dict:
         )
         await db.execute(stmt)
         await db.commit()
-        return {"financials_synced": 1, "source": label, "period": values["period"]}
+        return {
+            "financials_synced": 1,
+            "source": label,
+            "period": values["period"],
+            "per": values.get("per"),
+            "pbr": values.get("pbr"),
+            "roe": values.get("roe"),
+            "market_cap": values.get("market_cap"),
+            "revenue": values.get("revenue"),
+            "net_income": values.get("net_income"),
+        }
 
     except Exception as e:
         return {"financials_synced": 0, "error": f"재무지표 동기화 실패: {e}"}

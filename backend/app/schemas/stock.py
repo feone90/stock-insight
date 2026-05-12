@@ -77,6 +77,7 @@ class SyncResult(BaseModel):
     status: str = "ok"
     ticker: str
     synced: dict
+    financials_detail: dict | None = None
     errors: list[str]
 
 

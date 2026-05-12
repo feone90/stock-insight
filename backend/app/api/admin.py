@@ -48,6 +48,10 @@ async def sync_stock(stock: Stock = Depends(get_stock_or_404), db: AsyncSession 
             "disclosures": disclosures_result.get("disclosures_synced", 0),
             "analysis": analysis_result.get("analysis_created", False),
         },
+        "financials_detail": {
+            k: financials_result.get(k)
+            for k in ("source", "period", "per", "pbr", "roe", "market_cap", "revenue", "net_income")
+        },
         "errors": errors,
     }
 
