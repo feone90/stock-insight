@@ -46,21 +46,22 @@ export function StockSearch() {
       setResults([]);
       return;
     }
-    const controller = new AbortController();
+    let active = true;
     const timer = setTimeout(async () => {
       try {
-        const data = await searchStocks(query, controller.signal);
-        if (!controller.signal.aborted) {
+        const data = await searchStocks(query);
+        // effect cleanup 후 stale 응답은 무시 (race protection)
+        if (active) {
           setResults(data);
           setSelectedIndex(0);
         }
-      } catch {
-        // aborted or network error — ignore
+      } catch (e) {
+        console.error("search failed:", e);
       }
     }, 300);
     return () => {
       clearTimeout(timer);
-      controller.abort();
+      active = false;
     };
   }, [query]);
 
