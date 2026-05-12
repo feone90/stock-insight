@@ -218,21 +218,33 @@ async def political_status(
             .limit(3)
         )
     ).scalars().all()
-    samples = [
-        {
+    # substantive = RT 아닌 본인 발언. 진짜 분석 대상.
+    substantive = (
+        await db.execute(
+            select(PoliticalSignal)
+            .where(~PoliticalSignal.content.like("RT:%"))
+            .order_by(PoliticalSignal.posted_at.desc())
+            .limit(5)
+        )
+    ).scalars().all()
+
+    def _serialize(s):
+        return {
             "posted_at": s.posted_at.isoformat() if s.posted_at else None,
-            "content_preview": (s.content or "")[:150],
+            "content_preview": (s.content or "")[:300],
             "analyzed": s.analyzed_at is not None,
             "is_relevant": s.is_market_relevant,
             "summary_ko": s.summary_ko,
             "sentiment": s.overall_sentiment,
+            "macro_themes": s.macro_themes,
+            "url": s.url,
         }
-        for s in latest
-    ]
+
     return {
         "total_signals": total,
         "analyzed": analyzed,
         "market_relevant": relevant,
         "ticker_impacts": ticker_rows,
-        "latest_3": samples,
+        "latest_3": [_serialize(s) for s in latest],
+        "substantive_5": [_serialize(s) for s in substantive],
     }
