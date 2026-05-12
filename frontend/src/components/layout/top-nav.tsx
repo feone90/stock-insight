@@ -117,36 +117,36 @@ export function TopNav() {
           <button
             onClick={handleSyncAll}
             disabled={syncing}
-            className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
+            className="hidden md:inline-flex rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-300 transition-colors hover:bg-slate-700 disabled:opacity-50"
           >
             {syncing ? "동기화 중..." : "전체 동기화"}
           </button>
         )}
         <Link
           href="/chat"
-          className="text-sm text-purple-400 transition-colors hover:text-purple-300"
+          className="hidden md:inline text-sm text-purple-400 transition-colors hover:text-purple-300"
         >
           Ask AI
         </Link>
         <Link
           href="/"
-          className="text-sm text-yellow-400 hover:text-yellow-300 transition-colors"
+          className="hidden md:inline text-sm text-yellow-400 hover:text-yellow-300 transition-colors"
         >
           즐겨찾기
         </Link>
 
-        {/* 가족 user picker — 인증 없이 즐겨찾기 분리 */}
+        {/* 가족 user picker — 인증 없이 즐겨찾기 분리. 모바일에서도 항상 보임. */}
         <div className="relative">
           <button
             onClick={() => setShowPicker((v) => !v)}
-            className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200 hover:bg-slate-700"
+            className="flex items-center gap-1 rounded-md border border-slate-700 bg-slate-800 px-2 md:px-3 py-1 text-sm text-slate-200 hover:bg-slate-700 max-w-[160px]"
           >
             <span>👤</span>
-            <span>{active || "사용자 선택"}</span>
+            <span className="truncate">{active || "사용자"}</span>
             <span className="text-xs text-slate-500">▼</span>
           </button>
           {showPicker && (
-            <div className="absolute right-0 top-9 z-50 w-56 rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl">
+            <div className="absolute right-0 top-9 z-50 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl">
               {users.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-slate-500">
                   사용자 없음 — 아래에 이름 입력해 추가
