@@ -30,9 +30,14 @@ router = APIRouter(prefix="/api/stocks", tags=["cards"])
 _last_refresh: dict[str, float] = {}
 
 
-async def _ensure_analyzable(ticker: str, stock: Stock) -> tuple[bool, str | None]:
+async def _ensure_analyzable(
+    ticker: str, stock: Stock, db: AsyncSession
+) -> tuple[bool, str | None]:
     """`is_analyzable` 체크. fail 사유가 'no price history' 또는
     'current_price <= 0'이면 sync_prices 1회 호출 후 재체크 (self-heal).
+
+    sync_prices는 handler가 넘긴 `db` 세션을 그대로 재사용해야 stock object
+    가 detach되지 않음. exception은 graceful 처리.
 
     Returns (ok, reason). 자가 치유 후에도 fail이면 reason 반환.
     """
@@ -41,8 +46,11 @@ async def _ensure_analyzable(ticker: str, stock: Stock) -> tuple[bool, str | Non
         return True, None
     if reason in ("no price history", "current_price <= 0"):
         logger.info("self-heal: syncing prices for %s (reason=%s)", ticker, reason)
-        async with async_session() as db:
+        try:
             await sync_prices(db, stock)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("self-heal sync_prices failed for %s: %s", ticker, e)
+            return False, f"self-heal failed: {e}"
         ok, reason = await is_analyzable(ticker)
     return ok, reason
 
@@ -78,10 +86,11 @@ async def trigger_analyze(
     ticker: str,
     bg: BackgroundTasks,
     stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
 ):
     if not can_proceed():
         raise HTTPException(503, "daily analysis budget exceeded")
-    ok, reason = await _ensure_analyzable(ticker, stock)
+    ok, reason = await _ensure_analyzable(ticker, stock, db)
     if not ok:
         raise HTTPException(422, f"not analyzable: {reason}")
     bg.add_task(analyze, ticker)
@@ -93,6 +102,7 @@ async def force_refresh(
     ticker: str,
     bg: BackgroundTasks,
     stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
 ):
     if not can_proceed():
         raise HTTPException(503, "daily analysis budget exceeded")
@@ -103,7 +113,7 @@ async def force_refresh(
     if now - last < settings.analysis_cooldown_seconds:
         remaining = int(settings.analysis_cooldown_seconds - (now - last))
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
-    ok, reason = await _ensure_analyzable(ticker, stock)
+    ok, reason = await _ensure_analyzable(ticker, stock, db)
     if not ok:
         raise HTTPException(422, f"not analyzable: {reason}")
     _last_refresh[key] = now
