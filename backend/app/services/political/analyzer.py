@@ -159,15 +159,25 @@ async def analyze_signal(
         kr_hint=kr_hint or "(empty)",
         us_hint=us_hint or "(empty)",
     )
+    raw = ""
     try:
         raw = await adapter.generate_json(prompt)
+        logger.info(
+            "political analyzer raw len=%d for signal %s", len(raw or ""), signal.id
+        )
         data = json.loads(raw)
         return TruthSocialAnalysis.model_validate(data)
     except (json.JSONDecodeError, ValidationError) as e:
-        logger.warning("political analyzer parse fail for signal %s: %s", signal.id, e)
+        logger.warning(
+            "political analyzer parse fail signal %s: %s | raw[:800]: %s",
+            signal.id, e, (raw or "")[:800],
+        )
         return None
     except Exception as e:  # noqa: BLE001
-        logger.exception("political analyzer fail for signal %s: %s", signal.id, e)
+        logger.exception(
+            "political analyzer LLM call fail signal %s: %s | raw[:200]: %s",
+            signal.id, e, (raw or "")[:200],
+        )
         return None
 
 
