@@ -146,6 +146,13 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
     from app.services.ontology import universe_wide_sector_match
     from app.services.universe import nightly_universe_refresh
 
+    from app.collectors.truth_social import sync_truth_social
+    from app.database import async_session as _async_session
+
+    async def _truth_social_job():
+        async with _async_session() as db:
+            return await sync_truth_social(db)
+
     jobs = {
         "fred": run_fred_macro_sync,
         "sector_match": universe_wide_sector_match,
@@ -154,6 +161,7 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
         "inverse_verify": run_inverse_verification,
         "universe_refresh": nightly_universe_refresh,
         "sync_favorites": scheduled_sync_job,
+        "truth_social": _truth_social_job,
     }
     if job_id not in jobs:
         raise HTTPException(
