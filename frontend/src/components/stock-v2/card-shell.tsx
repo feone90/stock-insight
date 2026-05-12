@@ -1,6 +1,9 @@
 "use client";
 
-import { Moon, RefreshCw, Sun } from "lucide-react";
+import { Moon, RefreshCw, Star, Sun } from "lucide-react";
+import { useEffect, useState } from "react";
+import { addFavorite, getStock, removeFavorite } from "@/services/api";
+import { onUserChanged } from "@/services/user";
 import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import { AtAGlancePanel } from "./at-a-glance-panel";
@@ -31,6 +34,32 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   const { card, state, refresh, triggerAnalyze } = useStockCard(ticker);
   const refreshing = state === "analyzing";
 
+  // 즐겨찾기 — user picker 변경 시 reload (사용자별 분리)
+  const [isFav, setIsFav] = useState(false);
+  const [favBusy, setFavBusy] = useState(false);
+
+  useEffect(() => {
+    const load = () => {
+      getStock(ticker)
+        .then((s) => setIsFav(s.is_favorite ?? false))
+        .catch(() => setIsFav(false));
+    };
+    load();
+    return onUserChanged(load);
+  }, [ticker]);
+
+  const toggleFav = async () => {
+    if (favBusy) return;
+    setFavBusy(true);
+    try {
+      if (isFav) await removeFavorite(ticker);
+      else await addFavorite(ticker);
+      setIsFav(!isFav);
+    } finally {
+      setFavBusy(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
       <div className="mx-auto max-w-[1200px] px-4 py-6 md:py-8">
@@ -41,6 +70,19 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               : `v2 카드 · ${ticker}`}
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleFav}
+              disabled={favBusy}
+              aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+              title={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+              className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11 disabled:opacity-50"
+            >
+              <Star
+                size={18}
+                className={isFav ? "fill-yellow-400 text-yellow-400" : ""}
+              />
+            </button>
             {card ? (
               <button
                 type="button"
