@@ -301,35 +301,51 @@ class AnalystOutput(BaseModel):
     interp_citations: list[Citation] = []
 
     @model_validator(mode="after")
-    def _validate_citation_refs(self) -> "AnalystOutput":
-        # spec §6: "LLM cites non-existent citation ID → retry". Any id
-        # referenced anywhere in the 4 analyst fields must exist in this
-        # output's own interp_citations pool — `engine.compose` handles the
-        # K-offset later, but the LLM is only allowed to cite the pool it
-        # registered itself.
+    def _strip_dangling_citations(self) -> "AnalystOutput":
+        # spec §6 originally said "LLM cites non-existent citation ID → retry"
+        # but empirically the LLM hallucinates dangling citations even with
+        # explicit retry prompts, especially when `interp_citations` is
+        # naturally empty (e.g. stocks where fundamentals + news both
+        # short on hard-cite-worthy data). Throwing a ValueError tanks the
+        # whole analyze pass and leaves the user with no v2 card at all,
+        # which is worse than showing a card with one missing footnote.
+        # We strip the unknown ids, log them, and let the card render.
         valid_ids = {c.id for c in self.interp_citations}
 
-        def _check(ids: list[int], where: str) -> None:
-            for cid in ids:
-                if cid not in valid_ids:
-                    raise ValueError(
-                        f"{where} references citation id {cid} not in interp_citations pool"
-                    )
+        def _filter(ids: list[int], where: str) -> list[int]:
+            bad = [i for i in ids if i not in valid_ids]
+            if bad:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "dropping dangling citation ids %s from %s (pool=%s)",
+                    bad, where, sorted(valid_ids),
+                )
+            return [i for i in ids if i in valid_ids]
 
-        _check(self.glance.citations, "glance")
-        _check(self.thesis.citations, "thesis")
-        _check(self.relations_narrative.citations, "relations_narrative")
-        _check(self.decision.citations, "decision")
+        self.glance.citations = _filter(self.glance.citations, "glance")
+        self.thesis.citations = _filter(self.thesis.citations, "thesis")
+        self.relations_narrative.citations = _filter(
+            self.relations_narrative.citations, "relations_narrative"
+        )
+        self.decision.citations = _filter(self.decision.citations, "decision")
         for i, claim in enumerate(self.thesis.supports):
-            _check(claim.citations, f"thesis.supports[{i}]")
+            claim.citations = _filter(claim.citations, f"thesis.supports[{i}]")
             if claim.interpretation:
-                _check(claim.interpretation.based_on, f"thesis.supports[{i}].interpretation")
+                claim.interpretation.based_on = _filter(
+                    claim.interpretation.based_on,
+                    f"thesis.supports[{i}].interpretation",
+                )
         for i, claim in enumerate(self.thesis.opposes):
-            _check(claim.citations, f"thesis.opposes[{i}]")
+            claim.citations = _filter(claim.citations, f"thesis.opposes[{i}]")
             if claim.interpretation:
-                _check(claim.interpretation.based_on, f"thesis.opposes[{i}].interpretation")
+                claim.interpretation.based_on = _filter(
+                    claim.interpretation.based_on,
+                    f"thesis.opposes[{i}].interpretation",
+                )
         for i, cat in enumerate(self.thesis.catalysts):
-            _check(cat.citation_ids, f"thesis.catalysts[{i}]")
+            cat.citation_ids = _filter(cat.citation_ids, f"thesis.catalysts[{i}]")
         if self.decision.interpretation:
-            _check(self.decision.interpretation.based_on, "decision.interpretation")
+            self.decision.interpretation.based_on = _filter(
+                self.decision.interpretation.based_on, "decision.interpretation"
+            )
         return self

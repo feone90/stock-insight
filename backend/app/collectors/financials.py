@@ -66,25 +66,44 @@ def _us_values(stock: Stock, info: dict, period: str) -> dict | None:
 # ---------- KR: dartlab DART ----------
 
 
-def fetch_kr_financials_raw(ticker: str) -> dict:  # pragma: no cover
-    """dartlab analysis('financial', '수익성') → marginTrend + returnTrend."""
+def _yf_market_cap(ticker: str, market: str | None) -> int | None:  # pragma: no cover
+    """yfinance .KS/.KQ market_cap fallback. stock.market_cap이 None인 신규
+    universe 종목들 자체적으로 보강.
+    """
+    import yfinance as yf
+
+    if market == "KOSPI":
+        suffixes = (".KS",)
+    elif market == "KOSDAQ":
+        suffixes = (".KQ",)
+    else:
+        suffixes = (".KS", ".KQ")
+    for sfx in suffixes:
+        try:
+            mc = yf.Ticker(f"{ticker}{sfx}").info.get("marketCap")
+        except Exception:
+            continue
+        if mc:
+            return int(mc)
+    return None
+
+
+def fetch_kr_financials_raw(ticker: str, market: str | None) -> dict:  # pragma: no cover
+    """dartlab analysis('financial', '수익성') + yfinance market_cap 보강."""
     import dartlab
 
+    out: dict = {"margin": [], "return": [], "market_cap": None}
     try:
         c = dartlab.Company(ticker)
+        if c.market == "KR":
+            prof = c.analysis("financial", "수익성") or {}
+            out["margin"] = (prof.get("marginTrend") or {}).get("history") or []
+            out["return"] = (prof.get("returnTrend") or {}).get("history") or []
     except Exception as e:
-        logger.warning("dartlab Company('%s') failed: %s", ticker, e)
-        return {}
-    if c.market != "KR":
-        return {}
-    try:
-        prof = c.analysis("financial", "수익성") or {}
-    except Exception as e:
-        logger.warning("dartlab analysis 수익성 for %s failed: %s", ticker, e)
-        return {}
-    margin = (prof.get("marginTrend") or {}).get("history") or []
-    ret = (prof.get("returnTrend") or {}).get("history") or []
-    return {"margin": margin, "return": ret}
+        logger.warning("dartlab fetch failed for %s: %s", ticker, e)
+    # market_cap fallback — Stock.market_cap이 None인 신규 universe 종목 대응.
+    out["market_cap"] = _yf_market_cap(ticker, market)
+    return out
 
 
 def _latest_fully_populated(rows: list[dict], required: tuple[str, ...]) -> dict | None:
@@ -113,8 +132,8 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
     net_won = int(margin["netIncome"] * _KR_UNIT_TO_WON)
     equity_won = int(ret.get("equity") * _KR_UNIT_TO_WON) if ret.get("equity") else None
 
-    # market_cap 은 Stock.market_cap (universe seed / yfinance fallback) 사용.
-    market_cap = int(stock.market_cap) if stock.market_cap else None
+    # market_cap: stock 테이블 우선, 없으면 raw 의 yfinance fallback.
+    market_cap = int(stock.market_cap) if stock.market_cap else raw.get("market_cap")
 
     per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
     pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
@@ -147,7 +166,9 @@ async def sync_financials(db: AsyncSession, stock: Stock) -> dict:
     """종목 시장에 따라 DART(KR) 또는 yfinance(US) 로 재무지표 동기화."""
     try:
         if is_kr(stock.market):
-            raw = await asyncio.to_thread(fetch_kr_financials_raw, stock.ticker)
+            raw = await asyncio.to_thread(
+                fetch_kr_financials_raw, stock.ticker, stock.market
+            )
             values = _kr_values(stock, raw)
             label = "DART"
         else:
