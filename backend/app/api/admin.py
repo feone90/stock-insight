@@ -175,7 +175,64 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
             detail=f"unknown job_id '{job_id}'. Available: {sorted(jobs.keys())}",
         )
     try:
-        await jobs[job_id]()
+        result = await jobs[job_id]()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"job '{job_id}' failed: {e}")
-    return {"status": "ok", "job": job_id}
+    # job 함수가 dict 반환 시 그대로 노출 (None인 경우 빈 dict). 검증/디버깅용.
+    return {"status": "ok", "job": job_id, "result": result if result is not None else {}}
+
+
+@router.get("/political/status")
+async def political_status(
+    db: AsyncSession = Depends(get_db),
+    _admin: UserInfo = Depends(require_admin),
+):
+    """정치 시그널 DB 상태 확인 (검증/디버깅용)."""
+    from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
+    from sqlalchemy import func as sql_func
+
+    total = (
+        await db.execute(select(sql_func.count()).select_from(PoliticalSignal))
+    ).scalar() or 0
+    analyzed = (
+        await db.execute(
+            select(sql_func.count())
+            .select_from(PoliticalSignal)
+            .where(PoliticalSignal.analyzed_at.isnot(None))
+        )
+    ).scalar() or 0
+    relevant = (
+        await db.execute(
+            select(sql_func.count())
+            .select_from(PoliticalSignal)
+            .where(PoliticalSignal.is_market_relevant.is_(True))
+        )
+    ).scalar() or 0
+    ticker_rows = (
+        await db.execute(select(sql_func.count()).select_from(PoliticalSignalTicker))
+    ).scalar() or 0
+    latest = (
+        await db.execute(
+            select(PoliticalSignal)
+            .order_by(PoliticalSignal.posted_at.desc())
+            .limit(3)
+        )
+    ).scalars().all()
+    samples = [
+        {
+            "posted_at": s.posted_at.isoformat() if s.posted_at else None,
+            "content_preview": (s.content or "")[:150],
+            "analyzed": s.analyzed_at is not None,
+            "is_relevant": s.is_market_relevant,
+            "summary_ko": s.summary_ko,
+            "sentiment": s.overall_sentiment,
+        }
+        for s in latest
+    ]
+    return {
+        "total_signals": total,
+        "analyzed": analyzed,
+        "market_relevant": relevant,
+        "ticker_impacts": ticker_rows,
+        "latest_3": samples,
+    }
