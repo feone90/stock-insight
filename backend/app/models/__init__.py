@@ -10,6 +10,7 @@ from app.models.chat import ChatMessage
 from app.models.relation import StockRelation
 from app.models.relation_candidate import RelationCandidate
 from app.models.macro_factor import MacroFactor
+from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 
 __all__ = [
     "Base",
@@ -27,4 +28,6 @@ __all__ = [
     "StockRelation",
     "RelationCandidate",
     "MacroFactor",
+    "PoliticalSignal",
+    "PoliticalSignalTicker",
 ]
