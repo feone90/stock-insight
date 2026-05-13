@@ -137,7 +137,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               <aside className="space-y-3 min-w-0">
                 <AtAGlancePanel card={card} />
                 <DecisionSection decision={card.decision} />
-                <ThesisSection thesis={card.thesis} />
+                <ThesisSection thesis={card.thesis} stance={card.glance.stance} />
               </aside>
             </div>
 

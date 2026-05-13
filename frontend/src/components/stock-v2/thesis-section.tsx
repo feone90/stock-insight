@@ -1,6 +1,6 @@
 "use client";
 
-import type { Thesis } from "@/types/card";
+import type { Stance, Thesis } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
 const SCENARIO_BAR_COLOR = {
@@ -9,7 +9,7 @@ const SCENARIO_BAR_COLOR = {
   BEAR: "bg-rose-500",
 } as const;
 
-export function ThesisSection({ thesis }: { thesis: Thesis }) {
+export function ThesisSection({ thesis, stance }: { thesis: Thesis; stance: Stance }) {
   const supportCount = thesis.supports?.length ?? 0;
   const opposeCount = thesis.opposes?.length ?? 0;
   const baseScenario = thesis.scenarios?.find((s) => s.name === "BASE");
@@ -27,7 +27,7 @@ export function ThesisSection({ thesis }: { thesis: Thesis }) {
       emoji="▣"
       title="종합 의견"
       defaultOpen
-      highlight="glance"
+      stanceAccent={stance}
       compact={<span>{compactParts.join(" · ")}</span>}
       expanded={<ThesisExpanded thesis={thesis} />}
     />
