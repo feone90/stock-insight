@@ -138,6 +138,18 @@ async def _run_for_ticker(
         ).all()
         ticker_to_name = {t.upper(): (n or "") for t, n in rows}
 
+    # ETF / 지수 / 펀드 편입 류 키워드 — LLM 이 prompt 의 명시적 금지에도
+    # complementary/competitor 로 분류해서 통과시키는 케이스를 rationale 본문
+    # 패턴으로 직접 차단. "ACE AI반도체TOP3+ ETF 는 ... 투자한다" 같은 ETF
+    # 구성종목 동거가 가장 자주 잡힌다.
+    _ETF_INDEX_PATTERNS = (
+        "etf", "코덱스", "kodex", "tiger", "ace ", " ace",
+        "구성종목", "편입", "지수에 포함", "지수 포함",
+        "테마주", "관련주", "수혜주", "동반",
+    )
+
+    skipped_rationale_etf = 0
+
     # Phase 3 — per-relation evidence gate (focal already verified; check OTHER side).
     for art, rels, haystack_low, _focal_in in pending:
         for rel in rels:
@@ -154,14 +166,20 @@ async def _run_for_ticker(
                 continue
             other_ticker = to_t if from_t == focal_token_low else from_t
             other_name = ticker_to_name.get(other_ticker.upper(), "").lower()
-            # Accept if EITHER target ticker OR target name appears in article.
-            # KR 기사는 한글 이름 위주라 name match 가 실질 evidence.
-            if (other_ticker and other_ticker in haystack_low) or (
+            # target ticker 또는 이름 substring 확인.
+            if not ((other_ticker and other_ticker in haystack_low) or (
                 other_name and other_name in haystack_low
-            ):
-                relations.append(rel)
-            else:
+            )):
                 skipped_target_not_in_article += 1
+                continue
+            # rationale 키워드 필터 — ETF/지수 동거, 테마주/수혜주 류 차단.
+            rationale_low = (rel.rationale or "").lower()
+            metadata_rationale = (rel.extra_metadata or {}).get("rationale", "") or ""
+            rationale_low += " " + metadata_rationale.lower()
+            if any(pat in rationale_low for pat in _ETF_INDEX_PATTERNS):
+                skipped_rationale_etf += 1
+                continue
+            relations.append(rel)
 
     summary = await validate_and_route(relations, source=_SOURCE, session=session)
     summary["ticker"] = ticker
@@ -170,6 +188,7 @@ async def _run_for_ticker(
     summary["llm_relations_returned"] = llm_returned_total
     summary["evidence_dropped_no_focal"] = skipped_no_focal_evidence
     summary["evidence_dropped_target_missing"] = skipped_target_not_in_article
+    summary["evidence_dropped_etf_pattern"] = skipped_rationale_etf
     return summary
 
 
