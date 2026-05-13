@@ -208,6 +208,48 @@ async def extract_relations_for_one(
     return {"status": "ok", "ticker": ticker, "summary": summary}
 
 
+@router.get("/inspect/relations/{ticker}")
+async def inspect_relations(
+    ticker: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: UserInfo = Depends(require_admin),
+):
+    """ticker의 outgoing StockRelation row 5건의 raw extra_metadata 노출.
+
+    rationale 데이터 흐름 진단용 — LLM extract → validator → DB → data_layer.
+    """
+    from app.models.relation import StockRelation
+
+    stock = (
+        await db.execute(select(Stock).where(Stock.ticker == ticker.upper()))
+    ).scalar_one_or_none()
+    if not stock:
+        raise HTTPException(404, detail=f"ticker '{ticker}' not in DB")
+    rows = (
+        await db.execute(
+            select(StockRelation)
+            .where(StockRelation.from_stock_id == stock.id)
+            .order_by(StockRelation.refreshed_at.desc().nulls_last())
+            .limit(10)
+        )
+    ).scalars().all()
+    return {
+        "ticker": ticker.upper(),
+        "stock_id": stock.id,
+        "rows": [
+            {
+                "to_target": r.to_target,
+                "relation_type": r.relation_type,
+                "source": r.source,
+                "confidence": r.confidence,
+                "refreshed_at": r.refreshed_at.isoformat() if r.refreshed_at else None,
+                "extra_metadata": r.extra_metadata,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/inspect/news/{ticker}")
 async def inspect_news(
     ticker: str,
