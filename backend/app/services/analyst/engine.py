@@ -319,43 +319,28 @@ def _resolve_ids(
 ) -> list[int]:
     """LLM 이 출력한 citation id 를 final pool 기준으로 매핑.
 
-    LLM 은 data_citations (1..K) 와 자기 interp_citations (1..M) 가 모두 1 부터
-    시작한다는 사실을 모른다. 그래서 LLM 이 cite 한 id 가 양쪽 풀에 동시에
-    존재하는 케이스 (예: interp 1 등록 + data 1 도 존재) 가 자주 발생하고,
-    어느 쪽을 의도했는지 시스템 입장에서는 결정 불가능하다 (Codex 리뷰 high).
+    Spec (synthesize.py prompt): "interp_citations 에 *등록한* id 만 참조".
+    그러므로 LLM 이 출력하는 citation id 는 *항상* 자기 interp 풀을 가리킨다 —
+    data 풀과 숫자가 겹쳐도 의미적 충돌은 없다 (data 풀은 LLM 에 노출되지 않음).
 
-    네 경우:
-      (a) id ∈ interp AND id ∈ data 범위(1..K)  → ambiguous → drop + log
-      (b) id ∈ interp 만                         → +K shift (LLM 등록 출처)
-      (c) 1 ≤ id ≤ K 만                          → 그대로 유지 (data 차용)
-      (d) 어디에도 없음                          → drop + log (LLM hallucination)
+    Codex review 의 초기 fix (ambiguous → drop) 는 K=127 + interp={1..4} 같은
+    실 운영 환경에서 *모든* LLM citation 을 drop 하여 카드의 footnote 가 완전히
+    사라지는 부작용을 만들었다. spec 을 신뢰하고 단순화:
+      (a) id ∈ interp 풀 → +K shift (정상 인용)
+      (b) 어디에도 없음 → drop + log (LLM hallucination 가능성)
     """
     resolved: list[int] = []
-    dropped_dangling: list[int] = []
-    dropped_ambiguous: list[int] = []
+    dropped: list[int] = []
     for i in ids:
-        in_interp = i in interp_ids_pre_shift
-        in_data = 1 <= i <= k
-        if in_interp and in_data:
-            dropped_ambiguous.append(i)
-        elif in_interp:
+        if i in interp_ids_pre_shift:
             resolved.append(i + k)
-        elif in_data:
-            resolved.append(i)
         else:
-            dropped_dangling.append(i)
-    if dropped_ambiguous:
-        logger.warning(
-            "compose: dropped %d ambiguous citation id(s) in %s: %s "
-            "(both interp and data pool — cannot disambiguate; k=%d interp=%s)",
-            len(dropped_ambiguous), where, dropped_ambiguous, k,
-            sorted(interp_ids_pre_shift),
-        )
-    if dropped_dangling:
+            dropped.append(i)
+    if dropped:
         logger.info(
-            "compose: dropped %d dangling citation id(s) in %s: %s (k=%d interp=%s)",
-            len(dropped_dangling), where, dropped_dangling, k,
-            sorted(interp_ids_pre_shift),
+            "compose: dropped %d citation id(s) in %s: %s — not in interp pool "
+            "(k=%d interp=%s)",
+            len(dropped), where, dropped, k, sorted(interp_ids_pre_shift),
         )
     return resolved
 
