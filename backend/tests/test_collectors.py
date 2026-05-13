@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import pandas as pd
 from sqlalchemy import select
 
-from app.collectors.stock_price import sync_prices
+from app.collectors.stock_price import _flatten_multiindex_columns, sync_prices
 from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news, strip_html
 from app.collectors.disclosure import sync_disclosures
@@ -35,6 +35,31 @@ def _make_mock_df(days=3):
         "Close": [153.0 + i for i in range(days)],
         "Volume": [1000000 + i * 100000 for i in range(days)],
     }, index=dates)
+
+
+@pytest.mark.parametrize("level_names", [
+    ("Price", "Ticker"),   # yfinance 0.2.x
+    ("Price", "Tickers"),  # yfinance 0.2.40+
+    (None, None),          # 일부 빌드 (unnamed levels)
+])
+def test_flatten_multiindex_columns_drops_single_value_level(level_names):
+    """yfinance 단일 ticker fetch는 MultiIndex columns 반환 — level 이름이
+    버전마다 흔들려도 평탄화 후 row['Close']가 scalar여야 함 (Series면 sync에서
+    float() 변환 폭발 — NVDA/AMD 5/13 sync 실패의 원인)."""
+    base = _make_mock_df(days=3)
+    base.columns = pd.MultiIndex.from_tuples(
+        [(c, "NVDA") for c in base.columns], names=level_names,
+    )
+    flat = _flatten_multiindex_columns(base, "NVDA")
+    assert not isinstance(flat.columns, pd.MultiIndex)
+    assert list(flat.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert isinstance(float(flat.iloc[-1]["Close"]), float)
+
+
+def test_flatten_multiindex_columns_passthrough_single_level():
+    df = _make_mock_df(days=2)
+    out = _flatten_multiindex_columns(df, "NVDA")
+    assert list(out.columns) == ["Open", "High", "Low", "Close", "Volume"]
 
 
 @pytest.mark.asyncio

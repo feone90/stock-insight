@@ -15,14 +15,34 @@ logger = logging.getLogger(__name__)
 PRICE_ANOMALY_RATIO = 1.5
 
 
-def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:  # pragma: no cover
+def _flatten_multiindex_columns(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """yfinance가 single ticker도 MultiIndex 컬럼으로 반환. level 이름이
+    'Ticker'/'Tickers'/None 사이로 버전마다 흔들려서 level 이름으로 drop하면
+    silently 실패하고 row[col]이 Series로 잡힘 (NVDA/AMD sync에서 본 버그).
+
+    안전한 평탄화: 단일 ticker fetch → ticker level은 unique value 1개. 그
+    level을 찾아 drop. 못 찾으면 첫 level fallback.
+    """
+    if not isinstance(df.columns, pd.MultiIndex):
+        return df
+    ticker_level = next(
+        (
+            lvl for lvl in range(df.columns.nlevels)
+            if df.columns.get_level_values(lvl).nunique() == 1
+        ),
+        None,
+    )
+    df.columns = df.columns.droplevel(ticker_level if ticker_level is not None else 0)
+    return df
+
+
+def fetch_us_prices(ticker: str, start: str) -> pd.DataFrame:
     """yfinance로 US 주가 조회 (동기 함수)."""
     import yfinance as yf
     df = yf.download(ticker, start=start, progress=False, auto_adjust=True)
-    # yfinance returns MultiIndex columns (Price, Ticker) — flatten
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel("Ticker")
-    return df
+    if df is None or df.empty:
+        return df
+    return _flatten_multiindex_columns(df, ticker)
 
 
 def fetch_kr_prices(ticker: str, start: str) -> pd.DataFrame:  # pragma: no cover
