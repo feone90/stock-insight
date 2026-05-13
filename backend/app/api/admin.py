@@ -298,6 +298,62 @@ async def inspect_news(
     }
 
 
+@router.post("/ontology/purge_noise")
+async def purge_ontology_noise(
+    db: AsyncSession = Depends(get_db),
+    _admin: UserInfo = Depends(require_admin),
+):
+    """옛 정책으로 DB 에 깔린 노이즈 관계를 일괄 제거.
+
+    제거 대상 두 패턴:
+      1) source='sector_match' AND confidence < 0.5
+         — KSIC 산업분류 자동 매칭. 천일고속/성창기업지주 같은 무관 종목까지
+           "동종업계 peer" 로 들어가 카드 그래프 노이즈의 주범.
+      2) relation_type ∈ {peer, theme, macro, group} AND source='news'
+         — 시황 기사("반도체 장비주들이 약세") 에서 LLM 이 잘못 잡은 peer/theme.
+           새 prompt + extract_news 가드는 이걸 막지만 옛 row 들이 남아있음.
+
+    실행 후 force re-extract 로 새 정책 (사업 본질 카테고리 + 0.5 floor) 의
+    quality 있는 관계만 다시 채워짐.
+    """
+    from sqlalchemy import and_, delete, or_
+
+    from app.models import StockRelation
+
+    sector_match_low_conf = and_(
+        StockRelation.source == "sector_match",
+        StockRelation.confidence < 0.5,
+    )
+    news_shallow_type = and_(
+        StockRelation.source == "news",
+        StockRelation.relation_type.in_(["peer", "theme", "macro", "group"]),
+    )
+    to_delete_filter = or_(sector_match_low_conf, news_shallow_type)
+
+    # Count first 로 사용자에게 명시적 숫자 노출.
+    from sqlalchemy import func as sql_func, select
+
+    sector_count = (
+        await db.execute(
+            select(sql_func.count()).select_from(StockRelation).where(sector_match_low_conf)
+        )
+    ).scalar() or 0
+    news_count = (
+        await db.execute(
+            select(sql_func.count()).select_from(StockRelation).where(news_shallow_type)
+        )
+    ).scalar() or 0
+
+    result = await db.execute(delete(StockRelation).where(to_delete_filter))
+    await db.commit()
+    return {
+        "status": "ok",
+        "deleted_total": result.rowcount or 0,
+        "deleted_sector_match_low_conf": sector_count,
+        "deleted_news_shallow_type": news_count,
+    }
+
+
 @router.post("/political/purge_samples")
 async def purge_political_samples(
     db: AsyncSession = Depends(get_db),
