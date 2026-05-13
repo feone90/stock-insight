@@ -304,51 +304,32 @@ class AnalystOutput(BaseModel):
     interp_citations: list[Citation] = []
 
     @model_validator(mode="after")
-    def _strip_dangling_citations(self) -> "AnalystOutput":
-        # spec §6 originally said "LLM cites non-existent citation ID → retry"
-        # but empirically the LLM hallucinates dangling citations even with
-        # explicit retry prompts, especially when `interp_citations` is
-        # naturally empty (e.g. stocks where fundamentals + news both
-        # short on hard-cite-worthy data). Throwing a ValueError tanks the
-        # whole analyze pass and leaves the user with no v2 card at all,
-        # which is worse than showing a card with one missing footnote.
-        # We strip the unknown ids, log them, and let the card render.
+    def _log_unresolved_citations(self) -> "AnalystOutput":
+        # citation resolution moved to engine.compose so we can distinguish
+        # three cases that the schema layer alone can't:
+        #   (a) id ∈ interp_citations pool — register OK, compose shifts +K
+        #   (b) 1 ≤ id ≤ K — LLM borrowed a data_citations id directly,
+        #       compose keeps as-is. We *want* this — Naver/SEC/DART data
+        #       gets footnoted without LLM re-registering.
+        #   (c) id 어디에도 없음 — truly dangling, compose drops + logs.
+        # The schema validator only sees (a) vs not-(a); stripping not-(a)
+        # tanks both (b) and (c), leaving cards with empty footnotes even
+        # when the LLM was actually trying to reference real data.
         valid_ids = {c.id for c in self.interp_citations}
-
-        def _filter(ids: list[int], where: str) -> list[int]:
-            bad = [i for i in ids if i not in valid_ids]
-            if bad:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "dropping dangling citation ids %s from %s (pool=%s)",
-                    bad, where, sorted(valid_ids),
-                )
-            return [i for i in ids if i in valid_ids]
-
-        self.glance.citations = _filter(self.glance.citations, "glance")
-        self.thesis.citations = _filter(self.thesis.citations, "thesis")
-        self.relations_narrative.citations = _filter(
-            self.relations_narrative.citations, "relations_narrative"
-        )
-        self.decision.citations = _filter(self.decision.citations, "decision")
-        for i, claim in enumerate(self.thesis.supports):
-            claim.citations = _filter(claim.citations, f"thesis.supports[{i}]")
-            if claim.interpretation:
-                claim.interpretation.based_on = _filter(
-                    claim.interpretation.based_on,
-                    f"thesis.supports[{i}].interpretation",
-                )
-        for i, claim in enumerate(self.thesis.opposes):
-            claim.citations = _filter(claim.citations, f"thesis.opposes[{i}]")
-            if claim.interpretation:
-                claim.interpretation.based_on = _filter(
-                    claim.interpretation.based_on,
-                    f"thesis.opposes[{i}].interpretation",
-                )
-        for i, cat in enumerate(self.thesis.catalysts):
-            cat.citation_ids = _filter(cat.citation_ids, f"thesis.catalysts[{i}]")
-        if self.decision.interpretation:
-            self.decision.interpretation.based_on = _filter(
-                self.decision.interpretation.based_on, "decision.interpretation"
+        seen_unresolved: set[int] = set()
+        for ids in (
+            self.glance.citations,
+            self.thesis.citations,
+            self.relations_narrative.citations,
+            self.decision.citations,
+        ):
+            for cid in ids:
+                if cid not in valid_ids:
+                    seen_unresolved.add(cid)
+        if seen_unresolved:
+            import logging
+            logging.getLogger(__name__).info(
+                "AnalystOutput has %d citation id(s) outside interp_citations pool — engine.compose will resolve against data pool",
+                len(seen_unresolved),
             )
         return self

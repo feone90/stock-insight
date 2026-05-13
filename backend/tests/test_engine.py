@@ -204,14 +204,34 @@ def test_compose_server_fields_win_over_llm():
     assert card.name_ko == "엔진테스트"
 
 
-def test_compose_raises_on_dangling_citation_ref():
-    """Analyst references a citation id that doesn't exist in interp_citations."""
+def test_compose_drops_truly_dangling_citation_ref():
+    """LLM cites an id that is neither in interp pool nor in data pool 1..K —
+    compose drops it silently (logged at INFO), card still renders.
+
+    Previously raised ValueError; spec change after demo observed LLM
+    hallucinating dangling ids while leaving interp_citations empty.
+    """
     data = _make_data_layer()
     analyst = _make_analyst_output()
-    # Mutate: glance refs id=99, but interp_citations only has id=1
+    # Mutate: glance refs id=99, interp has only id=1, data pool has 2 ids
+    # → 99 is past both pools → dropped.
     analyst.glance.citations = [99]
-    with pytest.raises(ValueError, match="not in final pool"):
-        compose("ENG1", data, analyst, _identity())
+    card = compose("ENG1", data, analyst, _identity())
+    assert card.glance.citations == []
+
+
+def test_compose_keeps_data_citation_ref_without_interp_register():
+    """LLM cites id=2 directly (a data pool id). Even though it isn't in
+    interp_citations, compose keeps it — it's a valid data pool reference.
+    """
+    data = _make_data_layer()
+    analyst = _make_analyst_output()
+    # data pool has K citations (>=2). Cite id=2 directly without registering.
+    k = len(data.data_citations)
+    assert k >= 2, "fixture needs ≥ 2 data citations"
+    analyst.glance.citations = [2]
+    card = compose("ENG1", data, analyst, _identity())
+    assert card.glance.citations == [2]
 
 
 def test_compose_stubs_missing_data_sections():

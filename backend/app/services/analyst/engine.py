@@ -158,6 +158,7 @@ def compose(
       become structural stubs so the StockCard contract still holds.
     """
     k = len(data.data_citations)
+    interp_ids_pre_shift = {c.id for c in analyst.interp_citations}
 
     # Final citation pool: data IDs unchanged 1..K; analyst IDs offset by K.
     final_citations: list[Citation] = list(data.data_citations)
@@ -178,17 +179,35 @@ def compose(
         stance=analyst.glance.stance,
         entry_stage=analyst.glance.entry_stage,
         one_line=analyst.glance.one_line,
-        citations=_shift_ids(analyst.glance.citations, k),
+        citations=_resolve_ids(
+            analyst.glance.citations, k=k,
+            interp_ids_pre_shift=interp_ids_pre_shift, where="glance",
+        ),
     )
 
     thesis = Thesis(
         core_thesis=analyst.thesis.core_thesis,
-        supports=[_shift_claim(c, k) for c in analyst.thesis.supports],
-        opposes=[_shift_claim(c, k) for c in analyst.thesis.opposes],
-        catalysts=[_shift_catalyst(cat, k) for cat in analyst.thesis.catalysts],
+        supports=[
+            _resolve_claim(c, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+                           where=f"thesis.supports[{i}]")
+            for i, c in enumerate(analyst.thesis.supports)
+        ],
+        opposes=[
+            _resolve_claim(c, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+                           where=f"thesis.opposes[{i}]")
+            for i, c in enumerate(analyst.thesis.opposes)
+        ],
+        catalysts=[
+            _resolve_catalyst(cat, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+                              where=f"thesis.catalysts[{i}]")
+            for i, cat in enumerate(analyst.thesis.catalysts)
+        ],
         no_catalysts_reason=analyst.thesis.no_catalysts_reason,
         scenarios=list(analyst.thesis.scenarios),
-        citations=_shift_ids(analyst.thesis.citations, k),
+        citations=_resolve_ids(
+            analyst.thesis.citations, k=k,
+            interp_ids_pre_shift=interp_ids_pre_shift, where="thesis",
+        ),
     )
 
     decision = Decision(
@@ -197,8 +216,14 @@ def compose(
         support_price=analyst.decision.support_price,
         risk_threshold=analyst.decision.risk_threshold,
         note=analyst.decision.note,
-        citations=_shift_ids(analyst.decision.citations, k),
-        interpretation=_shift_interp(analyst.decision.interpretation, k),
+        citations=_resolve_ids(
+            analyst.decision.citations, k=k,
+            interp_ids_pre_shift=interp_ids_pre_shift, where="decision",
+        ),
+        interpretation=_resolve_interp(
+            analyst.decision.interpretation, k=k,
+            interp_ids_pre_shift=interp_ids_pre_shift, where="decision.interp",
+        ),
     )
 
     relations_with_notes: list[Relation] = []
@@ -228,7 +253,10 @@ def compose(
     relations = RelationsSummary(
         one_line=analyst.relations_narrative.one_line,
         relations=relations_with_notes,
-        citations=_shift_ids(analyst.relations_narrative.citations, k),
+        citations=_resolve_ids(
+            analyst.relations_narrative.citations, k=k,
+            interp_ids_pre_shift=interp_ids_pre_shift, where="relations_narrative",
+        ),
     )
 
     technical = data.technical or _stub_technical()
@@ -282,37 +310,92 @@ def compose(
 # ---------------------------------------------------------------------------
 
 
-def _shift_ids(ids: list[int], offset: int) -> list[int]:
-    return [i + offset for i in ids]
+def _resolve_ids(
+    ids: list[int],
+    *,
+    k: int,
+    interp_ids_pre_shift: set[int],
+    where: str,
+) -> list[int]:
+    """LLM이 출력한 citation id를 final pool 기준으로 매핑.
+
+    세 경우:
+      (a) id ∈ interp_ids_pre_shift  → +k shift (LLM이 정상 등록한 출처)
+      (b) 1 ≤ id ≤ k                 → 그대로 유지 (LLM이 data_citations id 직접 차용 — 정상)
+      (c) 그 외                      → drop + log (LLM hallucination)
+    """
+    resolved: list[int] = []
+    dropped: list[int] = []
+    for i in ids:
+        if i in interp_ids_pre_shift:
+            resolved.append(i + k)
+        elif 1 <= i <= k:
+            resolved.append(i)
+        else:
+            dropped.append(i)
+    if dropped:
+        logger.info(
+            "compose: dropped %d dangling citation id(s) in %s: %s (k=%d interp=%s)",
+            len(dropped), where, dropped, k, sorted(interp_ids_pre_shift),
+        )
+    return resolved
 
 
-def _shift_interp(
-    interp: Interpretation | None, offset: int
+def _resolve_interp(
+    interp: Interpretation | None,
+    *,
+    k: int,
+    interp_ids_pre_shift: set[int],
+    where: str,
 ) -> Interpretation | None:
     if interp is None:
         return None
     return Interpretation(
         kind=interp.kind,
-        based_on=_shift_ids(interp.based_on, offset),
+        based_on=_resolve_ids(
+            interp.based_on, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            where=f"{where}.based_on",
+        ),
         rationale=interp.rationale,
     )
 
 
-def _shift_claim(c: Claim, offset: int) -> Claim:
+def _resolve_claim(
+    c: Claim,
+    *,
+    k: int,
+    interp_ids_pre_shift: set[int],
+    where: str,
+) -> Claim:
     return Claim(
         text=c.text,
-        citations=_shift_ids(c.citations, offset),
-        interpretation=_shift_interp(c.interpretation, offset),
+        citations=_resolve_ids(
+            c.citations, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            where=f"{where}.citations",
+        ),
+        interpretation=_resolve_interp(
+            c.interpretation, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            where=f"{where}.interp",
+        ),
     )
 
 
-def _shift_catalyst(cat: Catalyst, offset: int) -> Catalyst:
+def _resolve_catalyst(
+    cat: Catalyst,
+    *,
+    k: int,
+    interp_ids_pre_shift: set[int],
+    where: str,
+) -> Catalyst:
     return Catalyst(
         when=cat.when,
         event=cat.event,
         impact_estimate=cat.impact_estimate,
         direction=cat.direction,
-        citation_ids=_shift_ids(cat.citation_ids, offset),
+        citation_ids=_resolve_ids(
+            cat.citation_ids, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            where=f"{where}.citation_ids",
+        ),
     )
 
 
