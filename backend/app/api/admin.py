@@ -298,105 +298,51 @@ async def inspect_news(
     }
 
 
-@router.post("/political/seed_sample")
-async def seed_political_sample(
+@router.post("/political/purge_samples")
+async def purge_political_samples(
     db: AsyncSession = Depends(get_db),
     _admin: UserInfo = Depends(require_admin),
 ):
-    """Demo/검증용 — 실제 트럼프 매크로 발언 sample 5개 seed.
+    """초기 demo 단계에서 들어간 sample_macro 시드를 정리한다.
 
-    trumpstruth.org/feed의 RT 다수로 substantive content 부족 + pagination
-    제한이라 historical backfill 어려움. demo + UI 검증을 위해 매크로
-    영향 명확한 sample 5개를 직접 insert. analyzer가 ticker 매핑.
-
-    실제 트럼프가 최근 1년 사이 했던 발언의 paraphrase. demo source 명시
-    (source='sample_macro'). 운영 시점에는 매시 cron이 자연 축적.
+    `seed_political_sample` 엔드포인트는 example.com URL + 가상 발언 5개를
+    insert 했고 (source='sample_macro'), 카드의 정치 시그널 섹션에서 사용자가
+    "원문 보기" 클릭 시 example.com 으로 가는 가라 데이터로 노출됐다.
+    이제 trumpstruth.org RSS 가 매시 cron 으로 자연 축적 중이라 시드 더 필요
+    없음. 시드 endpoint 자체는 제거됐고 본 purge 가 잔여 정리.
     """
-    from datetime import datetime, timedelta
-    from app.models.political_signal import PoliticalSignal
+    from sqlalchemy import delete
 
-    samples = [
-        {
-            "id": "sample_tariff_china_2026_05_10",
-            "posted_at": datetime.utcnow() - timedelta(days=2),
-            "content": (
-                "China is going to pay a 60% TARIFF on ALL goods coming into our "
-                "Country. This will protect American Semiconductor, Auto, and Steel "
-                "industries. Make America Great Again!"
-            ),
-            "url": "https://example.com/sample/tariff",
-        },
-        {
-            "id": "sample_ai_infra_2026_05_09",
-            "posted_at": datetime.utcnow() - timedelta(days=3),
-            "content": (
-                "MASSIVE new AI infrastructure deal — $500 BILLION investment in "
-                "American semiconductors and data centers. NVIDIA, AMD will benefit "
-                "tremendously. This is the future!"
-            ),
-            "url": "https://example.com/sample/ai",
-        },
-        {
-            "id": "sample_iran_sanctions_2026_05_08",
-            "posted_at": datetime.utcnow() - timedelta(days=4),
-            "content": (
-                "Iran will face the toughest SANCTIONS ever. Oil prices will surge. "
-                "We will not allow them to have nuclear weapons. American energy "
-                "independence FIRST!"
-            ),
-            "url": "https://example.com/sample/iran",
-        },
-        {
-            "id": "sample_fed_rate_2026_05_07",
-            "posted_at": datetime.utcnow() - timedelta(days=5),
-            "content": (
-                "The Federal Reserve must CUT rates immediately. The economy is "
-                "STRONG but high rates are hurting American businesses and homeowners. "
-                "We need lower rates NOW!"
-            ),
-            "url": "https://example.com/sample/fed",
-        },
-        {
-            "id": "sample_korea_chip_2026_05_06",
-            "posted_at": datetime.utcnow() - timedelta(days=6),
-            "content": (
-                "South Korea is taking advantage of our trade deals. We will impose "
-                "TARIFFS on Korean semiconductor and auto imports. Samsung, Hyundai "
-                "must build factories in America!"
-            ),
-            "url": "https://example.com/sample/korea",
-        },
-    ]
+    from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-    inserted = 0
-    for s in samples:
-        stmt = (
-            pg_insert(PoliticalSignal)
-            .values(
-                source="sample_macro",
-                source_post_id=s["id"],
-                author="realDonaldTrump",
-                posted_at=s["posted_at"],
-                content=s["content"],
-                content_lang="en",
-                url=s["url"],
-            )
-            .on_conflict_do_nothing(
-                index_elements=["source", "source_post_id"],
-            )
+    sample_ids = (
+        await db.execute(
+            select(PoliticalSignal.id).where(PoliticalSignal.source == "sample_macro")
         )
-        result = await db.execute(stmt)
-        if result.rowcount and result.rowcount > 0:
-            inserted += 1
+    ).scalars().all()
+    if not sample_ids:
+        return {"status": "ok", "deleted_signals": 0, "deleted_tickers": 0}
+
+    ticker_del = await db.execute(
+        delete(PoliticalSignalTicker).where(
+            PoliticalSignalTicker.signal_id.in_(sample_ids)
+        )
+    )
+    signal_del = await db.execute(
+        delete(PoliticalSignal).where(PoliticalSignal.source == "sample_macro")
+    )
     await db.commit()
     return {
         "status": "ok",
-        "inserted": inserted,
-        "total_samples": len(samples),
-        "next_step": "POST /api/admin/jobs/run/political_analyze",
+        "deleted_signals": signal_del.rowcount or 0,
+        "deleted_tickers": ticker_del.rowcount or 0,
     }
+
+
+# NOTE: 이전엔 `seed_political_sample` (POST /political/seed_sample) 가 있었고
+# example.com URL 시드 5건 insert. demo 초기엔 유용했지만 trumpstruth.org 매시
+# cron 정상 동작 후엔 가라 데이터로만 남아 사용자 신뢰 손상. 시드 함수 자체
+# 제거 + purge_political_samples 로 잔여 정리.
 
 
 @router.get("/political/status")
