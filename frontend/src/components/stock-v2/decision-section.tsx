@@ -1,6 +1,7 @@
 "use client";
 
-import type { Decision } from "@/types/card";
+import type { Citation, Decision } from "@/types/card";
+import { CitationList } from "./citation-ref";
 import { SectionShell } from "./section-shell";
 
 const STANCE_LABEL = {
@@ -9,7 +10,13 @@ const STANCE_LABEL = {
   REJECT: "보류",
 } as const;
 
-export function DecisionSection({ decision }: { decision: Decision }) {
+export function DecisionSection({
+  decision,
+  citations,
+}: {
+  decision: Decision;
+  citations: Citation[];
+}) {
   const parts: string[] = [STANCE_LABEL[decision.stance]];
   if (decision.support_price != null)
     parts.push(`지지선 ${decision.support_price.toLocaleString()}`);
@@ -23,17 +30,30 @@ export function DecisionSection({ decision }: { decision: Decision }) {
       defaultOpen
       stanceAccent={decision.stance}
       compact={<span>{parts.join(" · ")}</span>}
-      expanded={<DecisionExpanded decision={decision} />}
+      expanded={<DecisionExpanded decision={decision} citations={citations} />}
     />
   );
 }
 
-function DecisionExpanded({ decision }: { decision: Decision }) {
+function DecisionExpanded({
+  decision,
+  citations,
+}: {
+  decision: Decision;
+  citations: Citation[];
+}) {
   return (
     <div className="space-y-3 text-sm">
       {decision.sizing_note ? (
-        <p className="font-medium leading-relaxed">{decision.sizing_note}</p>
-      ) : null}
+        <p className="font-medium leading-relaxed">
+          {decision.sizing_note}
+          <CitationList ids={decision.citations} citations={citations} className="ml-1" />
+        </p>
+      ) : (
+        <div className="text-sm">
+          <CitationList ids={decision.citations} citations={citations} />
+        </div>
+      )}
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         <div className="flex justify-between">

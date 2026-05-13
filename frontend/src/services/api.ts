@@ -80,9 +80,12 @@ export async function getKnownUsers(): Promise<string[]> {
 }
 
 export async function removeFavorite(ticker: string): Promise<void> {
+  // Codex review [medium]: add/list 는 combinedHeaders() 로 X-User-Id 보내는데
+  // delete 만 authHeaders() 라 가족 user 별 favorite row 가 안 지워지고
+  // default user 만 시도하다 fail. 멀티 user 경계 깨짐 → 같은 헤더로 통일.
   const res = await fetch(`${API_BASE}/api/favorites/${ticker}`, {
     method: "DELETE",
-    headers: authHeaders(),
+    headers: combinedHeaders(),
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
 }

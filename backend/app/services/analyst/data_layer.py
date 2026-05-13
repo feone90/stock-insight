@@ -371,6 +371,11 @@ async def _fetch_political_signals(ticker: str) -> dict:
                     PoliticalSignal.analyzed_at.isnot(None),
                     PoliticalSignal.is_market_relevant.is_(True),
                     PoliticalSignal.posted_at >= cutoff,
+                    # Defense in depth — purge endpoint 이미 sample_macro 삭제했지만
+                    # 어떤 경로로든 (dev DB 카피, 마이그레이션 실수, 누군가 새 seed
+                    # endpoint 추가) 재유입되면 카드의 매수 판단 신호 자리에 가짜
+                    # example.com URL 발언이 뜬다. 자본 운용 도구 기준 zero-tolerance.
+                    PoliticalSignal.source != "sample_macro",
                 )
                 .order_by(PoliticalSignal.posted_at.desc())
                 .limit(10)

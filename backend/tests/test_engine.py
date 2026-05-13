@@ -223,20 +223,21 @@ def test_compose_drops_truly_dangling_citation_ref():
     assert card.glance.citations == []
 
 
-def test_compose_drops_unregistered_llm_citation():
-    """LLM cites id=2 without registering it in interp_citations. Per spec
-    the LLM may only cite from its own pool, so unregistered ids are treated
-    as hallucinations and dropped — even if the same number happens to exist
-    as a data pool id (the LLM can't see the data pool).
+def test_compose_preserves_data_citation_ref_from_llm():
+    """Codex review v2 [high]: when the LLM cites a data-pool id (DART/news
+    /financial), compose must KEEP it — these are the highest-value facts
+    in the card. Earlier strict policy silently dropped any id not in the
+    interp pool, so a 'supports: DART 공시 id=5' got unfootnoted.
     """
     data = _make_data_layer()
     analyst = _make_analyst_output()  # interp pool only has id=1
     k = len(data.data_citations)
     assert k >= 2, "fixture needs ≥ 2 data citations"
     assert 2 not in {c.id for c in analyst.interp_citations}
+    assert 2 in {c.id for c in data.data_citations}
     analyst.glance.citations = [2]
     card = compose("ENG1", data, analyst, _identity())
-    assert card.glance.citations == [], "unregistered id must be dropped"
+    assert card.glance.citations == [2], "data-pool ref must be preserved"
 
 
 def test_compose_shifts_interp_citations_even_when_overlapping_data_range():

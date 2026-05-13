@@ -138,14 +138,16 @@ async def _run_for_ticker(
         ).all()
         ticker_to_name = {t.upper(): (n or "") for t, n in rows}
 
-    # ETF / 지수 / 펀드 편입 류 키워드 — LLM 이 prompt 의 명시적 금지에도
-    # complementary/competitor 로 분류해서 통과시키는 케이스를 rationale 본문
-    # 패턴으로 직접 차단. "ACE AI반도체TOP3+ ETF 는 ... 투자한다" 같은 ETF
-    # 구성종목 동거가 가장 자주 잡힌다.
+    # ETF / 지수 편입 동거 차단 키워드. Codex review [medium]: 이전 list 는
+    # "동반", "수혜주", "관련주" 같이 *진짜 supply/complementary 관계 표현* 도
+    # 같이 잡아서 false negative 가 컸다 ("HBM 동반 성장" 같은 진짜 인과). 진짜
+    # ETF/지수/펀드 편입 표현으로만 좁힘 — 단순 같이 언급되는 카테고리 동거가
+    # 잡히는 표현만 유지.
     _ETF_INDEX_PATTERNS = (
-        "etf", "코덱스", "kodex", "tiger", "ace ", " ace",
-        "구성종목", "편입", "지수에 포함", "지수 포함",
-        "테마주", "관련주", "수혜주", "동반",
+        "etf", "코덱스", "kodex", "tiger ", " tiger",
+        "ace ", " ace",
+        "구성종목", "지수에 편입", "지수에 포함", "지수 편입", "지수 포함",
+        "테마주",
     )
 
     skipped_rationale_etf = 0

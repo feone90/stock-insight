@@ -1,6 +1,7 @@
 "use client";
 
-import type { Stance, Thesis } from "@/types/card";
+import type { Citation, Claim, Stance, Thesis } from "@/types/card";
+import { CitationList } from "./citation-ref";
 import { SectionShell } from "./section-shell";
 
 const SCENARIO_BAR_COLOR = {
@@ -9,7 +10,15 @@ const SCENARIO_BAR_COLOR = {
   BEAR: "bg-rose-500",
 } as const;
 
-export function ThesisSection({ thesis, stance }: { thesis: Thesis; stance: Stance }) {
+export function ThesisSection({
+  thesis,
+  stance,
+  citations,
+}: {
+  thesis: Thesis;
+  stance: Stance;
+  citations: Citation[];
+}) {
   const supportCount = thesis.supports?.length ?? 0;
   const opposeCount = thesis.opposes?.length ?? 0;
   const baseScenario = thesis.scenarios?.find((s) => s.name === "BASE");
@@ -29,25 +38,36 @@ export function ThesisSection({ thesis, stance }: { thesis: Thesis; stance: Stan
       defaultOpen
       stanceAccent={stance}
       compact={<span>{compactParts.join(" · ")}</span>}
-      expanded={<ThesisExpanded thesis={thesis} />}
+      expanded={<ThesisExpanded thesis={thesis} citations={citations} />}
     />
   );
 }
 
-function ThesisExpanded({ thesis }: { thesis: Thesis }) {
+function ThesisExpanded({
+  thesis,
+  citations,
+}: {
+  thesis: Thesis;
+  citations: Citation[];
+}) {
   return (
     <div className="space-y-4 text-sm">
-      <p className="font-medium leading-relaxed">{thesis.core_thesis}</p>
+      <p className="font-medium leading-relaxed">
+        {thesis.core_thesis}
+        <CitationList ids={thesis.citations} citations={citations} className="ml-1" />
+      </p>
 
       <ClaimList
         label="긍정 근거"
         labelClass="text-red-700 dark:text-red-400"
-        claims={thesis.supports.map((c) => c.text)}
+        claims={thesis.supports}
+        citations={citations}
       />
       <ClaimList
         label="반대 근거"
         labelClass="text-blue-700 dark:text-blue-400"
-        claims={thesis.opposes.map((c) => c.text)}
+        claims={thesis.opposes}
+        citations={citations}
       />
 
       {thesis.scenarios.length > 0 ? (
@@ -80,6 +100,7 @@ function ThesisExpanded({ thesis }: { thesis: Thesis }) {
             {thesis.catalysts.map((c, i) => (
               <li key={i}>
                 · <span className="font-medium text-[var(--surface-text)]">{c.when}</span> — {c.event}
+                <CitationList ids={c.citation_ids} citations={citations} className="ml-1" />
               </li>
             ))}
           </ul>
@@ -97,18 +118,23 @@ function ClaimList({
   label,
   labelClass,
   claims,
+  citations,
 }: {
   label: string;
   labelClass: string;
-  claims: string[];
+  claims: Claim[];
+  citations: Citation[];
 }) {
   if (claims.length === 0) return null;
   return (
     <div>
       <div className={`text-xs font-semibold mb-1 ${labelClass}`}>{label}</div>
       <ul className="space-y-1 list-disc list-inside text-[var(--surface-text-muted)]">
-        {claims.map((t, i) => (
-          <li key={i}>{t}</li>
+        {claims.map((c, i) => (
+          <li key={i}>
+            {c.text}
+            <CitationList ids={c.citations} citations={citations} className="ml-1" />
+          </li>
         ))}
       </ul>
     </div>

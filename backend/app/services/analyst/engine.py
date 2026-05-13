@@ -159,6 +159,7 @@ def compose(
     """
     k = len(data.data_citations)
     interp_ids_pre_shift = {c.id for c in analyst.interp_citations}
+    valid_data_ids = {c.id for c in data.data_citations}
 
     # Final citation pool: data IDs unchanged 1..K; analyst IDs offset by K.
     final_citations: list[Citation] = list(data.data_citations)
@@ -181,24 +182,24 @@ def compose(
         one_line=analyst.glance.one_line,
         citations=_resolve_ids(
             analyst.glance.citations, k=k,
-            interp_ids_pre_shift=interp_ids_pre_shift, where="glance",
+            interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where="glance",
         ),
     )
 
     thesis = Thesis(
         core_thesis=analyst.thesis.core_thesis,
         supports=[
-            _resolve_claim(c, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            _resolve_claim(c, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids,
                            where=f"thesis.supports[{i}]")
             for i, c in enumerate(analyst.thesis.supports)
         ],
         opposes=[
-            _resolve_claim(c, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            _resolve_claim(c, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids,
                            where=f"thesis.opposes[{i}]")
             for i, c in enumerate(analyst.thesis.opposes)
         ],
         catalysts=[
-            _resolve_catalyst(cat, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
+            _resolve_catalyst(cat, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids,
                               where=f"thesis.catalysts[{i}]")
             for i, cat in enumerate(analyst.thesis.catalysts)
         ],
@@ -206,7 +207,7 @@ def compose(
         scenarios=list(analyst.thesis.scenarios),
         citations=_resolve_ids(
             analyst.thesis.citations, k=k,
-            interp_ids_pre_shift=interp_ids_pre_shift, where="thesis",
+            interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where="thesis",
         ),
     )
 
@@ -218,11 +219,11 @@ def compose(
         note=analyst.decision.note,
         citations=_resolve_ids(
             analyst.decision.citations, k=k,
-            interp_ids_pre_shift=interp_ids_pre_shift, where="decision",
+            interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where="decision",
         ),
         interpretation=_resolve_interp(
             analyst.decision.interpretation, k=k,
-            interp_ids_pre_shift=interp_ids_pre_shift, where="decision.interp",
+            interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where="decision.interp",
         ),
     )
 
@@ -255,7 +256,7 @@ def compose(
         relations=relations_with_notes,
         citations=_resolve_ids(
             analyst.relations_narrative.citations, k=k,
-            interp_ids_pre_shift=interp_ids_pre_shift, where="relations_narrative",
+            interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where="relations_narrative",
         ),
     )
 
@@ -315,30 +316,32 @@ def _resolve_ids(
     *,
     k: int,
     interp_ids_pre_shift: set[int],
+    valid_data_ids: set[int],
     where: str,
 ) -> list[int]:
     """LLM 이 출력한 citation id 를 final pool 기준으로 매핑.
 
-    Spec (synthesize.py prompt): "interp_citations 에 *등록한* id 만 참조".
-    그러므로 LLM 이 출력하는 citation id 는 *항상* 자기 interp 풀을 가리킨다 —
-    data 풀과 숫자가 겹쳐도 의미적 충돌은 없다 (data 풀은 LLM 에 노출되지 않음).
+    Codex review v2 [high]: schema 가 data 풀 id 인용도 허용한다 (DART 공시 /
+    뉴스 / 재무 같은 *hard fact* 출처). interp 풀만 인정하던 정책은 LLM 이
+    data 풀 id 를 인용한 케이스 — 가장 가치 있는 근거 — 를 묵묵히 drop 시켰다.
 
-    Codex review 의 초기 fix (ambiguous → drop) 는 K=127 + interp={1..4} 같은
-    실 운영 환경에서 *모든* LLM citation 을 drop 하여 카드의 footnote 가 완전히
-    사라지는 부작용을 만들었다. spec 을 신뢰하고 단순화:
-      (a) id ∈ interp 풀 → +K shift (정상 인용)
-      (b) 어디에도 없음 → drop + log (LLM hallucination 가능성)
+    우선순위 (정보 보존 > 잘못된 attribution; 자본 운용 도구 기준):
+      (1) id ∈ interp_ids_pre_shift → +K shift (LLM 자기 풀 ref)
+      (2) id ∈ valid_data_ids 만     → 그대로 유지 (LLM 이 data 풀 직접 인용)
+      (3) 어느 풀에도 없음           → drop + INFO log (hallucination 가능성)
     """
     resolved: list[int] = []
     dropped: list[int] = []
     for i in ids:
         if i in interp_ids_pre_shift:
             resolved.append(i + k)
+        elif i in valid_data_ids:
+            resolved.append(i)
         else:
             dropped.append(i)
     if dropped:
         logger.info(
-            "compose: dropped %d citation id(s) in %s: %s — not in interp pool "
+            "compose: dropped %d citation id(s) in %s: %s — neither interp nor data pool "
             "(k=%d interp=%s)",
             len(dropped), where, dropped, k, sorted(interp_ids_pre_shift),
         )
@@ -350,6 +353,7 @@ def _resolve_interp(
     *,
     k: int,
     interp_ids_pre_shift: set[int],
+    valid_data_ids: set[int],
     where: str,
 ) -> Interpretation | None:
     if interp is None:
@@ -357,8 +361,7 @@ def _resolve_interp(
     return Interpretation(
         kind=interp.kind,
         based_on=_resolve_ids(
-            interp.based_on, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
-            where=f"{where}.based_on",
+            interp.based_on, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where=f"{where}.based_on",
         ),
         rationale=interp.rationale,
     )
@@ -369,17 +372,16 @@ def _resolve_claim(
     *,
     k: int,
     interp_ids_pre_shift: set[int],
+    valid_data_ids: set[int],
     where: str,
 ) -> Claim:
     return Claim(
         text=c.text,
         citations=_resolve_ids(
-            c.citations, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
-            where=f"{where}.citations",
+            c.citations, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where=f"{where}.citations",
         ),
         interpretation=_resolve_interp(
-            c.interpretation, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
-            where=f"{where}.interp",
+            c.interpretation, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where=f"{where}.interp",
         ),
     )
 
@@ -389,6 +391,7 @@ def _resolve_catalyst(
     *,
     k: int,
     interp_ids_pre_shift: set[int],
+    valid_data_ids: set[int],
     where: str,
 ) -> Catalyst:
     return Catalyst(
@@ -397,8 +400,7 @@ def _resolve_catalyst(
         impact_estimate=cat.impact_estimate,
         direction=cat.direction,
         citation_ids=_resolve_ids(
-            cat.citation_ids, k=k, interp_ids_pre_shift=interp_ids_pre_shift,
-            where=f"{where}.citation_ids",
+            cat.citation_ids, k=k, interp_ids_pre_shift=interp_ids_pre_shift, valid_data_ids=valid_data_ids, where=f"{where}.citation_ids",
         ),
     )
 

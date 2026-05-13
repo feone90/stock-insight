@@ -1,6 +1,7 @@
 "use client";
 
 import type { StockCard } from "@/types/card";
+import { CitationList } from "./citation-ref";
 
 const GRADE_FG = {
   S: "text-violet-600 dark:text-violet-400",
@@ -85,6 +86,7 @@ export function AtAGlancePanel({ card }: { card: StockCard }) {
 
       <p className="mt-4 text-base md:text-[15px] leading-relaxed text-[var(--surface-text)]">
         {g.one_line}
+        <CitationList ids={g.citations} citations={card.citations} className="ml-1" />
       </p>
     </div>
   );
