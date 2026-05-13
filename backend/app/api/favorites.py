@@ -1,6 +1,7 @@
+import logging
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from app.database import get_db
 from app.dependencies import get_stock_or_404
 from app.models import Favorite, Stock
 from app.schemas.stock import FavoriteActionResponse, StockResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/favorites", tags=["favorites"])
 
@@ -87,8 +90,88 @@ async def list_favorites(user_id: str = Depends(_get_user_id), db: AsyncSession 
     ]
 
 
+async def _auto_analyze_after_favorite(ticker: str, stock_id: int) -> None:
+    """즐겨찾기 추가 직후 background self-heal — v2 카드 없으면 sync + analyze +
+    relation extract 를 한 번에 처리.
+
+    idempotent: 이미 v2 Analysis row 가 있으면 즉시 return. collectors 모두
+    중복 호출 안전. budget 초과 시 LLM 호출만 skip.
+
+    cards.py 의 `_ensure_analyzable` + `_extract_relations_safe` 가 카드 view
+    경로에서 같은 일을 하지만 사용자가 카드 페이지로 가야 발동된다 — 즐겨찾기
+    추가 시점에 미리 데이터 채워두면 첫 카드 view 가 instant.
+    """
+    from datetime import date, timedelta
+
+    from app.collectors.disclosure import sync_disclosures
+    from app.collectors.financials import sync_financials
+    from app.collectors.news import sync_news
+    from app.collectors.stock_price import sync_prices
+    from app.database import async_session
+    from app.models.analysis import Analysis
+    from app.services.analyst.cost import can_proceed
+    from app.services.analyst.engine import analyze
+    from app.services.ontology import extract_news_relations_for_ticker
+
+    async with async_session() as db:
+        existing = (
+            await db.execute(
+                select(Analysis)
+                .where(
+                    Analysis.stock_id == stock_id,
+                    Analysis.schema_version == "v2",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing and existing.card_data:
+            logger.info("auto-analyze[%s] skipped — v2 card exists", ticker)
+            return
+        stock = (
+            await db.execute(select(Stock).where(Stock.id == stock_id))
+        ).scalar_one_or_none()
+        if stock is None:
+            return
+        try:
+            await sync_prices(db, stock)
+            await sync_news(db, stock)
+            await sync_financials(db, stock)
+            await sync_disclosures(db, stock)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("auto-analyze[%s] sync phase failed: %s", ticker, e)
+
+    if not can_proceed():
+        logger.info("auto-analyze[%s] LLM phase skipped — budget exceeded", ticker)
+        return
+    try:
+        await analyze(ticker)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auto-analyze[%s] analyze failed: %s", ticker, e)
+        return
+    try:
+        summary = await extract_news_relations_for_ticker(
+            ticker,
+            since=date.today() - timedelta(days=14),
+            articles_per_run=10,
+        )
+        logger.info(
+            "auto-analyze[%s] extract: seen=%s llm=%s upserted=%s",
+            ticker,
+            summary.get("articles_seen"),
+            summary.get("llm_relations_returned"),
+            summary.get("upserted"),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("auto-analyze[%s] extract failed: %s", ticker, e)
+
+
 @router.post("/{ticker}", response_model=FavoriteActionResponse)
-async def add(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_get_user_id), db: AsyncSession = Depends(get_db)):
+async def add(
+    bg: BackgroundTasks,
+    stock: Stock = Depends(get_stock_or_404),
+    user_id: str = Depends(_get_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     import asyncio
 
     from app.services.universe import promote_to_tier_2
@@ -103,6 +186,8 @@ async def add(stock: Stock = Depends(get_stock_or_404), user_id: str = Depends(_
     await db.commit()
     # P1.7 Phase B: 즐겨찾기 추가는 강한 user signal — tier 3 → 2 자동 승격.
     asyncio.create_task(promote_to_tier_2(stock.id))
+    # 카드 첫 view 마찰 제거 — sync + analyze + extract 를 background 로 미리.
+    bg.add_task(_auto_analyze_after_favorite, stock.ticker, stock.id)
     return FavoriteActionResponse(status="added", ticker=stock.ticker)
 
 
