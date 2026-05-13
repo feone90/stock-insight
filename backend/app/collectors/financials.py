@@ -66,9 +66,10 @@ def _us_values(stock: Stock, info: dict, period: str) -> dict | None:
 # ---------- KR: dartlab DART ----------
 
 
-def _yf_market_cap(ticker: str, market: str | None) -> int | None:  # pragma: no cover
-    """yfinance .KS/.KQ market_cap fallback. stock.market_cap이 None인 신규
-    universe 종목들 자체적으로 보강.
+def _yf_kr_ratios(ticker: str, market: str | None) -> dict:  # pragma: no cover
+    """yfinance .KS/.KQ 에서 KR fallback ratios. dartlab 이 IS roll-up 못 만드는
+    종목 (예: 인보사 사태 이후 코오롱티슈진 — DART 사업보고서 부재) 도 yfinance
+    가 marketCap/sharesOutstanding 만큼은 줄 때가 있어 카드의 최소 정보를 살린다.
     """
     import yfinance as yf
 
@@ -78,21 +79,36 @@ def _yf_market_cap(ticker: str, market: str | None) -> int | None:  # pragma: no
         suffixes = (".KQ",)
     else:
         suffixes = (".KS", ".KQ")
+    out: dict = {
+        "market_cap": None,
+        "trailing_pe": None,
+        "price_to_book": None,
+        "dividend_yield": None,
+        "shares_outstanding": None,
+    }
     for sfx in suffixes:
         try:
-            mc = yf.Ticker(f"{ticker}{sfx}").info.get("marketCap")
+            info = yf.Ticker(f"{ticker}{sfx}").info
         except Exception:
             continue
-        if mc:
-            return int(mc)
-    return None
+        mc = info.get("marketCap")
+        if not mc:
+            continue
+        out["market_cap"] = int(mc)
+        out["trailing_pe"] = info.get("trailingPE")
+        out["price_to_book"] = info.get("priceToBook")
+        dy = info.get("dividendYield")
+        out["dividend_yield"] = round(dy * 100, 2) if dy else None
+        out["shares_outstanding"] = info.get("sharesOutstanding")
+        break
+    return out
 
 
 def fetch_kr_financials_raw(ticker: str, market: str | None) -> dict:  # pragma: no cover
-    """dartlab analysis('financial', '수익성') + yfinance market_cap 보강."""
+    """dartlab analysis('financial', '수익성') + yfinance ratios fallback."""
     import dartlab
 
-    out: dict = {"margin": [], "return": [], "market_cap": None}
+    out: dict = {"margin": [], "return": [], "yf": {}}
     try:
         c = dartlab.Company(ticker)
         if c.market == "KR":
@@ -101,8 +117,7 @@ def fetch_kr_financials_raw(ticker: str, market: str | None) -> dict:  # pragma:
             out["return"] = (prof.get("returnTrend") or {}).get("history") or []
     except Exception as e:
         logger.warning("dartlab fetch failed for %s: %s", ticker, e)
-    # market_cap fallback — Stock.market_cap이 None인 신규 universe 종목 대응.
-    out["market_cap"] = _yf_market_cap(ticker, market)
+    out["yf"] = _yf_kr_ratios(ticker, market)
     return out
 
 
@@ -118,23 +133,11 @@ def _latest_fully_populated(rows: list[dict], required: tuple[str, ...]) -> dict
 def _kr_values(stock: Stock, raw: dict) -> dict | None:
     margin_rows = raw.get("margin") or []
     return_rows = raw.get("return") or []
-    margin = _latest_fully_populated(
-        margin_rows, ("revenue", "operatingIncome", "netIncome")
-    )
-    if not margin:
-        return None
-    period = margin.get("period")
-    # 같은 period 의 returnTrend row 매칭 — equity / totalAssets / roe 가져온다.
-    ret = next((r for r in return_rows if r.get("period") == period), {})
-
-    revenue_won = int(margin["revenue"] * _KR_UNIT_TO_WON)
-    op_won = int(margin["operatingIncome"] * _KR_UNIT_TO_WON)
-    net_won = int(margin["netIncome"] * _KR_UNIT_TO_WON)
-    equity_won = int(ret.get("equity") * _KR_UNIT_TO_WON) if ret.get("equity") else None
+    yf_fallback = raw.get("yf") or {}
 
     # market_cap: fresh yfinance > stock 테이블. write-back 으로 stock 의 시총
     # 컬럼도 갱신해 다음 sync 호출에서 재활용.
-    fresh_mc = raw.get("market_cap")
+    fresh_mc = yf_fallback.get("market_cap")
     if fresh_mc:
         stock.market_cap = fresh_mc
         market_cap = fresh_mc
@@ -142,31 +145,66 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
         market_cap = int(stock.market_cap)
     else:
         market_cap = None
-    logger.info(
-        "kr_values[%s] period=%s fresh_mc=%s stock_mc=%s net=%s equity=%s",
-        stock.ticker, period, fresh_mc, stock.market_cap, net_won, equity_won,
+
+    margin = _latest_fully_populated(
+        margin_rows, ("revenue", "operatingIncome", "netIncome")
     )
 
-    per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
-    pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
-    # dartlab ROE 우선, 없으면 직접 계산.
-    roe = ret.get("roe")
-    if roe is None and equity_won and equity_won > 0:
-        roe = round(net_won / equity_won * 100, 2)
-    elif roe is not None:
-        roe = round(roe, 2)
+    if margin:
+        # dartlab IS roll-up 정상 — primary path.
+        period = margin.get("period")
+        ret = next((r for r in return_rows if r.get("period") == period), {})
+        revenue_won = int(margin["revenue"] * _KR_UNIT_TO_WON)
+        op_won = int(margin["operatingIncome"] * _KR_UNIT_TO_WON)
+        net_won = int(margin["netIncome"] * _KR_UNIT_TO_WON)
+        equity_won = int(ret.get("equity") * _KR_UNIT_TO_WON) if ret.get("equity") else None
 
+        per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
+        pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
+        roe = ret.get("roe")
+        if roe is None and equity_won and equity_won > 0:
+            roe = round(net_won / equity_won * 100, 2)
+        elif roe is not None:
+            roe = round(roe, 2)
+
+        logger.info(
+            "kr_values[%s] DART period=%s mc=%s net=%s equity=%s",
+            stock.ticker, period, market_cap, net_won, equity_won,
+        )
+        return {
+            "stock_id": stock.id,
+            "period": f"{period}A",
+            "period_type": "annual",
+            "revenue": revenue_won,
+            "operating_profit": op_won,
+            "net_income": net_won,
+            "per": per,
+            "pbr": pbr,
+            "roe": roe,
+            "dividend_yield": yf_fallback.get("dividend_yield"),
+            "market_cap": market_cap,
+        }
+
+    # DART 빈 결과 — 회계감리/거래정지/R&D 단계 종목 (예: 코오롱티슈진).
+    # yfinance 가 marketCap 라도 주면 카드 최소 정보 (시총 + 가능하면 PER/PBR)
+    # 살린다. 매출/영업이익/순이익 은 None — 사용자가 "데이터 미공개" 인지.
+    if market_cap is None:
+        return None
+    logger.info(
+        "kr_values[%s] yfinance-only mc=%s pe=%s pb=%s (DART IS empty)",
+        stock.ticker, market_cap, yf_fallback.get("trailing_pe"), yf_fallback.get("price_to_book"),
+    )
     return {
         "stock_id": stock.id,
-        "period": f"{period}A",
+        "period": f"{date.today().year}A",
         "period_type": "annual",
-        "revenue": revenue_won,
-        "operating_profit": op_won,
-        "net_income": net_won,
-        "per": per,
-        "pbr": pbr,
-        "roe": roe,
-        "dividend_yield": None,  # dartlab analysis 에 표면화 안 됨 — Phase B 에서 capital() 사용
+        "revenue": None,
+        "operating_profit": None,
+        "net_income": None,
+        "per": yf_fallback.get("trailing_pe"),
+        "pbr": yf_fallback.get("price_to_book"),
+        "roe": None,
+        "dividend_yield": yf_fallback.get("dividend_yield"),
         "market_cap": market_cap,
     }
 
@@ -182,7 +220,9 @@ async def sync_financials(db: AsyncSession, stock: Stock) -> dict:
                 fetch_kr_financials_raw, stock.ticker, stock.market
             )
             values = _kr_values(stock, raw)
-            label = "DART"
+            # primary path 가 dartlab annual row 였는지, yfinance fallback 이었는지
+            # 응답에서 구분해 운영자가 종목별 데이터 출처 확인 가능.
+            label = "DART" if values and values.get("revenue") is not None else "yfinance-KR"
         else:
             info = await asyncio.to_thread(fetch_us_financials, stock.ticker)
             values = _us_values(stock, info, f"{date.today().year}Q0")

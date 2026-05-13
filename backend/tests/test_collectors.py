@@ -244,6 +244,51 @@ async def test_sync_financials_kr_partial_history(db):
 
 
 @pytest.mark.asyncio
+async def test_sync_financials_kr_yfinance_fallback(db):
+    """KR — dartlab IS 비어 있어도 yfinance market_cap 으로 최소 row 생성."""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.market_cap = None  # 시드 빈 값 흉내.
+
+    mock_raw = {
+        "margin": [],
+        "return": [],
+        "yf": {
+            "market_cap": 11_110_000_000_000,
+            "trailing_pe": None,
+            "price_to_book": None,
+            "dividend_yield": None,
+            "shares_outstanding": 83_221_265,
+        },
+    }
+
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 1
+    assert result["source"] == "yfinance-KR"
+    assert result["market_cap"] == 11_110_000_000_000
+    assert result["revenue"] is None
+    assert result["net_income"] is None
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_kr_no_data_anywhere(db):
+    """KR — dartlab + yfinance 모두 빈 결과면 row 만들지 않음."""
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.market_cap = None
+
+    mock_raw = {"margin": [], "return": [], "yf": {"market_cap": None}}
+
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 0
+    assert "error" in result
+
+
+@pytest.mark.asyncio
 async def test_sync_financials_exception(db):
     """US fetch 예외 시 graceful fail"""
     result = await db.execute(select(Stock).where(Stock.market.in_(["NYSE", "NASDAQ"])))
