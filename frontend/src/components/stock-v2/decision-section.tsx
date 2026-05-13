@@ -21,7 +21,7 @@ export function DecisionSection({ decision }: { decision: Decision }) {
       emoji="✅"
       title="의사결정"
       defaultOpen
-      highlight="decision"
+      stanceAccent={decision.stance}
       compact={<span>{parts.join(" · ")}</span>}
       expanded={<DecisionExpanded decision={decision} />}
     />

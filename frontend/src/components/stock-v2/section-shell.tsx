@@ -3,6 +3,14 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
+type StanceAccent = "BUY" | "WATCH" | "REJECT";
+
+const STANCE_STRIPE_CLASS: Record<StanceAccent, string> = {
+  BUY: "before:bg-red-500",
+  WATCH: "before:bg-amber-500",
+  REJECT: "before:bg-blue-500",
+};
+
 /**
  * Common 7-section shell — header, compact body, expandable expanded body,
  * and a per-section source list slot.
@@ -15,6 +23,7 @@ export function SectionShell({
   title,
   defaultOpen = false,
   highlight,
+  stanceAccent,
   compact,
   expanded,
   sources,
@@ -24,6 +33,10 @@ export function SectionShell({
   defaultOpen?: boolean;
   /** Optional surface-token key for emphasized sections (glance / decision). */
   highlight?: "glance" | "decision";
+  /** When set, draws a stance-colored 4px left accent stripe and uses the shared
+   *  emphasized surface (`--surface-glance`). Used by 종합 의견 + 의사결정 so the
+   *  two visually group as the "what should I do?" pane. */
+  stanceAccent?: StanceAccent;
   /** 1-line summary always visible. */
   compact: ReactNode;
   /** Drill-down content shown when expanded. */
@@ -33,16 +46,21 @@ export function SectionShell({
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
-  const highlightClass =
-    highlight === "glance"
+  const surfaceClass = stanceAccent
+    ? "bg-[var(--surface-glance)]"
+    : highlight === "glance"
       ? "bg-[var(--surface-glance)]"
       : highlight === "decision"
         ? "bg-[var(--surface-decision)]"
         : "bg-[var(--surface-section)]";
 
+  const stripeClass = stanceAccent
+    ? `before:absolute before:left-0 before:top-3 before:bottom-3 before:w-1 before:rounded-r before:content-[''] ${STANCE_STRIPE_CLASS[stanceAccent]}`
+    : "";
+
   return (
     <section
-      className={`rounded-xl border border-[var(--surface-border)] ${highlightClass} overflow-hidden`}
+      className={`relative rounded-xl border border-[var(--surface-border)] ${surfaceClass} ${stripeClass} overflow-hidden`}
     >
       <button
         type="button"
