@@ -16,3 +16,21 @@ notes/
 .mcp.json
 .azure/secrets.env
 backend/app/data/sec_company_tickers.json
+
+# Local debug artifacts dumped at repo root during ad-hoc API probes.
+# These are captured curl responses + screenshots from manual verification,
+# not fixtures — keeping them tracked would bloat the repo and noise reviews.
+# Codex review 2026-05-13 [P2].
+/card-*.png
+/graph-*.png
+/card_*.json
+/sync_*.json
+/inspect_*.json
+/extract_*.json
+/ontology_*.json
+/runs.json
+/gh_runs.json
+/pol_status.json
+/card.json
+/cors.json
+/ontology.json
