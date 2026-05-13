@@ -5,8 +5,7 @@ import { useParams } from "next/navigation";
 import { OntologyGraph } from "@/components/stock-v2/ontology-graph";
 
 /**
- * Stock Universe ontology graph page (P3).
- * Route: /v2/stock/[ticker]/graph
+ * Stock Universe ontology graph page — canonical route /stock/[ticker]/graph.
  */
 export default function StockGraphPage() {
   const params = useParams();
@@ -17,7 +16,7 @@ export default function StockGraphPage() {
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-baseline gap-3">
             <Link
-              href={`/v2/stock/${ticker}`}
+              href={`/stock/${ticker}`}
               className="text-sm text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
             >
               ← {ticker.toUpperCase()} 카드로

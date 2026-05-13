@@ -65,9 +65,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
       <div className="mx-auto max-w-[1200px] px-4 py-6 md:py-8">
         <div className="mb-4 flex items-center justify-between">
           <div className="text-xs text-[var(--surface-text-subtle)]">
-            {card
-              ? `v2 카드 · schema ${card.schema_version} · persona ${card.persona_version}`
-              : `v2 카드 · ${ticker}`}
+            {card ? card.ticker : ticker}
           </div>
           <div className="flex items-center gap-2">
             <button

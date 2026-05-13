@@ -299,7 +299,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             cooldownTicks={150}
             onNodeClick={(n) => {
               const node = n as GraphNode;
-              window.location.href = `/v2/stock/${node.ticker}`;
+              window.location.href = `/stock/${node.ticker}`;
             }}
             onLinkClick={(l) => {
               setSelectedLink(l as GraphLink);

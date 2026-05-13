@@ -44,7 +44,7 @@ export default function Home() {
             {favorites.map((stock) => (
               <Link
                 key={stock.ticker}
-                href={`/v2/stock/${stock.ticker}`}
+                href={`/stock/${stock.ticker}`}
                 className="group rounded-lg border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-600"
               >
                 <div className="flex items-center justify-between">
@@ -119,7 +119,7 @@ function EmptyState() {
         {RECOMMENDATIONS.map((s) => (
           <Link
             key={s.ticker}
-            href={`/v2/stock/${s.ticker}`}
+            href={`/stock/${s.ticker}`}
             className="group rounded-xl border border-[var(--surface-border)] bg-[var(--surface-card)] p-4 transition-colors hover:border-blue-500/40"
           >
             <div className="font-semibold text-[var(--surface-text)] group-hover:text-blue-400 transition-colors">

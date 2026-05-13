@@ -28,8 +28,8 @@ from app.services.ontology.upsert import bulk_upsert_relations
 logger = logging.getLogger(__name__)
 
 _TIER_USER_TOUCHED = 2
-_REVIEW_FLOOR = 0.3  # below this → drop (too noisy to keep)
-_REVIEW_THRESHOLD = 0.6  # below this → flagged in metadata for admin review
+_REVIEW_FLOOR = 0.5  # below this → drop. 시황 기사에서 LLM 이 만든 약신호 차단.
+_REVIEW_THRESHOLD = 0.75  # below this → 정성적 추정. metadata.needs_review=True 로 flag.
 
 # Reciprocal type for the reverse direction. supply / contract are asymmetric
 # (supplier ↔ customer); peer / competitor / complementary are symmetric.

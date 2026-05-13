@@ -68,7 +68,7 @@ export function StockSearch() {
   const handleSelect = (ticker: string) => {
     setOpen(false);
     setQuery("");
-    router.push(`/v2/stock/${ticker}`);
+    router.push(`/stock/${ticker}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -91,9 +91,6 @@ export function StockSearch() {
       >
         <span>🔍</span>
         <span>종목 검색...</span>
-        <kbd className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-xs text-slate-500">
-          ⌘K
-        </kbd>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent

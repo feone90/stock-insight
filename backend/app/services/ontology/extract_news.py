@@ -125,6 +125,12 @@ async def _run_for_ticker(
             skipped_no_focal_evidence += len(rels)
             continue
         for rel in rels:
+            # 시황성 type (peer / theme / macro / group) 은 news 출처 에선 거의 항상
+            # "단순 같이 나옴" 신호다. sector_match path 가 별도로 peer 를 깔아주니
+            # news LLM 추출에선 사업 본질 type 만 통과시켜 그래프 잡음 차단.
+            if rel.relation_type in {"peer", "theme", "macro", "group"}:
+                skipped_no_focal_evidence += 1
+                continue
             from_t = (rel.from_ticker or "").lower()
             to_t = (rel.to_ticker or "").lower()
             if focal_token_low not in (from_t, to_t):

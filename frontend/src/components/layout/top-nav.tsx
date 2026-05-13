@@ -159,7 +159,7 @@ export function TopNav() {
             <span className="text-xs text-slate-500">▼</span>
           </button>
           {showPicker && (
-            <div className="absolute right-0 top-9 z-50 w-56 max-w-[calc(100vw-1.5rem)] rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl">
+            <div className="fixed inset-x-2 top-14 z-50 mx-auto w-auto max-w-[calc(100vw-1rem)] rounded-lg border border-slate-700 bg-slate-900 p-2 shadow-xl md:absolute md:inset-x-auto md:right-0 md:top-9 md:mx-0 md:w-56 md:max-w-none">
               {users.length === 0 ? (
                 <p className="px-2 py-2 text-xs text-slate-500">
                   사용자 없음 — 아래에 이름 입력해 추가
