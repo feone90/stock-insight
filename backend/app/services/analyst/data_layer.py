@@ -183,6 +183,7 @@ def _build_fundamentals(res: Any, pool: _CitationPool) -> Fundamentals | None:
         market_cap_krw=res.get("market_cap_krw"),
         dividend_yield=res.get("dividend_yield"),
         per_5y_z=res.get("per_5y_z"),
+        source_label=label,
         citations=[cid],
     )
 
@@ -294,6 +295,8 @@ def _build_relations(
 
 
 async def _fetch_fundamentals(ticker: str) -> dict:
+    from app.markets import is_kr
+
     async with async_session() as db:
         stock = (
             await db.execute(select(Stock).where(Stock.ticker == ticker))
@@ -309,6 +312,7 @@ async def _fetch_fundamentals(ticker: str) -> dict:
             )
         ).scalar_one_or_none()
         if fin:
+            label = _label_for_financial(fin, is_kr(stock.market))
             return {
                 "per": fin.per,
                 "pbr": fin.pbr,
@@ -316,12 +320,10 @@ async def _fetch_fundamentals(ticker: str) -> dict:
                 "dividend_yield": fin.dividend_yield,
                 "per_5y_z": None,  # needs 5y series
                 "period": fin.period,
-                "label": f"DB · financials ({fin.period})",
+                "label": label,
             }
-        # Fallback: Stock.market_cap (P1.7 universe seed가 채움). PER/PBR/배당
-        # 수익률 source는 아직 없음 — 솔직하게 None으로 노출. analyst persona가
-        # "PER/PBR이 비어 있어 가격이 비싼지 싼지 숫자로 확인하기 어렵다" 식으로
-        # 가족 사용자에게 상태 설명.
+        # Fallback: Stock.market_cap only (universe seed 단계). Financial row
+        # 자체가 없음 — 사용자에게 "데이터 미수집" 명시.
         if stock.market_cap is not None:
             return {
                 "per": None,
@@ -330,9 +332,24 @@ async def _fetch_fundamentals(ticker: str) -> dict:
                 "dividend_yield": None,
                 "per_5y_z": None,
                 "period": None,
-                "label": "DB · stocks.market_cap (재무 상세 미수집)",
+                "label": "시총만 — 재무 미수집 (분석 시작 전)",
             }
         return {"error": "재무 데이터 없음"}
+
+
+def _label_for_financial(fin: "Financial", kr: bool) -> str:  # type: ignore[name-defined]
+    """Financial row 의 채워진 필드 모양으로 출처 추정.
+
+    - KR + revenue 있음    → "DART · 사업보고서 ({period})"
+    - KR + revenue 없음    → "yfinance · 시총만 (DART 미공개)" — 인보사 사태 이후
+                              코오롱티슈진 같은 회계감리/거래정지 케이스
+    - US                   → "yfinance · TTM ({period})"
+    """
+    if not kr:
+        return f"yfinance · TTM ({fin.period})"
+    if fin.revenue is not None:
+        return f"DART · 사업보고서 ({fin.period})"
+    return "yfinance · 시총만 (DART 사업보고서 미공개)"
 
 
 async def _fetch_political_signals(ticker: str) -> dict:

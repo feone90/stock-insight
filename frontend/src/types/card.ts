@@ -138,6 +138,7 @@ export interface Fundamentals {
   market_cap_krw?: number | null;
   dividend_yield?: number | null;
   per_5y_z?: number | null;
+  source_label?: string | null;
   citations: number[];
 }
 

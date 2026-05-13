@@ -168,6 +168,10 @@ class Fundamentals(BaseModel):
     market_cap_krw: float | None = None
     dividend_yield: float | None = None
     per_5y_z: float | None = None
+    # 데이터 출처 사용자 표시용. 예: "DART · 사업보고서 (2023A)",
+    # "yfinance · TTM (2026Q0)", "yfinance · 시총만 (DART 미공개)",
+    # "시총만 — 재무 미수집 (분석 시작 전)". None이면 라벨 숨김.
+    source_label: str | None = None
     citations: list[int] = []
 
 

@@ -52,19 +52,36 @@ function FundamentalsExpanded({
       value: fundamentals.per_5y_z.toFixed(2),
     });
 
-  if (items.length === 0)
+  const source = fundamentals.source_label?.trim() || null;
+
+  if (items.length === 0) {
     return (
-      <p className="text-sm text-[var(--surface-text-muted)]">재무 데이터 부족</p>
+      <div className="space-y-1">
+        <p className="text-sm text-[var(--surface-text-muted)]">재무 데이터 부족</p>
+        {source ? (
+          <p className="text-[11px] italic text-[var(--surface-text-subtle)]">
+            출처: {source}
+          </p>
+        ) : null}
+      </div>
     );
+  }
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-      {items.map((i) => (
-        <div key={i.label} className="flex justify-between">
-          <dt className="text-[var(--surface-text-muted)]">{i.label}</dt>
-          <dd className="tabular-nums">{i.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="space-y-2">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {items.map((i) => (
+          <div key={i.label} className="flex justify-between">
+            <dt className="text-[var(--surface-text-muted)]">{i.label}</dt>
+            <dd className="tabular-nums">{i.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {source ? (
+        <p className="text-[11px] italic text-[var(--surface-text-subtle)]">
+          출처: {source}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
