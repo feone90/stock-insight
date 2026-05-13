@@ -38,6 +38,36 @@ const RELATION_COLOR: Record<string, string> = {
   regulatory_link: "#ea580c",         // orange 600
 };
 
+const RELATION_LABEL_KO: Record<string, string> = {
+  peer: "동종업계",
+  competitor: "경쟁",
+  contract_supplier: "공급계약",
+  contract_customer: "구매계약",
+  complementary: "상호보완",
+  supply_upstream: "공급-상류",
+  supply_downstream: "공급-하류",
+  group: "그룹사",
+  theme: "테마",
+  macro: "매크로",
+  regulatory_link: "규제연동",
+};
+
+const SIGNAL_LABEL_KO: Record<string, string> = {
+  positive: "↑ 동조",
+  negative: "↓ 부정",
+  inverse: "⇄ 역신호",
+};
+
+const SOURCE_LABEL_KO: Record<string, string> = {
+  sector_match: "섹터매칭",
+  sec_8k: "SEC 8-K",
+  dart_contract: "DART 공시",
+  news: "뉴스",
+  curated_relation: "AI 큐레이션",
+  candidate_promote: "후보 승격",
+  llm_web_search: "웹 탐색",
+};
+
 const SOURCE_COLOR: Record<string, string> = {
   sec_8k: "#2563eb",
   dart_contract: "#f59e0b",
@@ -67,6 +97,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
   const [error, setError] = useState<string | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [depth, setDepth] = useState(1);
+  const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
   const { mode } = useTheme();
 
   // 노드 간 거리 / charge 강하게 — 라벨 안 겹치게.
@@ -174,7 +205,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
       </div>
       <div
         ref={containerRef}
-        className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden"
+        className="relative rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden"
         style={{ height: renderHeight }}
       >
         <ForceGraph2D
@@ -244,7 +275,18 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             }
             linkLabel={(l) => {
               const link = l as GraphLink;
-              return `${link.relation_type} · ${link.signal_direction} · 신뢰 ${(link.confidence * 100).toFixed(0)}%`;
+              const rel = RELATION_LABEL_KO[link.relation_type] ?? link.relation_type;
+              const sig = SIGNAL_LABEL_KO[link.signal_direction] ?? link.signal_direction;
+              const conf = `신뢰 ${(link.confidence * 100).toFixed(0)}%`;
+              const head = `${rel} · ${sig} · ${conf}`;
+              if (link.rationale && link.rationale.trim()) {
+                const short =
+                  link.rationale.length > 80
+                    ? link.rationale.slice(0, 80) + "…"
+                    : link.rationale;
+                return `${head}\n근거: ${short}\n(선 클릭 → 전체 근거)`;
+              }
+              return `${head} · (출처: ${SOURCE_LABEL_KO[link.src_label] ?? link.src_label})`;
             }}
             linkDirectionalArrowLength={3.5}
             linkDirectionalArrowRelPos={0.96}
@@ -259,7 +301,109 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
               const node = n as GraphNode;
               window.location.href = `/v2/stock/${node.ticker}`;
             }}
+            onLinkClick={(l) => {
+              setSelectedLink(l as GraphLink);
+            }}
+            onBackgroundClick={() => setSelectedLink(null)}
           />
+        {selectedLink ? (
+          <LinkDetailPanel
+            link={selectedLink}
+            onClose={() => setSelectedLink(null)}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function LinkDetailPanel({
+  link,
+  onClose,
+}: {
+  link: GraphLink;
+  onClose: () => void;
+}) {
+  const rel = RELATION_LABEL_KO[link.relation_type] ?? link.relation_type;
+  const sig = SIGNAL_LABEL_KO[link.signal_direction] ?? link.signal_direction;
+  const src = SOURCE_LABEL_KO[link.src_label] ?? link.src_label;
+  const srcId =
+    typeof link.source === "string"
+      ? link.source
+      : ((link.source as unknown as { ticker?: string })?.ticker ?? "?");
+  const tgtId =
+    typeof link.target === "string"
+      ? link.target
+      : ((link.target as unknown as { ticker?: string })?.ticker ?? "?");
+  const color = RELATION_COLOR[link.relation_type] ?? RELATION_COLOR.peer;
+  return (
+    <div
+      className="absolute right-3 top-3 w-[320px] max-w-[calc(100%-1.5rem)] rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)]/95 backdrop-blur p-3 text-sm shadow-lg"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+            <span className="font-mono">{srcId}</span>
+            <span
+              className="inline-block h-[2px] w-5 align-middle"
+              style={{ backgroundColor: color }}
+            />
+            <span className="font-mono">{tgtId}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+            <span
+              className="rounded-sm px-1.5 py-0.5 font-medium text-white"
+              style={{ backgroundColor: color }}
+            >
+              {rel}
+            </span>
+            <span className="text-[var(--surface-text-muted)]">{sig}</span>
+            <span className="text-[var(--surface-text-muted)]">
+              · 신뢰 {(link.confidence * 100).toFixed(0)}%
+            </span>
+            <span className="text-[var(--surface-text-muted)]">
+              · 강도 {(link.strength * 100).toFixed(0)}%
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          className="shrink-0 text-[var(--surface-text-muted)] hover:text-[var(--surface-text)] text-lg leading-none"
+        >
+          ×
+        </button>
+      </div>
+
+      {link.rationale && link.rationale.trim() ? (
+        <div className="mb-2 rounded-sm border border-[var(--surface-border)]/60 bg-[var(--surface-section)] p-2">
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-[var(--surface-text-muted)]">
+            왜 이 관계?
+          </div>
+          <p className="text-[13px] leading-relaxed text-[var(--surface-text)]">
+            {link.rationale}
+          </p>
+        </div>
+      ) : (
+        <p className="mb-2 text-xs italic text-[var(--surface-text-subtle)]">
+          LLM 추출 근거 없음 — rule-based ({src}) 매핑.
+        </p>
+      )}
+
+      <div className="flex items-center justify-between text-[11px] text-[var(--surface-text-muted)]">
+        <span>출처: {src}</span>
+        {link.src_url ? (
+          <a
+            href={link.src_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            원문 ↗
+          </a>
+        ) : null}
       </div>
     </div>
   );

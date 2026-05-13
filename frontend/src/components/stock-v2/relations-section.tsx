@@ -121,7 +121,7 @@ function RelationsExpanded({
           href={`/v2/stock/${selfTicker}/graph`}
           className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
         >
-          그래프로 보기 →
+          Ontology 그래프 →
         </a>
       ) : null}
     </div>

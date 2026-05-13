@@ -172,5 +172,6 @@ def _link_dict(src: Stock, rel: StockRelation, tgt: Stock | None) -> dict:
         "confidence": rel.confidence,
         "src_label": rel.source,
         "src_url": md.get("source_url"),
+        "rationale": md.get("rationale"),
         "target_in_universe": tgt is not None,
     }

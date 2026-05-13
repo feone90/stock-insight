@@ -23,6 +23,7 @@ export interface GraphLink {
   confidence: number;
   src_label: string;
   src_url: string | null;
+  rationale: string | null;
   target_in_universe: boolean;
 }
 
