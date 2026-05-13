@@ -96,13 +96,28 @@ async def _extract_relations_safe(ticker: str) -> None:
 
     가족 환경 — 새로 본 종목이면 analyze 직후 supply-chain/competitor 관계도
     당일치 뉴스에서 한 번 채워줘야 사용자가 카드 다시 안 열어도 됨.
+
+    Window 는 admin force-extract 와 동일한 14일 / 10 articles. 짧은 윈도우
+    (7일/5건) 로는 mid-cap KR 종목에서 LLM 이 충분한 entity context 못 받아
+    관계 0건 반환하는 케이스가 다수 (240810 원익IPS, 042700 한미반도체 검증됨).
     """
     if not can_proceed():
         logger.info("ontology extract skipped for %s: budget", ticker)
         return
     try:
-        await extract_news_relations_for_ticker(
-            ticker, since=date.today() - timedelta(days=7)
+        summary = await extract_news_relations_for_ticker(
+            ticker,
+            since=date.today() - timedelta(days=14),
+            articles_per_run=10,
+        )
+        logger.info(
+            "ontology extract %s: seen=%s short=%s llm=%s upserted=%s buffered=%s",
+            ticker,
+            summary.get("articles_seen"),
+            summary.get("articles_skipped_short"),
+            summary.get("llm_relations_returned"),
+            summary.get("upserted"),
+            summary.get("buffered"),
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("ontology extract failed for %s: %s", ticker, e)
