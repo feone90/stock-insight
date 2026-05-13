@@ -97,6 +97,7 @@ export interface Relation {
   source_url?: string | null;
   valid_from?: string | null;
   valid_until?: string | null;
+  rationale?: string | null;
 }
 
 export interface RelationsSummary {

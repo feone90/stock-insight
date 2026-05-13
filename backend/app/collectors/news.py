@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -227,11 +228,116 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
     return {"news_synced": count}
 
 
+# --- Google News (KR 보조) ---
+
+
+_GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
+_GOOGLE_NEWS_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml,text/xml,*/*",
+}
+
+
+async def _fetch_google_news_kr(query: str) -> str | None:  # pragma: no cover
+    """Google News 한국 RSS — 회사명 검색으로 직접 매칭되는 기사 수집.
+
+    Naver Open API 와 달리 매일경제 / 한국경제 / 머니투데이 / 이데일리 / 연합뉴스
+    등 증권 전문 매체 + 영문 매체까지 한 번에 잡힘. description 본문은 짧지만
+    URL 은 정상 매체 직접 링크라 trafilatura 스크래핑이 잘 통한다.
+    """
+    params = {"q": query, "hl": "ko-KR", "gl": "KR", "ceid": "KR:ko"}
+    # Google News 는 hl/gl 정규화로 항상 301 redirect — follow_redirects 필수.
+    async with httpx.AsyncClient(
+        timeout=30, headers=_GOOGLE_NEWS_HEADERS, follow_redirects=True
+    ) as client:
+        resp = await client.get(_GOOGLE_NEWS_RSS, params=params)
+        if resp.status_code != 200:
+            return None
+        return resp.text
+
+
+def _parse_google_news_items(xml_text: str) -> list[dict]:
+    """RSS 2.0 → list of dicts. <description> 안의 source/링크 HTML 은 분리."""
+    items: list[dict] = []
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return items
+    channel = root.find("channel")
+    if channel is None:
+        return items
+    for item in channel.findall("item"):
+        title_el = item.find("title")
+        link_el = item.find("link")
+        pub_el = item.find("pubDate")
+        src_el = item.find("source")
+        desc_el = item.find("description")
+        if title_el is None or link_el is None:
+            continue
+        title = strip_html(title_el.text or "").strip()
+        url = (link_el.text or "").strip()
+        if not title or not url:
+            continue
+        source_name = (src_el.text or "Google News").strip() if src_el is not None else "Google News"
+        pub_date = None
+        if pub_el is not None and pub_el.text:
+            try:
+                pd = parsedate_to_datetime(pub_el.text)
+                pub_date = pd.astimezone(timezone.utc).replace(tzinfo=None) if pd.tzinfo else pd
+            except Exception:
+                pub_date = None
+        description = strip_html(desc_el.text or "").strip() if desc_el is not None else ""
+        items.append(
+            {
+                "title": title,
+                "url": url,
+                "source": source_name,
+                "published_at": pub_date or datetime.now(timezone.utc).replace(tzinfo=None),
+                "description": description or None,
+            }
+        )
+    return items
+
+
+async def _sync_google_news_kr(db: AsyncSession, stock: Stock) -> dict:
+    """Google News RSS 로 KR 종목 뉴스 보조 수집."""
+    query = (stock.name or "").strip() or stock.ticker
+    try:
+        xml_text = await _fetch_google_news_kr(query)
+    except Exception as e:
+        return {"news_synced": 0, "error": f"Google News 조회 실패: {e}"}
+    if not xml_text:
+        return {"news_synced": 0, "error": "Google News empty response"}
+
+    count = 0
+    for item in _parse_google_news_items(xml_text):
+        stmt = insert(News).values(
+            stock_id=stock.id,
+            title=item["title"][:500],
+            source=item["source"][:100],
+            url=item["url"][:1000],
+            published_at=item["published_at"],
+            content=item.get("description"),
+        ).on_conflict_do_nothing(constraint="uq_news_stock_url")
+        result = await db.execute(stmt)
+        if result.rowcount > 0:
+            count += 1
+    await db.commit()
+    return {"news_synced": count}
+
+
 # --- 통합 ---
 
 
 async def sync_news(db: AsyncSession, stock: Stock) -> dict:
-    """종목 시장에 따라 적절한 뉴스 소스로 동기화한다."""
+    """종목 시장에 따라 적절한 뉴스 소스로 동기화한다.
+
+    KR: Naver Open API + Google News RSS (보조 — 증권 전문매체 + 외신).
+    US: yfinance + NewsAPI.
+    """
     if is_us(stock.market):
         yf_result = await _sync_yfinance_news(db, stock)
         api_result = await _sync_newsapi(db, stock)
@@ -244,7 +350,16 @@ async def sync_news(db: AsyncSession, stock: Stock) -> dict:
         if errors:
             result["error"] = "; ".join(errors)
     else:
-        result = await _sync_naver_news(db, stock)
+        naver_result = await _sync_naver_news(db, stock)
+        gnews_result = await _sync_google_news_kr(db, stock)
+        total = naver_result.get("news_synced", 0) + gnews_result.get("news_synced", 0)
+        errors = []
+        for r in [naver_result, gnews_result]:
+            if "error" in r:
+                errors.append(r["error"])
+        result = {"news_synced": total}
+        if errors:
+            result["error"] = "; ".join(errors)
 
     # 본문 스크래핑 (실패해도 뉴스 수집 결과는 유지)
     try:

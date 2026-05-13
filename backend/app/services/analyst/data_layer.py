@@ -467,6 +467,7 @@ async def _fetch_relations_data(ticker: str) -> dict:
                     "confidence": r.confidence if r.confidence is not None else 0.5,
                     "source": r.source,
                     "source_url": metadata.get("source_url") if isinstance(metadata, dict) else None,
+                    "rationale": metadata.get("rationale") if isinstance(metadata, dict) else None,
                     "valid_from": r.valid_from.isoformat() if r.valid_from else None,
                     "valid_until": r.valid_until.isoformat() if r.valid_until else None,
                 }

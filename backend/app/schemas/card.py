@@ -125,6 +125,9 @@ class Relation(BaseModel):
     source_url: str | None = None
     valid_from: str | None = None  # ISO date
     valid_until: str | None = None
+    # LLM 추출 시 prompt 가 요구한 "근거 한 줄" — 왜 이 관계로 분류했는지.
+    # sector_match 같은 rule 기반 source 에는 비어있을 수 있음.
+    rationale: str | None = None
 
 
 class RelationsSummary(BaseModel):

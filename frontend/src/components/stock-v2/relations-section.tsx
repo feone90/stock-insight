@@ -147,41 +147,59 @@ function RelationRow({ rel }: { rel: Relation }) {
   const conf = Math.round(confidence * 100);
   const sourceLabel = rel.source ? SOURCE_LABEL[rel.source] ?? rel.source : null;
 
+  const rationale = rel.rationale?.trim() || null;
+
   return (
-    <tr className="border-t border-[var(--surface-border)]">
-      <td className="py-1.5">
-        {rel.target_name}
-        {rel.target_ticker && rel.target_ticker !== rel.target_name ? (
-          <span className="ml-1 text-[var(--surface-text-muted)]">({rel.target_ticker})</span>
-        ) : null}
-      </td>
-      <td className="text-[var(--surface-text-muted)]">
-        {RELATION_LABEL[rel.relation_type] ?? rel.relation_type}
-      </td>
-      <td>
-        <SignalBadge direction={rel.signal_direction} />
-      </td>
-      <td className="text-right tabular-nums">{(rel.strength * 100).toFixed(0)}%</td>
-      <td className="text-right tabular-nums text-[var(--surface-text-muted)]">{conf}%</td>
-      <td className={`text-right tabular-nums ${changeColor}`}>
-        {change != null ? `${change > 0 ? "+" : ""}${change.toFixed(1)}%` : "—"}
-      </td>
-      <td className="pl-2 text-xs">
-        {rel.source_url ? (
-          <a
-            href={rel.source_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 dark:text-blue-400 hover:underline"
-            title={sourceLabel ?? rel.source ?? "source"}
+    <>
+      <tr
+        className="border-t border-[var(--surface-border)]"
+        title={rationale ?? undefined}
+      >
+        <td className="py-1.5">
+          {rel.target_name}
+          {rel.target_ticker && rel.target_ticker !== rel.target_name ? (
+            <span className="ml-1 text-[var(--surface-text-muted)]">({rel.target_ticker})</span>
+          ) : null}
+        </td>
+        <td className="text-[var(--surface-text-muted)]">
+          {RELATION_LABEL[rel.relation_type] ?? rel.relation_type}
+        </td>
+        <td>
+          <SignalBadge direction={rel.signal_direction} />
+        </td>
+        <td className="text-right tabular-nums">{(rel.strength * 100).toFixed(0)}%</td>
+        <td className="text-right tabular-nums text-[var(--surface-text-muted)]">{conf}%</td>
+        <td className={`text-right tabular-nums ${changeColor}`}>
+          {change != null ? `${change > 0 ? "+" : ""}${change.toFixed(1)}%` : "—"}
+        </td>
+        <td className="pl-2 text-xs">
+          {rel.source_url ? (
+            <a
+              href={rel.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 dark:text-blue-400 hover:underline"
+              title={sourceLabel ?? rel.source ?? "source"}
+            >
+              {sourceLabel ?? "원문"} ↗
+            </a>
+          ) : (
+            <span className="text-[var(--surface-text-subtle)]">{sourceLabel ?? "—"}</span>
+          )}
+        </td>
+      </tr>
+      {rationale ? (
+        <tr className="border-t border-[var(--surface-border)]/40">
+          <td
+            colSpan={7}
+            className="pb-2 pl-2 text-[11px] italic leading-snug text-[var(--surface-text-subtle)]"
           >
-            {sourceLabel ?? "원문"} ↗
-          </a>
-        ) : (
-          <span className="text-[var(--surface-text-subtle)]">{sourceLabel ?? "—"}</span>
-        )}
-      </td>
-    </tr>
+            <span className="not-italic mr-1 text-[var(--surface-text-muted)]">근거:</span>
+            {rationale}
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
