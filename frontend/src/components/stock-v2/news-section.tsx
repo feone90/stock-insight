@@ -110,10 +110,14 @@ function NewsExpanded({
 
 function PoliticalBlock({ signals }: { signals: PoliticalSignalCard[] }) {
   return (
-    <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
-      <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-amber-700 dark:text-amber-300">
-        <span>🇺🇸</span>
-        <span>정치 시그널 (트럼프 Truth Social)</span>
+    <div className="relative rounded-md border-2 border-amber-500/40 dark:border-amber-500/30 bg-amber-500/5 pl-4 pr-3 py-3 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-amber-500 before:rounded-l-md before:content-['']">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px] font-semibold">
+          정치 시그널
+        </span>
+        <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+          🇺🇸 트럼프 Truth Social
+        </span>
         <span className="text-xs font-normal text-[var(--surface-text-muted)]">
           · 자동매매 trigger 기준
         </span>
