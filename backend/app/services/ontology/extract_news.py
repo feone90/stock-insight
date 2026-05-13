@@ -91,12 +91,14 @@ async def _run_for_ticker(
     focal_name = stock.name or ticker
     focal_name_low = focal_name.lower()
 
+    # Phase 1 — collect (article, llm_relations) per article + accumulate target
+    # tickers so we can do ONE bulk name-lookup for the substring evidence gate.
+    # 한국 기사는 "삼성전자" 같은 한글 이름으로만 쓰지 ticker 코드 ("005930") 는
+    # 거의 안 쓴다. ticker substring 만 보면 KR 종목 전부 drop 됨.
+    pending: list[tuple[News, list[ExtractedRelation], str, bool]] = []
+    needed_tickers: set[str] = set()
     for art in articles:
         body = (art.content or "").strip()
-        # 50자 임계 — 기존 100자는 Naver API description(~150자)이 trafilatura
-        # 본문 스크래핑 실패해서 끝부분만 남는 케이스에서 KR 종목 전부 skip.
-        # "한미반도체, 삼성전자에 HBM 본더 공급" 같은 한 줄짜리도 supply
-        # signal 자체는 살려 LLM 에게 일단 넘긴다.
         if len(body) < 50:
             skipped_short += 1
             continue
@@ -105,7 +107,6 @@ async def _run_for_ticker(
             focal_token_low in haystack_low
             or (focal_name_low and focal_name_low in haystack_low)
         )
-        # title 도 prompt 에 같이 넣어줘 short-body 케이스에서 LLM 이 entity 식별.
         enriched = f"제목: {art.title}\n\n{body}"
         rels = await extract_relations(
             body=enriched,
@@ -118,27 +119,46 @@ async def _run_for_ticker(
             },
         )
         llm_returned_total += len(rels)
-        # Codex review [high]: focal/target evidence gate. LLM tends to hallucinate
-        # relations from generic market news (코스피 등락 등) when focal isn't really
-        # in the article. Require explicit substring evidence before persistence.
         if not focal_in_article:
             skipped_no_focal_evidence += len(rels)
             continue
+        pending.append((art, rels, haystack_low, focal_in_article))
         for rel in rels:
-            # 시황성 type (peer / theme / macro / group) 은 news 출처 에선 거의 항상
-            # "단순 같이 나옴" 신호다. sector_match path 가 별도로 peer 를 깔아주니
-            # news LLM 추출에선 사업 본질 type 만 통과시켜 그래프 잡음 차단.
+            for tk in (rel.from_ticker, rel.to_ticker):
+                if tk:
+                    needed_tickers.add(tk.upper())
+
+    # Phase 2 — bulk lookup target names from Stock table.
+    ticker_to_name: dict[str, str] = {}
+    if needed_tickers:
+        rows = (
+            await session.execute(
+                select(Stock.ticker, Stock.name).where(Stock.ticker.in_(needed_tickers))
+            )
+        ).all()
+        ticker_to_name = {t.upper(): (n or "") for t, n in rows}
+
+    # Phase 3 — per-relation evidence gate (focal already verified; check OTHER side).
+    for art, rels, haystack_low, _focal_in in pending:
+        for rel in rels:
+            # 시황성 type (peer/theme/macro/group) 은 news 출처 에선 거의 항상
+            # "단순 같이 나옴" 신호다. sector_match 가 별도로 peer 깔아두니
+            # news LLM 추출에선 사업 본질 type 만 통과시킨다.
             if rel.relation_type in {"peer", "theme", "macro", "group"}:
                 skipped_no_focal_evidence += 1
                 continue
             from_t = (rel.from_ticker or "").lower()
             to_t = (rel.to_ticker or "").lower()
             if focal_token_low not in (from_t, to_t):
-                # LLM put focal on neither side — prompt violation, skip.
                 skipped_no_focal_evidence += 1
                 continue
-            other = to_t if from_t == focal_token_low else from_t
-            if other and other in haystack_low:
+            other_ticker = to_t if from_t == focal_token_low else from_t
+            other_name = ticker_to_name.get(other_ticker.upper(), "").lower()
+            # Accept if EITHER target ticker OR target name appears in article.
+            # KR 기사는 한글 이름 위주라 name match 가 실질 evidence.
+            if (other_ticker and other_ticker in haystack_low) or (
+                other_name and other_name in haystack_low
+            ):
                 relations.append(rel)
             else:
                 skipped_target_not_in_article += 1
