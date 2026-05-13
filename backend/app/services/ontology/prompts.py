@@ -78,9 +78,10 @@ Rules:
 
 
 # v3 — News competitive / inverse signal (zero-sum patterns).
-NEWS_COMPETITOR_PROMPT = """이 뉴스 기사는 종목 {focal_ticker}({focal_name})에 대한 분석을 위해 수집됐다.
-기사에서 {focal_ticker}이 다른 상장사와 맺고 있는 관계를 모두 추출하라.
-{focal_ticker}이 기사에 직접 언급되지 않더라도 분석 대상 종목이므로 from_ticker 또는 to_ticker 중 한 쪽에 반드시 포함시켜라.
+NEWS_COMPETITOR_PROMPT = """이 뉴스 기사는 종목 {focal_ticker}({focal_name})의 검색 결과로 수집됐다.
+기사에서 {focal_ticker} 가 다른 상장사와 맺고 있는 관계가 *명시적으로* 언급된 경우에만 추출하라.
+기사가 {focal_ticker}({focal_name}) 를 언급하지 않거나, 시장 일반 시황(코스피 등락 등)만 다루면 `relations: []` 를 반환하라.
+시장 추측이나 같은 섹터라는 이유만으로 가짜 관계를 만들어내지 마라.
 
 기사:
 {body}
@@ -112,7 +113,7 @@ relation_type 가이드:
 
 규칙:
 - 양쪽 ticker 모두 한국 6자리(005930) 또는 US 1-5자(AAPL) 형식으로만 표기
-- {focal_ticker} 이 양쪽 어디든 1개에 반드시 들어가야 함 (둘 다 다른 종목이면 그 관계는 응답에서 제외)
+- {focal_ticker}({focal_name}) 가 기사 본문/제목에 *실제로* 등장한 관계만 추출. focal 이 양쪽 어디에도 포함되지 않는 관계는 응답에서 제외
 - 시장 추측이 아닌 기사에 명시된 관계만
 - 추출할 게 없으면 `{{"relations": []}}`"""
 

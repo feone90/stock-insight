@@ -9,8 +9,8 @@ import logging
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import cast, func, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
@@ -33,6 +33,11 @@ async def bulk_upsert_relations(
     On conflict (from_stock_id, to_target, relation_type, source):
       - strength → average of old & new (smooth re-discovery noise)
       - confidence → MAX (best evidence wins)
+      - signal_direction → latest extraction wins
+      - metadata → JSONB merge (existing keys preserved, incoming overrides
+        same keys) so a refreshed news article can update rationale /
+        source_url while not blanking out keys it didn't bring (Codex review
+        [medium]: rationale persistence broke when ON CONFLICT omitted metadata).
       - refreshed_at → NOW()
     """
     if not rows:
@@ -59,12 +64,19 @@ async def _upsert_chunk(session: AsyncSession, chunk: list[dict]) -> int:
     conflict (rows carrying a `metadata` key crash SQLAlchemy bulk update path)."""
     table = StockRelation.__table__
     stmt = pg_insert(table).values(chunk)
+    metadata_col = table.c.metadata
+    merged_metadata = func.coalesce(
+        metadata_col, cast({}, JSONB)
+    ).op("||")(
+        func.coalesce(stmt.excluded.metadata, cast({}, JSONB))
+    )
     stmt = stmt.on_conflict_do_update(
         index_elements=["from_stock_id", "to_target", "relation_type", "source"],
         set_={
             "strength": (table.c.strength + stmt.excluded.strength) / 2,
             "confidence": func.greatest(table.c.confidence, stmt.excluded.confidence),
             "signal_direction": stmt.excluded.signal_direction,
+            "metadata": merged_metadata,
             "refreshed_at": func.now(),
         },
     )

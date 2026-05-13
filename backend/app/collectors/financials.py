@@ -186,13 +186,21 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
         }
 
     # DART 빈 결과 — 회계감리/거래정지/R&D 단계 종목 (예: 코오롱티슈진).
-    # yfinance 가 marketCap 라도 주면 카드 최소 정보 (시총 + 가능하면 PER/PBR)
-    # 살린다. 매출/영업이익/순이익 은 None — 사용자가 "데이터 미공개" 인지.
-    if market_cap is None:
+    # Codex review [medium]: stale stock.market_cap 을 "올해 yfinance 시총만"
+    # 라벨로 카드에 박으면, 정작 데이터 깨진 종목에서 거짓말함. fresh yfinance
+    # 응답이 있을 때만 yfinance-only Financial row 를 만든다. 그 외엔 None →
+    # data_layer._fetch_fundamentals 가 stock.market_cap fallback path 로 가서
+    # "시총만 — 재무 미수집 (분석 시작 전)" 라벨을 정직하게 노출.
+    if not fresh_mc:
+        logger.info(
+            "kr_values[%s] no DART IS and no fresh yfinance — return None "
+            "(data_layer will surface stock.market_cap as stale fallback)",
+            stock.ticker,
+        )
         return None
     logger.info(
-        "kr_values[%s] yfinance-only mc=%s pe=%s pb=%s (DART IS empty)",
-        stock.ticker, market_cap, yf_fallback.get("trailing_pe"), yf_fallback.get("price_to_book"),
+        "kr_values[%s] yfinance-only mc=%s pe=%s pb=%s (DART IS empty, fresh yf)",
+        stock.ticker, fresh_mc, yf_fallback.get("trailing_pe"), yf_fallback.get("price_to_book"),
     )
     return {
         "stock_id": stock.id,
@@ -205,7 +213,7 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
         "pbr": yf_fallback.get("price_to_book"),
         "roe": None,
         "dividend_yield": yf_fallback.get("dividend_yield"),
-        "market_cap": market_cap,
+        "market_cap": fresh_mc,
     }
 
 

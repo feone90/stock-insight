@@ -317,26 +317,45 @@ def _resolve_ids(
     interp_ids_pre_shift: set[int],
     where: str,
 ) -> list[int]:
-    """LLM이 출력한 citation id를 final pool 기준으로 매핑.
+    """LLM 이 출력한 citation id 를 final pool 기준으로 매핑.
 
-    세 경우:
-      (a) id ∈ interp_ids_pre_shift  → +k shift (LLM이 정상 등록한 출처)
-      (b) 1 ≤ id ≤ k                 → 그대로 유지 (LLM이 data_citations id 직접 차용 — 정상)
-      (c) 그 외                      → drop + log (LLM hallucination)
+    LLM 은 data_citations (1..K) 와 자기 interp_citations (1..M) 가 모두 1 부터
+    시작한다는 사실을 모른다. 그래서 LLM 이 cite 한 id 가 양쪽 풀에 동시에
+    존재하는 케이스 (예: interp 1 등록 + data 1 도 존재) 가 자주 발생하고,
+    어느 쪽을 의도했는지 시스템 입장에서는 결정 불가능하다 (Codex 리뷰 high).
+
+    네 경우:
+      (a) id ∈ interp AND id ∈ data 범위(1..K)  → ambiguous → drop + log
+      (b) id ∈ interp 만                         → +K shift (LLM 등록 출처)
+      (c) 1 ≤ id ≤ K 만                          → 그대로 유지 (data 차용)
+      (d) 어디에도 없음                          → drop + log (LLM hallucination)
     """
     resolved: list[int] = []
-    dropped: list[int] = []
+    dropped_dangling: list[int] = []
+    dropped_ambiguous: list[int] = []
     for i in ids:
-        if i in interp_ids_pre_shift:
+        in_interp = i in interp_ids_pre_shift
+        in_data = 1 <= i <= k
+        if in_interp and in_data:
+            dropped_ambiguous.append(i)
+        elif in_interp:
             resolved.append(i + k)
-        elif 1 <= i <= k:
+        elif in_data:
             resolved.append(i)
         else:
-            dropped.append(i)
-    if dropped:
+            dropped_dangling.append(i)
+    if dropped_ambiguous:
+        logger.warning(
+            "compose: dropped %d ambiguous citation id(s) in %s: %s "
+            "(both interp and data pool — cannot disambiguate; k=%d interp=%s)",
+            len(dropped_ambiguous), where, dropped_ambiguous, k,
+            sorted(interp_ids_pre_shift),
+        )
+    if dropped_dangling:
         logger.info(
             "compose: dropped %d dangling citation id(s) in %s: %s (k=%d interp=%s)",
-            len(dropped), where, dropped, k, sorted(interp_ids_pre_shift),
+            len(dropped_dangling), where, dropped_dangling, k,
+            sorted(interp_ids_pre_shift),
         )
     return resolved
 
@@ -481,12 +500,17 @@ def _validate_citation_refs(
 
 
 async def _persist(ticker: str, card: StockCard) -> None:
-    """Upsert into `analyses` (one row per stock+date+period — DB unique).
+    """Race-safe upsert into `analyses` keyed on `uq_analysis_stock_date_period`.
 
-    A Phase A v1 row for the same day gets its `schema_version` bumped to v2
-    and `card_data` populated; its KeywordDetail children are not touched
-    (cascade is delete-orphan, only fires on Analysis delete).
+    Codex review [medium]: previous select-then-insert could race — two
+    concurrent analyze() runs for the same ticker on the same day could both
+    miss the existence check and one would die on the unique constraint.
+    Now: if a row exists, mutate via ORM (preserves Phase A keyword children +
+    identity-map sync); if not, INSERT ON CONFLICT DO NOTHING; on conflict
+    (race tail), re-select and mutate the racer's row.
     """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     async with async_session() as db:
         stock = (
             await db.execute(select(Stock).where(Stock.ticker == ticker))
@@ -497,6 +521,16 @@ async def _persist(ticker: str, card: StockCard) -> None:
 
         today = _date.today()
         card_json = card.model_dump(mode="json")
+        summary = card.glance.one_line[:500]
+        feedback = card.thesis.core_thesis[:1000]
+
+        def _apply(row: Analysis) -> None:
+            row.summary = summary
+            row.feedback = feedback
+            row.schema_version = "v2"
+            row.card_data = card_json
+            row.persona_version = card.persona_version
+
         existing = (
             await db.execute(
                 select(Analysis).where(
@@ -506,24 +540,38 @@ async def _persist(ticker: str, card: StockCard) -> None:
                 )
             )
         ).scalar_one_or_none()
-
         if existing:
-            existing.summary = card.glance.one_line[:500]
-            existing.feedback = card.thesis.core_thesis[:1000]
-            existing.schema_version = "v2"
-            existing.card_data = card_json
-            existing.persona_version = card.persona_version
-        else:
-            db.add(
-                Analysis(
-                    stock_id=stock.id,
-                    date=today,
-                    period_type="daily",
-                    summary=card.glance.one_line[:500],
-                    feedback=card.thesis.core_thesis[:1000],
-                    schema_version="v2",
-                    card_data=card_json,
-                    persona_version=card.persona_version,
-                )
+            _apply(existing)
+            await db.commit()
+            return
+
+        stmt = (
+            pg_insert(Analysis)
+            .values(
+                stock_id=stock.id,
+                date=today,
+                period_type="daily",
+                summary=summary,
+                feedback=feedback,
+                schema_version="v2",
+                card_data=card_json,
+                persona_version=card.persona_version,
             )
+            .on_conflict_do_nothing(constraint="uq_analysis_stock_date_period")
+        )
+        result = await db.execute(stmt)
         await db.commit()
+        if (result.rowcount or 0) == 0:
+            # Race tail — another analyze() got the row in between our SELECT
+            # and INSERT. Re-fetch and mutate so our card_data isn't lost.
+            racer = (
+                await db.execute(
+                    select(Analysis).where(
+                        Analysis.stock_id == stock.id,
+                        Analysis.date == today,
+                        Analysis.period_type == "daily",
+                    )
+                )
+            ).scalar_one()
+            _apply(racer)
+            await db.commit()

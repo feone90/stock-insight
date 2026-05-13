@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from urllib.parse import unquote
 
@@ -16,6 +17,22 @@ from app.schemas.stock import FavoriteActionResponse, StockResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/favorites", tags=["favorites"])
+
+# Codex review [medium]: in-process dedup of concurrent auto-analyze tasks for
+# the same ticker. Two family members favoriting the same stock at once used
+# to fire two LLM passes; now only the first runs and the second skips.
+# For multi-worker scale, the atomic upsert in engine._persist (ON CONFLICT
+# DO UPDATE on uq_analysis_stock_date_period) handles cross-process races —
+# last writer wins instead of one task failing on the unique constraint.
+_auto_analyze_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_auto_analyze_lock(stock_id: int) -> asyncio.Lock:
+    lock = _auto_analyze_locks.get(stock_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _auto_analyze_locks[stock_id] = lock
+    return lock
 
 _optional_bearer = HTTPBearer(auto_error=False)
 DEFAULT_USER = "default"
@@ -113,56 +130,68 @@ async def _auto_analyze_after_favorite(ticker: str, stock_id: int) -> None:
     from app.services.analyst.engine import analyze
     from app.services.ontology import extract_news_relations_for_ticker
 
-    async with async_session() as db:
-        existing = (
-            await db.execute(
-                select(Analysis)
-                .where(
-                    Analysis.stock_id == stock_id,
-                    Analysis.schema_version == "v2",
+    lock = _get_auto_analyze_lock(stock_id)
+    if lock.locked():
+        logger.info(
+            "auto-analyze[%s] skipped — another auto-analyze task already running for stock_id=%s",
+            ticker, stock_id,
+        )
+        return
+
+    async with lock:
+        async with async_session() as db:
+            # Re-check inside the lock — another task may have just finished
+            # while we were waiting (or another worker on a multi-process
+            # deployment may have written the row).
+            existing = (
+                await db.execute(
+                    select(Analysis)
+                    .where(
+                        Analysis.stock_id == stock_id,
+                        Analysis.schema_version == "v2",
+                    )
+                    .limit(1)
                 )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if existing and existing.card_data:
-            logger.info("auto-analyze[%s] skipped — v2 card exists", ticker)
-            return
-        stock = (
-            await db.execute(select(Stock).where(Stock.id == stock_id))
-        ).scalar_one_or_none()
-        if stock is None:
+            ).scalar_one_or_none()
+            if existing and existing.card_data:
+                logger.info("auto-analyze[%s] skipped — v2 card exists", ticker)
+                return
+            stock = (
+                await db.execute(select(Stock).where(Stock.id == stock_id))
+            ).scalar_one_or_none()
+            if stock is None:
+                return
+            try:
+                await sync_prices(db, stock)
+                await sync_news(db, stock)
+                await sync_financials(db, stock)
+                await sync_disclosures(db, stock)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("auto-analyze[%s] sync phase failed: %s", ticker, e)
+
+        if not can_proceed():
+            logger.info("auto-analyze[%s] LLM phase skipped — budget exceeded", ticker)
             return
         try:
-            await sync_prices(db, stock)
-            await sync_news(db, stock)
-            await sync_financials(db, stock)
-            await sync_disclosures(db, stock)
+            await analyze(ticker)
         except Exception as e:  # noqa: BLE001
-            logger.warning("auto-analyze[%s] sync phase failed: %s", ticker, e)
-
-    if not can_proceed():
-        logger.info("auto-analyze[%s] LLM phase skipped — budget exceeded", ticker)
-        return
-    try:
-        await analyze(ticker)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("auto-analyze[%s] analyze failed: %s", ticker, e)
-        return
-    try:
-        summary = await extract_news_relations_for_ticker(
-            ticker,
-            since=date.today() - timedelta(days=14),
-            articles_per_run=10,
-        )
-        logger.info(
-            "auto-analyze[%s] extract: seen=%s llm=%s upserted=%s",
-            ticker,
-            summary.get("articles_seen"),
-            summary.get("llm_relations_returned"),
-            summary.get("upserted"),
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("auto-analyze[%s] extract failed: %s", ticker, e)
+            logger.warning("auto-analyze[%s] analyze failed: %s", ticker, e)
+            return
+        try:
+            summary = await extract_news_relations_for_ticker(
+                ticker,
+                since=date.today() - timedelta(days=14),
+                articles_per_run=10,
+            )
+            logger.info(
+                "auto-analyze[%s] extract: seen=%s llm=%s upserted=%s",
+                ticker,
+                summary.get("articles_seen"),
+                summary.get("llm_relations_returned"),
+                summary.get("upserted"),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("auto-analyze[%s] extract failed: %s", ticker, e)
 
 
 @router.post("/{ticker}", response_model=FavoriteActionResponse)

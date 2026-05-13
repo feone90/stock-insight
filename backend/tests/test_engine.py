@@ -158,26 +158,33 @@ def test_compose_merges_data_and_analyst_into_stock_card():
 
 
 def test_compose_renumbers_citations_globally():
-    """Analyst pool ids 1..M get offset by K (data pool size)."""
+    """Analyst pool ids 1..M get offset by K (data pool size). With the new
+    ambiguity policy (Codex review [high]), citations that overlap both pools
+    are dropped instead of silently shifted, since the LLM may have meant either.
+
+    Fixture: K=2 (data ids 1,2), M=1 (interp id=1). Interp id 1 is in the data
+    range 1..2 → ambiguous → analyst-side citation refs [1] are dropped.
+    Data-side references (technical, macro) remain since they live in the data
+    pool unambiguously.
+    """
     data = _make_data_layer()  # K = 2
     analyst = _make_analyst_output()  # M = 1, analyst citation id=1
     card = compose("ENG1", data, analyst, _identity())
 
-    # Final pool size = K + M = 3
+    # Final pool size = K + M = 3 (interp pool still registered + shifted)
     assert len(card.citations) == 3
     final_ids = [c.id for c in card.citations]
     assert final_ids == [1, 2, 3]
 
-    # Data citations unchanged: technical references id=1 (data), macro id=2.
+    # Data citations unchanged: technical references id=1 (data only), macro id=2.
     assert card.technical.citations == [1]
     assert card.macro.citations == [2]
 
-    # Analyst references shifted by K=2: glance.citations [1] → [3]
-    assert card.glance.citations == [3]
-    assert card.thesis.citations == [3]
-    # Claim.citations also shifted
-    assert card.thesis.supports[0].citations == [3]
-    assert card.decision.citations == [3]
+    # Analyst-side refs to id=1 are ambiguous (also exists as data id=1) → dropped.
+    assert card.glance.citations == []
+    assert card.thesis.citations == []
+    assert card.thesis.supports[0].citations == []
+    assert card.decision.citations == []
 
 
 def test_compose_merges_relations_data_with_narrative():
@@ -232,6 +239,25 @@ def test_compose_keeps_data_citation_ref_without_interp_register():
     analyst.glance.citations = [2]
     card = compose("ENG1", data, analyst, _identity())
     assert card.glance.citations == [2]
+
+
+def test_compose_drops_ambiguous_citation_id_in_both_pools():
+    """Codex review [high]: id present in BOTH interp pool AND data pool 1..K
+    is unresolvable — compose must drop it, not silently pick one side.
+
+    Without this guard, an LLM that registers interp_citations[id=1] and also
+    cites '1' from glance gets mapped to K+1 (interp), even when the LLM
+    actually meant to point at data_citations[id=1]. Hidden misattribution.
+    """
+    data = _make_data_layer()
+    analyst = _make_analyst_output()  # has interp_citations[id=1]
+    k = len(data.data_citations)
+    assert k >= 1
+    assert any(c.id == 1 for c in analyst.interp_citations)
+    # id=1 is ambiguous: exists in both pools.
+    analyst.glance.citations = [1]
+    card = compose("ENG1", data, analyst, _identity())
+    assert card.glance.citations == [], "ambiguous id must be dropped"
 
 
 def test_compose_stubs_missing_data_sections():

@@ -84,6 +84,13 @@ async def _run_for_ticker(
 
     relations: list[ExtractedRelation] = []
     skipped_short = 0
+    skipped_no_focal_evidence = 0
+    skipped_target_not_in_article = 0
+    llm_returned_total = 0
+    focal_token_low = ticker.lower()
+    focal_name = stock.name or ticker
+    focal_name_low = focal_name.lower()
+
     for art in articles:
         body = (art.content or "").strip()
         # 50자 임계 — 기존 100자는 Naver API description(~150자)이 trafilatura
@@ -93,6 +100,11 @@ async def _run_for_ticker(
         if len(body) < 50:
             skipped_short += 1
             continue
+        haystack_low = f"{art.title}\n{body}".lower()
+        focal_in_article = (
+            focal_token_low in haystack_low
+            or (focal_name_low and focal_name_low in haystack_low)
+        )
         # title 도 prompt 에 같이 넣어줘 short-body 케이스에서 LLM 이 entity 식별.
         enriched = f"제목: {art.title}\n\n{body}"
         rels = await extract_relations(
@@ -102,16 +114,36 @@ async def _run_for_ticker(
             adapter=llm_adapter,
             prompt_kwargs={
                 "focal_ticker": ticker,
-                "focal_name": stock.name or ticker,
+                "focal_name": focal_name,
             },
         )
-        relations.extend(rels)
+        llm_returned_total += len(rels)
+        # Codex review [high]: focal/target evidence gate. LLM tends to hallucinate
+        # relations from generic market news (코스피 등락 등) when focal isn't really
+        # in the article. Require explicit substring evidence before persistence.
+        if not focal_in_article:
+            skipped_no_focal_evidence += len(rels)
+            continue
+        for rel in rels:
+            from_t = (rel.from_ticker or "").lower()
+            to_t = (rel.to_ticker or "").lower()
+            if focal_token_low not in (from_t, to_t):
+                # LLM put focal on neither side — prompt violation, skip.
+                skipped_no_focal_evidence += 1
+                continue
+            other = to_t if from_t == focal_token_low else from_t
+            if other and other in haystack_low:
+                relations.append(rel)
+            else:
+                skipped_target_not_in_article += 1
 
     summary = await validate_and_route(relations, source=_SOURCE, session=session)
     summary["ticker"] = ticker
     summary["articles_seen"] = len(articles)
     summary["articles_skipped_short"] = skipped_short
-    summary["llm_relations_returned"] = len(relations)
+    summary["llm_relations_returned"] = llm_returned_total
+    summary["evidence_dropped_no_focal"] = skipped_no_focal_evidence
+    summary["evidence_dropped_target_missing"] = skipped_target_not_in_article
     return summary
 
 
