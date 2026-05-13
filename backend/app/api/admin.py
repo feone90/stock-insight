@@ -328,7 +328,19 @@ async def purge_ontology_noise(
         StockRelation.source == "news",
         StockRelation.relation_type.in_(["peer", "theme", "macro", "group"]),
     )
-    to_delete_filter = or_(sector_match_low_conf, news_shallow_type)
+    # ETF / 지수 / 테마 류 — rationale 본문에 패턴 포함된 row 일괄 정리.
+    # JSONB ->> 'rationale' 로 string 추출 후 ILIKE 매칭.
+    rationale_text = StockRelation.extra_metadata["rationale"].astext
+    etf_patterns = (
+        "%etf%", "%kodex%", "%tiger%", "%ace %", "% ace%",
+        "%구성종목%", "%편입%", "%지수에 포함%", "%지수 포함%",
+        "%테마주%", "%관련주%", "%수혜주%", "%동반%",
+    )
+    rationale_etf = and_(
+        StockRelation.source == "news",
+        or_(*[rationale_text.ilike(p) for p in etf_patterns]),
+    )
+    to_delete_filter = or_(sector_match_low_conf, news_shallow_type, rationale_etf)
 
     # Count first 로 사용자에게 명시적 숫자 노출.
     from sqlalchemy import func as sql_func, select
@@ -343,6 +355,11 @@ async def purge_ontology_noise(
             select(sql_func.count()).select_from(StockRelation).where(news_shallow_type)
         )
     ).scalar() or 0
+    etf_count = (
+        await db.execute(
+            select(sql_func.count()).select_from(StockRelation).where(rationale_etf)
+        )
+    ).scalar() or 0
 
     result = await db.execute(delete(StockRelation).where(to_delete_filter))
     await db.commit()
@@ -351,6 +368,7 @@ async def purge_ontology_noise(
         "deleted_total": result.rowcount or 0,
         "deleted_sector_match_low_conf": sector_count,
         "deleted_news_shallow_type": news_count,
+        "deleted_rationale_etf_pattern": etf_count,
     }
 
 
