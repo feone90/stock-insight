@@ -28,6 +28,7 @@ backend/app/data/sec_company_tickers.json
 /inspect_*.json
 /extract_*.json
 /ontology_*.json
+/rel_*.json
 /runs.json
 /gh_runs.json
 /pol_status.json
