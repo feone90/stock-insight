@@ -44,7 +44,12 @@ async def test_news_extracts_competitor_relation(db) -> None:
         "from_ticker": "EX9102", "to_ticker": "EX9101",
         "relation_type": "competitor", "signal_direction": "inverse",
         "strength": 0.6, "confidence": 0.75,
-        "metadata": {"rationale": "B price hike → A market share gain"},
+        # rationale must contain both target Stock.name strings ("Alpha Inc",
+        # "Beta Inc") — validator's defense-in-depth substring gate requires
+        # to_target name evidence inside the rationale (length-padded test).
+        "metadata": {
+            "rationale": "Beta Inc price hike enables Alpha Inc to gain market share in mid-tier auto segment."
+        },
     }]})])
 
     summary = await extract_news_relations_for_ticker(

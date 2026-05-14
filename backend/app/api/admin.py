@@ -401,6 +401,12 @@ async def purge_ontology_noise(
         ),
     )
 
+    # 2026-05-14 — target-name-in-rationale 가드. LLM source 인데 rationale 에
+    # to_target Stock.name 이 없으면 환상. Python 레벨에서 정규화(공백 제거 후
+    # 비교)로 처리 — SQL ILIKE 로는 한글 띄어쓰기 edge case ("SK 하이닉스"
+    # vs "SK하이닉스") 를 안전하게 잡기 어렵다.
+    # 아래에서 별도 Python loop 로 처리.
+
     to_delete_filter = or_(
         sector_match_low_conf, news_shallow_type, rationale_etf, hallucination,
     )
@@ -428,15 +434,61 @@ async def purge_ontology_noise(
         )
     ).scalar() or 0
 
+    # target-name-in-rationale 필터 (Python 정규화 후 비교)
+    # LLM source 행을 가져와서 to_target 의 Stock.name 이 rationale 에 없는 것을
+    # 추가 delete.
+    _llm_rows = (
+        await db.execute(
+            select(StockRelation.id, StockRelation.to_target, StockRelation.extra_metadata)
+            .where(StockRelation.source.in_(_LLM_SRC))
+        )
+    ).all()
+
+    # to_target ticker → Stock.name 일괄 조회
+    _all_to_targets = {r.to_target for r in _llm_rows if r.to_target}
+    _target_name_map: dict[str, str] = {}
+    if _all_to_targets:
+        _name_rows = (
+            await db.execute(
+                select(Stock.ticker, Stock.name).where(Stock.ticker.in_(_all_to_targets))
+            )
+        ).all()
+        _target_name_map = {t: (n or "") for t, n in _name_rows}
+
+    _no_target_name_ids: list[int] = []
+    for row in _llm_rows:
+        target_name = _target_name_map.get(row.to_target or "", "")
+        if not target_name:
+            continue  # DB 에 없는 ticker 는 다른 필터로 잡힘
+        name_norm = "".join(target_name.split()).lower()
+        ticker_norm = (row.to_target or "").lower()
+        # Stock.name OR ticker 중 하나만 rationale 에 있어도 통과 — validator
+        # 동일 정책. 1 자 후보는 false positive 위험으로 제외.
+        candidates = [c for c in (name_norm, ticker_norm) if len(c) >= 2]
+        if not candidates:
+            continue  # 둘 다 1자 — 가드 무력화 (다른 필터 의존)
+        meta = row.extra_metadata or {}
+        rat = (meta.get("rationale") or "")
+        rat_norm = "".join(rat.split()).lower()
+        if not any(c in rat_norm for c in candidates):
+            _no_target_name_ids.append(row.id)
+
+    no_target_name_count = len(_no_target_name_ids)
+    if _no_target_name_ids:
+        await db.execute(
+            delete(StockRelation).where(StockRelation.id.in_(_no_target_name_ids))
+        )
+
     result = await db.execute(delete(StockRelation).where(to_delete_filter))
     await db.commit()
     return {
         "status": "ok",
-        "deleted_total": result.rowcount or 0,
+        "deleted_total": (result.rowcount or 0) + no_target_name_count,
         "deleted_sector_match_low_conf": sector_count,
         "deleted_news_shallow_type": news_count,
         "deleted_rationale_etf_pattern": etf_count,
         "deleted_llm_hallucination_no_rationale": hallucination_count,
+        "deleted_llm_no_target_name_in_rationale": no_target_name_count,
     }
 
 

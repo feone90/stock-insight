@@ -110,6 +110,7 @@ async def _route(
     candidate_payload: list[dict] = []
     dropped_low_conf = 0
     dropped_no_rationale = 0
+    dropped_no_target_name_evidence = 0
 
     requires_rationale = source in _LLM_SOURCES_REQUIRING_RATIONALE
 
@@ -135,6 +136,49 @@ async def _route(
                     rel.confidence, longest,
                 )
                 continue
+
+        # LLM hallucination 가드 (defense-in-depth) — rationale 안에 target
+        # Stock.name 이 포함되어야 한다. extract_news 의 article-body substring
+        # gate 와 동일 원칙을 validator 레이어에도 적용. paraphrase / 옛 row
+        # 잔재 / extract_news 우회 경로 모두 차단.
+        # 정규화: 한글 띄어쓰기 edge case ("SK 하이닉스" vs "SK하이닉스") 처리를
+        # 위해 공백 전체 제거 후 비교.
+        if requires_rationale:
+            to_name_row = (
+                await session.execute(
+                    select(Stock.name).where(Stock.ticker == rel.to_ticker)
+                )
+            ).scalar_one_or_none()
+            # Stock.name OR ticker 둘 중 하나가 rationale 에 등장해야 통과.
+            # LLM 이 rationale 작성 시 회사명 대신 ticker 만 쓰는 경우 정상
+            # ("EX0002 wins contract" 같은 abbreviated 표현). 둘 다 매칭 가능한데
+            # 어느 쪽도 매칭 안 되면 환상.
+            #
+            # 1 자 (Ford="F", Visa="V") 는 매칭 신뢰성 zero — false positive
+            # 거의 항상 통과. 후보 list 에서 제외. 둘 다 1 자면 가드 우회
+            # (다른 가드: rationale 30+ chars, confidence floor 에 의존).
+            to_name_norm = (
+                "".join(to_name_row.split()).lower() if to_name_row else ""
+            )
+            to_ticker_norm = rel.to_ticker.lower()
+            candidates = [
+                c for c in (to_name_norm, to_ticker_norm) if len(c) >= 2
+            ]
+            if candidates:
+                rat_combined = (rel.rationale or "") + " " + (
+                    (rel.extra_metadata or {}).get("rationale") or ""
+                )
+                rat_norm = "".join(rat_combined.split()).lower()
+                if not any(c in rat_norm for c in candidates):
+                    dropped_no_target_name_evidence += 1
+                    logger.info(
+                        "validator drop no-target-evidence: src=%s %s→%s "
+                        "type=%s conf=%.2f target_name=%r ticker=%s",
+                        source, rel.from_ticker, rel.to_ticker,
+                        rel.relation_type, rel.confidence, to_name_row,
+                        rel.to_ticker,
+                    )
+                    continue
 
         from_id = universe_ids.get(rel.from_ticker)
         to_in_universe = rel.to_ticker in universe_ids
@@ -181,6 +225,7 @@ async def _route(
         "self_loop_dropped": dropped_self,
         "low_conf_dropped": dropped_low_conf,
         "no_rationale_dropped": dropped_no_rationale,
+        "no_target_name_evidence_dropped": dropped_no_target_name_evidence,
         "upserted": upserted,
         "buffered": buffered,
     }

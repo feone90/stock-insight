@@ -17,9 +17,11 @@ def _rel(from_t: str, to_t: str, **overrides) -> ExtractedRelation:
         "signal_direction": "positive",
         "strength": 0.7,
         "confidence": 0.8,
-        # validator 가 LLM source 에 rationale 30+ chars 요구 (hallucination
-        # 가드, 2026-05-14). production 본문 인용 흉내.
-        "rationale": "본문 인용 fixture: A → B 공급 계약 명시 (테스트용 길이 확보).",
+        # validator 가 LLM source 에 (a) rationale 30+ chars (hallucination
+        # 가드) (b) target Stock.name OR ticker substring 매칭 (defense-in-depth,
+        # 2026-05-14 동화약품 case) 둘 다 요구. fixture rationale 에 from→to
+        # ticker 명시해서 둘 다 통과시킴.
+        "rationale": f"본문 인용 fixture: {from_t} → {to_t} 공급 계약 명시 (테스트용 길이 확보).",
     }
     base.update(overrides)
     return ExtractedRelation.model_validate(base)
@@ -194,3 +196,44 @@ async def test_mid_confidence_flagged_for_review_but_persisted(db) -> None:
     ).scalar_one()
     assert rel.extra_metadata is not None
     assert rel.extra_metadata.get("needs_review") is True
+
+
+@pytest.mark.asyncio
+async def test_llm_source_rationale_contains_target_name_passes(db) -> None:
+    """LLM source: rationale 에 to_ticker 의 Stock.name 포함 → upsert 통과."""
+    a = Stock(ticker="999871", name="A테크", market="KR", sector="IT", tier=1)
+    b = Stock(ticker="999872", name="비전반도체", market="KR", sector="IT", tier=1)
+    db.add_all([a, b])
+    await db.flush()
+
+    # rationale 에 "비전반도체" 명시적 포함 (공백 정규화 edge: 동일 효과)
+    summary = await validate_and_route(
+        [_rel("999871", "999872",
+              rationale="비전반도체와 A테크는 HBM 공급 계약을 체결하였다는 공시 내용 확인.")],
+        source="dart_contract",
+        session=db,
+    )
+
+    assert summary.get("no_target_name_evidence_dropped", 0) == 0
+    assert summary["upserted"] == 2  # forward + reciprocal
+
+
+@pytest.mark.asyncio
+async def test_llm_source_rationale_missing_target_name_dropped(db) -> None:
+    """LLM source: rationale 에 to_ticker 의 Stock.name 미포함 → drop (환상 차단)."""
+    a = Stock(ticker="999881", name="A테크", market="KR", sector="IT", tier=1)
+    b = Stock(ticker="999882", name="동화약품", market="KR", sector="IT", tier=1)
+    db.add_all([a, b])
+    await db.flush()
+
+    # rationale 은 30자 이상이지만 "동화약품" 미포함 → hallucination gate 에서 drop
+    summary = await validate_and_route(
+        [_rel("999881", "999882",
+              rationale="반도체 공급망 재편으로 A테크 수혜 기대된다는 분석이 나왔다.")],
+        source="dart_contract",
+        session=db,
+    )
+
+    assert summary.get("no_target_name_evidence_dropped", 0) == 1
+    assert summary["upserted"] == 0
+    assert summary["buffered"] == 0
