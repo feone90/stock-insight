@@ -20,6 +20,10 @@ from app.services.ontology.extract_10k_risk import (
     extract_10k_risk,
     extract_10k_risk_for_universe,
 )
+from app.services.ontology.extract_dart_contract import (
+    extract_dart_contracts,
+    extract_dart_contracts_for_universe,
+)
 from app.services.ontology.extract_sec import (
     extract_sec_contracts,
     extract_sec_contracts_for_universe,
@@ -47,6 +51,8 @@ __all__ = [
     "compute_pairwise_correlation",
     "extract_10k_risk",
     "extract_10k_risk_for_universe",
+    "extract_dart_contracts",
+    "extract_dart_contracts_for_universe",
     "extract_news_relations_for_ticker",
     "extract_news_relations_for_universe",
     "extract_relations",
