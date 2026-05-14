@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { analyzeStock, getStockCard, refreshStockCard } from "@/services/api";
+import {
+  analyzeStock,
+  dataRefreshStock,
+  getStockCard,
+  refreshStockCard,
+} from "@/services/api";
 import type { StockCard } from "@/types/card";
 
 export type CardLoadState = "loading" | "analyzing" | "ready" | "error";
@@ -51,6 +56,7 @@ export function useStockCard(ticker: string): {
   state: CardLoadState;
   error: string | null;
   refresh: () => Promise<void>;
+  refreshData: () => Promise<void>;
   triggerAnalyze: () => Promise<void>;
 } {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -116,6 +122,28 @@ export function useStockCard(ticker: string): {
     });
   }, [ticker]);
 
+  const refreshData = useCallback(async () => {
+    // LLM 0 — underlying sync. card_data 안 바뀜 → 같은 generated_at 으로
+    // re-fetch 해도 카드 표면 변경 X. 차트·가격(별도 endpoint) 만 fresh.
+    // 진행 중 spinner 만 잠시 보임.
+    try {
+      await dataRefreshStock(ticker);
+    } catch (e) {
+      // 429 (cooldown) 또는 transport 에러 — 무시 (button 그냥 다시 enable).
+      console.warn("data_refresh:", e);
+    }
+    // 잠시 대기 (backend background sync 짧게 — 가격 sync ~2-5초). 그 후
+    // card 한 번 re-fetch 해서 generated_at 같지만 React state 새 ref 로
+    // 갱신 → 차트/가격 컴포넌트 re-render trigger.
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const c = await getStockCard(ticker);
+      dispatch({ type: "loadOk", card: c });
+    } catch {
+      /* keep existing card */
+    }
+  }, [ticker]);
+
   const triggerAnalyze = useCallback(async () => {
     dispatch({ type: "analyzeStart" });
     try {
@@ -150,6 +178,7 @@ export function useStockCard(ticker: string): {
     state: state.status,
     error: state.error,
     refresh,
+    refreshData,
     triggerAnalyze,
   };
 }

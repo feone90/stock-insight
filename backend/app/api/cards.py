@@ -166,6 +166,65 @@ async def trigger_analyze(
     return {"status": "queued", "ticker": ticker.upper()}
 
 
+_last_data_refresh: dict[str, float] = {}
+_DATA_REFRESH_COOLDOWN_S = 60  # 1분 — 외부 API rate limit 보호. AI 의견 다시 의
+# 300s(5분)보다 가볍게 — LLM cost 0 이라 더 자주 가능.
+
+
+@router.post("/{ticker}/data_refresh", status_code=202)
+async def data_refresh(
+    ticker: str,
+    bg: BackgroundTasks,
+    stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """LLM 0 — underlying 데이터만 동기화 (price/news/financials/disclosures).
+
+    2026-05-14 사용자 통찰: "실시간값이랑 새로 추가된 뉴스가 있으면 그정도
+    + 의견변경 정도 말고는 없지않나". `/refresh` 는 LLM 2-stage 파이프라인
+    풀로 다시 돌아 $0.25 → cost 낭비. 데이터만 새로 받고 AI 의견은 기존
+    유지가 가족 dev 비용 효율.
+
+    효과:
+    - 차트·가격: 별도 GET /prices · /stocks/{ticker} endpoint 가 매번 fresh
+      DB query → 이 endpoint 호출 후 즉시 새 가격 노출.
+    - 카드 내 펀더멘털/수급/관계/실적·분석가 등: card_data JSON 에 박혀
+      있어 이 endpoint 로는 안 바뀜. AI 의견 다시 (`/refresh`) 클릭 시
+      그 시점에 새 data + new LLM narrative 로 풀 rebuild.
+
+    1분 cooldown — 외부 API rate limit 보호.
+    """
+    key = ticker.upper()
+    now = time.monotonic()
+    last = _last_data_refresh.get(key, 0.0)
+    if now - last < _DATA_REFRESH_COOLDOWN_S:
+        remaining = int(_DATA_REFRESH_COOLDOWN_S - (now - last))
+        raise HTTPException(429, f"cooldown: try again in {remaining}s")
+    _last_data_refresh[key] = now
+
+    async def _sync_underlying() -> None:
+        async with async_session() as own_db:
+            from app.models import Stock as _Stock
+            fresh = (
+                await own_db.execute(
+                    select(_Stock).where(_Stock.ticker == ticker)
+                )
+            ).scalar_one_or_none()
+            if not fresh:
+                return
+            for fn in (sync_prices, sync_news, sync_financials, sync_disclosures):
+                try:
+                    await fn(own_db, fresh)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "data_refresh %s collector %s failed: %s",
+                        ticker, fn.__name__, e,
+                    )
+
+    bg.add_task(_sync_underlying)
+    return {"status": "data_refresh_queued", "ticker": key}
+
+
 @router.post("/{ticker}/refresh", status_code=202)
 async def force_refresh(
     ticker: str,

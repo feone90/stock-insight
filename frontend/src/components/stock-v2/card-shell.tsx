@@ -51,8 +51,19 @@ function formatKoRelative(d: Date | null, now: number): string {
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
-  const { card, state, refresh, triggerAnalyze } = useStockCard(ticker);
+  const { card, state, refresh, refreshData, triggerAnalyze } = useStockCard(ticker);
   const refreshing = state === "analyzing";
+  const [dataRefreshing, setDataRefreshing] = useState(false);
+
+  const handleDataRefresh = async () => {
+    if (dataRefreshing) return;
+    setDataRefreshing(true);
+    try {
+      await refreshData();
+    } finally {
+      setDataRefreshing(false);
+    }
+  };
 
   // 즐겨찾기 — user picker 변경 시 reload (사용자별 분리)
   const [isFav, setIsFav] = useState(false);
@@ -123,27 +134,40 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                     title={generatedAt.toLocaleString("ko-KR")}
                   >
                     {cooldownActive
-                      ? `${cooldownLeftMin}분 뒤 다시 가능`
-                      : `마지막 분석 ${formatKoRelative(generatedAt, now)}`}
+                      ? `AI 의견 ${cooldownLeftMin}분 뒤 가능`
+                      : `AI 의견 ${formatKoRelative(generatedAt, now)}`}
                   </span>
                 )}
                 <button
                   type="button"
+                  onClick={handleDataRefresh}
+                  disabled={dataRefreshing}
+                  aria-label="데이터 새로고침"
+                  title="가격·뉴스·재무·공시만 새로 받기 — LLM 비용 0, 1분 cooldown. AI 의견은 그대로 유지."
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={16} className={dataRefreshing ? "animate-spin" : ""} />
+                  <span className="hidden sm:inline">
+                    {dataRefreshing ? "받는 중..." : "데이터 새로고침"}
+                  </span>
+                </button>
+                <button
+                  type="button"
                   onClick={refresh}
                   disabled={refreshing || cooldownActive}
-                  aria-label="분석 다시 실행"
+                  aria-label="AI 의견 다시 실행"
                   title={
                     refreshing
-                      ? "분석 중..."
+                      ? "AI 분석 중..."
                       : cooldownActive
                       ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
-                      : "분석 다시 실행 (~$0.25, 1분)"
+                      : "AI 의견 다시 실행 (~$0.25 LLM, 1분 소요)"
                   }
-                  className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
                   <span className="hidden sm:inline">
-                    {refreshing ? "분석 중..." : "분석 다시"}
+                    {refreshing ? "분석 중..." : "AI 의견 다시"}
                   </span>
                 </button>
               </>

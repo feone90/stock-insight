@@ -133,6 +133,17 @@ export async function refreshStockCard(ticker: string): Promise<StockCard> {
   return postJson(`/api/stocks/${ticker}/refresh`);
 }
 
+/**
+ * LLM 0 — underlying 데이터(가격/뉴스/공시/재무) 만 동기화. 카드 분석 narrative
+ * 는 안 건드림. 차트·가격 즉시 갱신, 카드 내 펀더멘털/수급 등은 다음 'AI 의견
+ * 다시' 시점에 반영. 1분 cooldown.
+ */
+export async function dataRefreshStock(
+  ticker: string,
+): Promise<{ status: string; ticker: string }> {
+  return postJson(`/api/stocks/${ticker}/data_refresh`);
+}
+
 export async function analyzeStock(
   ticker: string
 ): Promise<{ status: string; ticker: string }> {
