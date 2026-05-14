@@ -117,8 +117,14 @@ async def analyze(ticker: str) -> StockCard:
 
 
 async def _run_locked(ticker: str) -> StockCard:
-    logger.info("analyze[%s]: stage 1 research starting", ticker)
-    research = await run_research(ticker)
+    # 2026-05-15: stage 1 — research + knowledge_relations 병렬. 둘 다 LLM
+    # ~5-10s 라 gather 로 추가 latency 0. knowledge_relations 결과는 stage 2
+    # 의 assemble_data_layer 가 fresh 한 llm_knowledge row 를 픽업하게 된다.
+    logger.info("analyze[%s]: stage 1 research + knowledge in parallel", ticker)
+    research, _knowledge = await asyncio.gather(
+        run_research(ticker),
+        _extract_knowledge_safe(ticker),
+    )
 
     logger.info("analyze[%s]: stage 2 data + analyst in parallel", ticker)
     data, analyst = await asyncio.gather(
@@ -132,6 +138,21 @@ async def _run_locked(ticker: str) -> StockCard:
     await _persist(ticker, card)
     logger.info("analyze[%s]: done", ticker)
     return card
+
+
+async def _extract_knowledge_safe(ticker: str) -> dict:
+    """fire-and-forget — analyze 흐름 깨지 않게 예외 swallow."""
+    try:
+        from app.services.ontology.knowledge_relations import (
+            extract_knowledge_relations,
+        )
+
+        summary = await extract_knowledge_relations(ticker)
+        logger.info("knowledge_relations[%s]: %s", ticker, summary)
+        return summary
+    except Exception as e:  # noqa: BLE001
+        logger.warning("knowledge_relations[%s] failed: %s", ticker, e)
+        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------
