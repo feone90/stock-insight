@@ -98,14 +98,14 @@ export function RelationsSection({
   relations: RelationsSummary;
   ticker?: string;
 }) {
+  // Compact 는 우리 정량 summary 만 — one_line LLM narrative 는 길이 변수라
+  // collapsed view 한 줄에서 ellipsis 로 잘림. narrative 는 expanded 상단으로.
   const summary = summariseRelations(relations.relations ?? []);
   return (
     <SectionShell
       emoji="🔗"
       title="관계"
-      compact={
-        <span>{relations.one_line || summary || "관계 데이터 없음"}</span>
-      }
+      compact={<span>{summary || "관계 데이터 없음"}</span>}
       expanded={<RelationsExpanded relations={relations} selfTicker={ticker} />}
     />
   );
@@ -180,6 +180,12 @@ function RelationsExpanded({
 
   return (
     <div className="space-y-3 text-sm">
+      {relations.one_line ? (
+        <p className="text-xs text-[var(--surface-text-muted)] leading-relaxed">
+          {relations.one_line}
+        </p>
+      ) : null}
+
       {inverseCompetitors.length > 0 ? (
         <InverseCallout inverses={inverseCompetitors} />
       ) : null}
