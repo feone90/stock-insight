@@ -287,21 +287,17 @@ def _build_flow(res: Any, pool: _CitationPool) -> Flow | None:
         res.get("foreign_net_5d_krw") is not None
         or res.get("inst_net_5d_krw") is not None
     )
-    has_short = res.get("short_balance_ratio") is not None
-    if not (has_flow or has_short):
-        return None  # 모든 source 가 비어있으면 섹션 자체를 숨긴다
+    if not has_flow:
+        return None  # 수급 데이터 비면 섹션 자체를 숨긴다
     pool.add(
         "market_data",
-        f"KRX 수급·공매도 ({res.get('as_of') or '최근'})",
+        f"KRX 수급 ({res.get('as_of') or '최근'})",
     )
     return Flow(
         foreign_net_5d_krw=res.get("foreign_net_5d_krw"),
         inst_net_5d_krw=res.get("inst_net_5d_krw"),
         foreign_streak_days=res.get("foreign_streak_days") or 0,
         inst_streak_days=res.get("inst_streak_days") or 0,
-        short_balance_ratio=res.get("short_balance_ratio"),
-        short_balance_30d_avg=res.get("short_balance_30d_avg"),
-        short_turnover_today_pct=res.get("short_turnover_today_pct"),
         as_of=res.get("as_of"),
     )
 

@@ -4,25 +4,26 @@ import type { Flow } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
 /**
- * 수급·공매도 섹션 (KR-only).
+ * 수급 섹션 (KR-only).
  *
- * Backend: pykrx KRX 공식 일별 데이터 (외국인/기관 5거래일 누적 순매수,
- * 공매도 잔고 비중 + 30일 평균 baseline). Codex 시니어 트레이더 리뷰
- * 권고(2026-05-14): KR retail 매매 판단에 market sponsorship + short
- * pressure 는 절대 빠지면 안 되는 신호.
+ * Backend: pykrx KRX 공식 일별 데이터 (외국인/기관 5거래일 누적 순매수 +
+ * 연속 일수). Codex 시니어 트레이더 리뷰 권고(2026-05-14): KR retail
+ * 매매 판단에 market sponsorship 은 절대 빠지면 안 되는 신호.
+ *
+ * 공매도(잔고/회전)는 2026-05-14 사용자 결정으로 drop — 가족 비전공자
+ * 의사결정에 nuanced + noise > signal.
  *
  * UI 카피 가이드(memory: feedback_card_user_facing_copy):
  * - "외국인 순매수 120억" → "외국인이 최근 5일 동안 120억원 순매수
  *    (사들이고 있음)"
- * - "공매도 4.2%" → "공매도 잔고가 평소(2%)보다 2배 높음 — 시장이
- *    하락 베팅 중"
+ * - "5일 연속" → "5일 연속 순매수"
  */
 export function FlowSection({ flow }: { flow: Flow }) {
   const compact = buildCompact(flow);
   return (
     <SectionShell
       emoji="💰"
-      title="수급·공매도"
+      title="수급 (외국인·기관)"
       compact={<span>{compact}</span>}
       expanded={<FlowExpanded flow={flow} />}
     />
@@ -36,9 +37,6 @@ function buildCompact(flow: Flow): string {
   }
   if (flow.inst_net_5d_krw != null) {
     parts.push(`기관 ${signedKrwShort(flow.inst_net_5d_krw)} (5일)`);
-  }
-  if (flow.short_balance_ratio != null) {
-    parts.push(`공매도 ${flow.short_balance_ratio.toFixed(2)}%`);
   }
   return parts.length > 0 ? parts.join(" · ") : "수급 데이터 없음";
 }
@@ -62,23 +60,6 @@ function FlowExpanded({ flow }: { flow: Flow }) {
       label: "기관 — 최근 5거래일 순매수",
       value: signedKrw(v),
       help: flowHelp("기관", v, streak),
-    });
-  }
-  if (flow.short_balance_ratio != null) {
-    rows.push({
-      label: "공매도 잔고 비중",
-      value: `${flow.short_balance_ratio.toFixed(2)}%`,
-      help: shortBalanceHelp(
-        flow.short_balance_ratio,
-        flow.short_balance_30d_avg,
-      ),
-    });
-  }
-  if (flow.short_turnover_today_pct != null) {
-    rows.push({
-      label: "오늘 공매도 거래 비중",
-      value: `${flow.short_turnover_today_pct.toFixed(2)}%`,
-      help: shortTurnoverHelp(flow.short_turnover_today_pct),
     });
   }
 
@@ -114,8 +95,6 @@ function FlowExpanded({ flow }: { flow: Flow }) {
   );
 }
 
-// ── 카피 helpers — 가족 친화 평이한 한국어 ─────────────────────────────
-
 function flowHelp(actor: string, netKrw: number, streak: number): string {
   const absM = Math.abs(netKrw);
   if (absM < 100_000_000) {
@@ -124,38 +103,11 @@ function flowHelp(actor: string, netKrw: number, streak: number): string {
   const direction = netKrw > 0 ? "사들이는 중" : "팔고 있음";
   const streakNote =
     streak >= 3
-      ? ` · ${streak}일 연속 ${streak > 0 ? "순매수" : ""}`
+      ? ` · ${streak}일 연속 순매수`
       : streak <= -3
       ? ` · ${Math.abs(streak)}일 연속 순매도`
       : "";
   return `${actor}이 ${direction}${streakNote}`;
-}
-
-function shortBalanceHelp(
-  ratio: number,
-  baseline30d: number | null,
-): string {
-  if (baseline30d == null) {
-    if (ratio < 1) return "공매도 비중 낮음 — 하락 베팅 약함";
-    if (ratio < 3) return "공매도 비중 보통";
-    return "공매도 비중 높음 — 시장이 하락 베팅 중";
-  }
-  const diff = ratio - baseline30d;
-  const ratioStr = baseline30d > 0
-    ? `평소(30일 평균 ${baseline30d.toFixed(2)}%)`
-    : "최근 평균";
-  if (Math.abs(diff) < 0.3) return `${ratioStr} 수준`;
-  if (diff > 0) {
-    return `${ratioStr}보다 ${diff.toFixed(1)}%p 높음 — 시장이 하락 베팅을 늘리는 중`;
-  }
-  return `${ratioStr}보다 ${Math.abs(diff).toFixed(1)}%p 낮음 — 하락 베팅이 풀리는 중`;
-}
-
-function shortTurnoverHelp(pct: number): string {
-  if (pct < 5) return "오늘 거래 중 공매도 비중 낮음";
-  if (pct < 15) return "공매도 거래 보통 수준";
-  if (pct < 25) return "공매도 거래 비중 높음 — 단기 하락 압력 가능";
-  return "공매도 거래가 매우 많음 — 강한 하락 압력";
 }
 
 function signedKrw(krw: number): string {

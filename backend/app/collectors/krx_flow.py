@@ -1,13 +1,14 @@
-"""pykrx — KR 종목 수급(외국인/기관 5일 순매수) + 공매도 잔고/거래.
+"""pykrx — KR 종목 수급(외국인/기관 5일 순매수).
 
 Codex 시니어 트레이더 리뷰(2026-05-14): KR retail 의 매매 판단은
-외국인/기관 수급(market sponsorship)과 공매도 잔고/회전(short pressure)을
-빼면 빈 카드. yfinance 도 dartlab 도 이 영역은 제공하지 않는다. pykrx 의
-KRX 공식 일별 데이터로 보강.
+외국인/기관 수급(market sponsorship)을 빼면 빈 카드. yfinance 도 dartlab 도
+이 영역은 제공하지 않는다. pykrx 의 KRX 공식 일별 데이터로 보강.
 
-이 collector 는 ad-hoc 호출 패턴 — 카드 분석 시점에 직접 fetch. 별도 DB
-테이블/스케줄러 없이 카드 cache(5분)가 사실상 캐시 역할. 가족 dev 트래픽
-기준 충분.
+2026-05-14 사용자 결정: 공매도 잔고/회전은 가족 비전공자 retail 의사결정에
+nuanced + noise > signal 이라 drop. 외국인/기관 수급만 살림.
+
+ad-hoc 호출 패턴 — 카드 분석 시점에 직접 fetch. 별도 DB 테이블/스케줄러
+없이 카드 cache(5분)가 사실상 캐시 역할. 가족 dev 트래픽 기준 충분.
 
 Returns dict 형식 (collector pattern, 예외 던지지 않음):
     {
@@ -15,9 +16,6 @@ Returns dict 형식 (collector pattern, 예외 던지지 않음):
         "inst_net_5d_krw": int|None,           # 기관 5거래일 순매수 (원)
         "foreign_streak_days": int,            # +N 매수 연속 / -N 매도 연속
         "inst_streak_days": int,
-        "short_balance_ratio": float|None,     # 공매도 잔고 / 상장주식 (%)
-        "short_balance_30d_avg": float|None,   # 30일 평균 (비교 baseline)
-        "short_turnover_today_pct": float|None, # 오늘 공매도 거래량 비중
         "as_of": str|None,                     # 최근 거래일 (YYYY-MM-DD)
         "error": str | absent,
     }
@@ -85,41 +83,11 @@ def _parse_flow_df(df, out: dict) -> None:
         pass
 
 
-def _parse_short_balance_df(df, out: dict) -> None:
-    if df is None or df.empty:
-        return
-    ratio_col = next(
-        (c for c in ("비중", "공매도잔고비중", "공매도비율") if c in df.columns),
-        None,
-    )
-    if not ratio_col:
-        return
-    try:
-        out["short_balance_ratio"] = float(df[ratio_col].iloc[-1])
-        out["short_balance_30d_avg"] = round(
-            float(df[ratio_col].tail(30).mean()), 3
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("pykrx short balance col %s parse fail: %s", ratio_col, e)
-
-
-def _parse_short_status_df(df, out: dict) -> None:
-    if df is None or df.empty:
-        return
-    ratio_col = next((c for c in ("비중",) if c in df.columns), None)
-    if not ratio_col:
-        return
-    try:
-        out["short_turnover_today_pct"] = float(df[ratio_col].iloc[-1])
-    except Exception as e:  # noqa: BLE001
-        logger.warning("pykrx short status col %s parse fail: %s", ratio_col, e)
-
-
 def fetch_kr_flow(ticker: str) -> dict:  # pragma: no cover
-    """pykrx 로 한 종목 수급 + 공매도 스냅샷 조회.
+    """pykrx 로 한 종목 수급 스냅샷 조회.
 
-    pykrx 가 KRX 사이트 scraping 이라 실패 가능. 각 단계 graceful — 부분
-    결과만 반환. 카드 입장에서 "이 필드 없으면 섹션 숨김" 패턴이 자연스럽다.
+    pykrx 가 KRX 사이트 scraping 이라 실패 가능. graceful — 부분 결과만 반환.
+    카드 입장에서 "이 필드 없으면 섹션 숨김" 패턴이 자연스럽다.
     """
     try:
         from pykrx import stock as pykrx_stock
@@ -128,16 +96,12 @@ def fetch_kr_flow(ticker: str) -> dict:  # pragma: no cover
 
     today = date.today()
     flow_start = today - timedelta(days=21)   # 5거래일 + 주말/공휴일 흡수
-    short_start = today - timedelta(days=90)  # 30일 평균 baseline 위해 여유
 
     out: dict = {
         "foreign_net_5d_krw": None,
         "inst_net_5d_krw": None,
         "foreign_streak_days": 0,
         "inst_streak_days": 0,
-        "short_balance_ratio": None,
-        "short_balance_30d_avg": None,
-        "short_turnover_today_pct": None,
         "as_of": None,
     }
 
@@ -149,23 +113,5 @@ def fetch_kr_flow(ticker: str) -> dict:  # pragma: no cover
         logger.warning("pykrx flow fetch failed for %s: %s", ticker, e)
         flow_df = None
     _parse_flow_df(flow_df, out)
-
-    try:
-        bal_df = pykrx_stock.get_shorting_balance_by_date(
-            _ymd(short_start), _ymd(today), ticker
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("pykrx short balance fetch failed for %s: %s", ticker, e)
-        bal_df = None
-    _parse_short_balance_df(bal_df, out)
-
-    try:
-        st_df = pykrx_stock.get_shorting_status_by_date(
-            _ymd(today - timedelta(days=10)), _ymd(today), ticker
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("pykrx short status fetch failed for %s: %s", ticker, e)
-        st_df = None
-    _parse_short_status_df(st_df, out)
 
     return out

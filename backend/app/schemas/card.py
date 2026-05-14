@@ -176,10 +176,13 @@ class Fundamentals(BaseModel):
 
 
 class Flow(BaseModel):
-    """KR 종목 — 외국인/기관 수급 + 공매도 잔고/회전.
+    """KR 종목 — 외국인/기관 수급 (5일 누적 순매수 + 연속 일수).
 
     pykrx 보강(2026-05-14, Codex 시니어 트레이더 리뷰 권고). yfinance / dartlab
     이 못 채우는 영역. US 종목은 항상 None.
+
+    공매도 잔고/회전은 2026-05-14 사용자 결정으로 drop — 가족 비전공자 retail
+    의사결정에 nuanced + noise > signal.
 
     카드 노출 시 가족 친화 카피로 변환 — feedback_card_user_facing_copy 메모
     참조. 예: foreign_net_5d_krw=+120억 → "외국인이 최근 5일 동안 120억원
@@ -189,9 +192,6 @@ class Flow(BaseModel):
     inst_net_5d_krw: int | None = None       # 기관 5거래일 순매수 (원)
     foreign_streak_days: int = 0             # +N 연속 매수 / -N 연속 매도
     inst_streak_days: int = 0
-    short_balance_ratio: float | None = None     # 공매도 잔고 / 상장주식 (%)
-    short_balance_30d_avg: float | None = None   # 30일 평균 (비교 baseline)
-    short_turnover_today_pct: float | None = None  # 오늘 공매도 거래량 비중
     as_of: str | None = None                 # 최근 거래일 (YYYY-MM-DD)
 
 
