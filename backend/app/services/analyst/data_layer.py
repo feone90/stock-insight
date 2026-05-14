@@ -340,16 +340,18 @@ async def _fetch_fundamentals(ticker: str) -> dict:
 def _label_for_financial(fin: "Financial", kr: bool) -> str:  # type: ignore[name-defined]
     """Financial row 의 채워진 필드 모양으로 출처 추정.
 
-    - KR + revenue 있음    → "DART · 사업보고서 ({period})"
-    - KR + revenue 없음    → "yfinance · 시총만 (DART 미공개)" — 인보사 사태 이후
-                              코오롱티슈진 같은 회계감리/거래정지 케이스
-    - US                   → "yfinance · TTM ({period})"
+    - KR + revenue 있음             → "DART · 사업보고서 ({period})"
+    - KR + revenue 없음 + KRX 비율  → "KRX 공식 시세 (PER/PBR 일별)" — pykrx 보강
+    - KR + 시총만                    → "시총만 (DART 사업보고서 미공개)"
+    - US                            → "yfinance · TTM ({period})"
     """
     if not kr:
         return f"yfinance · TTM ({fin.period})"
     if fin.revenue is not None:
         return f"DART · 사업보고서 ({fin.period})"
-    return "yfinance · 시총만 (DART 사업보고서 미공개)"
+    if fin.per is not None or fin.pbr is not None:
+        return "KRX 공식 시세 (PER/PBR 일별)"
+    return "시총만 (DART 사업보고서 미공개)"
 
 
 async def _fetch_political_signals(ticker: str) -> dict:

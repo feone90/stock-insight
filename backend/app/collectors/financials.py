@@ -104,11 +104,74 @@ def _yf_kr_ratios(ticker: str, market: str | None) -> dict:  # pragma: no cover
     return out
 
 
+def _pykrx_fundamentals(ticker: str) -> dict:  # pragma: no cover
+    """pykrx — KRX 공식 fundamentals(PER/PBR/EPS/BPS/DIV) + 시가총액.
+
+    Why: yfinance .KS/.KQ 가 한국 종목 PER/PBR 을 자주 빈칸으로 반환해 카드의
+    '주가가 1년 이익의 N배' 라벨이 채워지지 않았다(2026-05-14 Codex 시니어
+    트레이더 리뷰 권고). KRX 공식 PER/PBR 은 일별 갱신이라 정확도가 가장
+    높은 source.
+
+    Returns: {"per","pbr","eps","bps","div_yield","market_cap","as_of"} or {}.
+    네트워크/스키마 실패는 swallow — collector 패턴(예외 안 던지고 빈 dict).
+    """
+    from datetime import date, timedelta
+
+    try:
+        from pykrx import stock as pykrx_stock
+    except ImportError:
+        return {}
+
+    end_dt = date.today()
+    start_dt = end_dt - timedelta(days=14)  # 연휴/주말 흡수 여유
+    end = end_dt.strftime("%Y%m%d")
+    start = start_dt.strftime("%Y%m%d")
+    out: dict = {}
+    try:
+        df = pykrx_stock.get_market_fundamental_by_date(start, end, ticker)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("pykrx fundamental fetch failed for %s: %s", ticker, e)
+        return {}
+    if df is None or df.empty:
+        return {}
+
+    last = df.iloc[-1]
+    def _positive(col: str) -> float | None:
+        try:
+            v = float(last[col])
+        except (KeyError, ValueError, TypeError):
+            return None
+        return v if v > 0 else None
+
+    out["per"] = _positive("PER")
+    out["pbr"] = _positive("PBR")
+    eps_v = _positive("EPS")
+    bps_v = _positive("BPS")
+    out["eps"] = int(eps_v) if eps_v else None
+    out["bps"] = int(bps_v) if bps_v else None
+    out["div_yield"] = _positive("DIV")
+
+    # 시총도 KRX 공식 (yfinance KS suffix 부정확함)
+    try:
+        mc_df = pykrx_stock.get_market_cap_by_date(start, end, ticker)
+        if mc_df is not None and not mc_df.empty and "시가총액" in mc_df.columns:
+            out["market_cap"] = int(mc_df["시가총액"].iloc[-1])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("pykrx market_cap fetch failed for %s: %s", ticker, e)
+
+    idx = df.index[-1]
+    out["as_of"] = idx.date().isoformat() if hasattr(idx, "date") else None
+    return out
+
+
 def fetch_kr_financials_raw(ticker: str, market: str | None) -> dict:  # pragma: no cover
-    """dartlab analysis('financial', '수익성') + yfinance ratios fallback."""
+    """dartlab analysis('financial', '수익성') + pykrx fundamentals + yfinance fallback.
+
+    Priority: pykrx PER/PBR/DIV (KRX 공식) > dartlab IS roll-up > yfinance KS/KQ.
+    """
     import dartlab
 
-    out: dict = {"margin": [], "return": [], "yf": {}}
+    out: dict = {"margin": [], "return": [], "yf": {}, "pykrx": {}}
     try:
         c = dartlab.Company(ticker)
         if c.market == "KR":
@@ -117,6 +180,7 @@ def fetch_kr_financials_raw(ticker: str, market: str | None) -> dict:  # pragma:
             out["return"] = (prof.get("returnTrend") or {}).get("history") or []
     except Exception as e:
         logger.warning("dartlab fetch failed for %s: %s", ticker, e)
+    out["pykrx"] = _pykrx_fundamentals(ticker)
     out["yf"] = _yf_kr_ratios(ticker, market)
     return out
 
@@ -134,10 +198,11 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
     margin_rows = raw.get("margin") or []
     return_rows = raw.get("return") or []
     yf_fallback = raw.get("yf") or {}
+    pykrx_data = raw.get("pykrx") or {}
 
-    # market_cap: fresh yfinance > stock 테이블. write-back 으로 stock 의 시총
-    # 컬럼도 갱신해 다음 sync 호출에서 재활용.
-    fresh_mc = yf_fallback.get("market_cap")
+    # market_cap 우선순위: pykrx KRX 공식 > yfinance > stock 테이블.
+    # 시총이 PER/PBR 직접계산 분모라 source 정확도가 카드 신뢰도에 직결.
+    fresh_mc = pykrx_data.get("market_cap") or yf_fallback.get("market_cap")
     if fresh_mc:
         stock.market_cap = fresh_mc
         market_cap = fresh_mc
@@ -159,17 +224,28 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
         net_won = int(margin["netIncome"] * _KR_UNIT_TO_WON)
         equity_won = int(ret.get("equity") * _KR_UNIT_TO_WON) if ret.get("equity") else None
 
-        per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
-        pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
+        # PER/PBR: KRX 공식(pykrx) 우선, 없으면 직접계산. KRX 는 일별 갱신 +
+        # 우선주/희석주식수 반영해 직접계산보다 정확.
+        per = pykrx_data.get("per")
+        if per is None:
+            per = round(market_cap / net_won, 2) if (market_cap and net_won > 0) else None
+        pbr = pykrx_data.get("pbr")
+        if pbr is None:
+            pbr = round(market_cap / equity_won, 2) if (market_cap and equity_won and equity_won > 0) else None
         roe = ret.get("roe")
         if roe is None and equity_won and equity_won > 0:
             roe = round(net_won / equity_won * 100, 2)
         elif roe is not None:
             roe = round(roe, 2)
 
+        # 배당수익률: KRX 공식 > yfinance fallback.
+        div_yield = pykrx_data.get("div_yield")
+        if div_yield is None:
+            div_yield = yf_fallback.get("dividend_yield")
+
         logger.info(
-            "kr_values[%s] DART period=%s mc=%s net=%s equity=%s",
-            stock.ticker, period, market_cap, net_won, equity_won,
+            "kr_values[%s] DART period=%s mc=%s per=%s pbr=%s (krx_per=%s)",
+            stock.ticker, period, market_cap, per, pbr, pykrx_data.get("per"),
         )
         return {
             "stock_id": stock.id,
@@ -181,40 +257,42 @@ def _kr_values(stock: Stock, raw: dict) -> dict | None:
             "per": per,
             "pbr": pbr,
             "roe": roe,
-            "dividend_yield": yf_fallback.get("dividend_yield"),
+            "dividend_yield": div_yield,
             "market_cap": market_cap,
         }
 
-    # DART 빈 결과 — 회계감리/거래정지/R&D 단계 종목 (예: 코오롱티슈진).
-    # Codex review [medium]: stale stock.market_cap 을 "올해 yfinance 시총만"
-    # 라벨로 카드에 박으면, 정작 데이터 깨진 종목에서 거짓말함. fresh yfinance
-    # 응답이 있을 때만 yfinance-only Financial row 를 만든다. 그 외엔 None →
-    # data_layer._fetch_fundamentals 가 stock.market_cap fallback path 로 가서
-    # "시총만 — 재무 미수집 (분석 시작 전)" 라벨을 정직하게 노출.
-    if not fresh_mc:
+    # DART IS 빈 결과 — 회계감리/거래정지/R&D 단계 종목 (예: 코오롱티슈진).
+    # 그래도 pykrx KRX 공식 PER/PBR/시총 만 있어도 카드 fundamentals 섹션이
+    # "비어있음"이 아닌 실제 숫자로 채워진다. yfinance .KS/.KQ 부정확 fallback
+    # 이전에 KRX 공식을 먼저 시도.
+    krx_per = pykrx_data.get("per")
+    krx_pbr = pykrx_data.get("pbr")
+    if krx_per or krx_pbr or fresh_mc:
         logger.info(
-            "kr_values[%s] no DART IS and no fresh yfinance — return None "
-            "(data_layer will surface stock.market_cap as stale fallback)",
-            stock.ticker,
+            "kr_values[%s] KRX-only mc=%s per=%s pbr=%s (DART IS empty)",
+            stock.ticker, fresh_mc, krx_per, krx_pbr,
         )
-        return None
+        return {
+            "stock_id": stock.id,
+            "period": f"{date.today().year}A",
+            "period_type": "annual",
+            "revenue": None,
+            "operating_profit": None,
+            "net_income": None,
+            "per": krx_per if krx_per is not None else yf_fallback.get("trailing_pe"),
+            "pbr": krx_pbr if krx_pbr is not None else yf_fallback.get("price_to_book"),
+            "roe": None,
+            "dividend_yield": pykrx_data.get("div_yield") or yf_fallback.get("dividend_yield"),
+            "market_cap": fresh_mc,
+        }
+
+    # 정말 아무 source 도 없음 — data_layer 의 stock.market_cap fallback 으로.
     logger.info(
-        "kr_values[%s] yfinance-only mc=%s pe=%s pb=%s (DART IS empty, fresh yf)",
-        stock.ticker, fresh_mc, yf_fallback.get("trailing_pe"), yf_fallback.get("price_to_book"),
+        "kr_values[%s] no DART, no pykrx, no yfinance — return None "
+        "(data_layer will surface stock.market_cap as stale fallback)",
+        stock.ticker,
     )
-    return {
-        "stock_id": stock.id,
-        "period": f"{date.today().year}A",
-        "period_type": "annual",
-        "revenue": None,
-        "operating_profit": None,
-        "net_income": None,
-        "per": yf_fallback.get("trailing_pe"),
-        "pbr": yf_fallback.get("price_to_book"),
-        "roe": None,
-        "dividend_yield": yf_fallback.get("dividend_yield"),
-        "market_cap": fresh_mc,
-    }
+    return None
 
 
 # ---------- 통합 ----------

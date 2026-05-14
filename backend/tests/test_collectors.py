@@ -299,18 +299,92 @@ async def test_sync_financials_kr_yfinance_fallback(db):
 
 @pytest.mark.asyncio
 async def test_sync_financials_kr_no_data_anywhere(db):
-    """KR — dartlab + yfinance 모두 빈 결과면 row 만들지 않음."""
+    """KR — dartlab + yfinance + pykrx 모두 빈 결과면 row 만들지 않음."""
     result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
     stock = result.scalar_one()
     stock.market_cap = None
 
-    mock_raw = {"margin": [], "return": [], "yf": {"market_cap": None}}
+    mock_raw = {"margin": [], "return": [], "yf": {"market_cap": None}, "pykrx": {}}
 
     with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
         result = await sync_financials(db, stock)
 
     assert result["financials_synced"] == 0
     assert "error" in result
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_kr_pykrx_overrides_dart_calc(db):
+    """KR — DART IS 정상 + pykrx 둘 다 있으면 PER/PBR/배당수익률은 KRX 공식 우선.
+
+    KRX 공식 PER 은 일별 갱신 + 우선주/희석주식수 반영. 직접계산
+    (mc/net_income) 보다 정확하다. 2026-05-14 Codex 권고 적용.
+    """
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.market_cap = None  # pykrx 시총으로 채워짐
+
+    mock_raw = {
+        "margin": [
+            {"period": "2024", "revenue": 300_000_000.0, "operatingIncome": 50_000_000.0, "netIncome": 40_000_000.0},
+        ],
+        "return": [
+            {"period": "2024", "netIncome": 40_000_000.0, "equity": 200_000_000.0, "roe": 20.0},
+        ],
+        "yf": {"market_cap": None, "dividend_yield": 1.0},
+        "pykrx": {
+            "per": 12.34,       # KRX 공식 — 직접계산(mc/net)과 다름
+            "pbr": 1.05,
+            "div_yield": 2.5,   # yf 1.0 보다 우선
+            "market_cap": 400_000_000_000_000,
+            "as_of": "2026-05-14",
+        },
+    }
+
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 1
+    assert result["source"] == "DART"
+    assert result["per"] == 12.34, "KRX 공식 PER 이 직접계산을 override 해야 함"
+    assert result["pbr"] == 1.05, "KRX 공식 PBR 이 직접계산을 override 해야 함"
+    assert result["market_cap"] == 400_000_000_000_000, "pykrx 시총이 yfinance 보다 우선"
+
+
+@pytest.mark.asyncio
+async def test_sync_financials_kr_pykrx_only_path(db):
+    """KR — DART IS 비어있어도 pykrx PER/PBR 만으로 카드 fundamentals 채워야 함.
+
+    이전엔 yfinance .KS/.KQ trailingPE 가 None 이면 카드의 '주가가 1년 이익의
+    N배' 라벨이 빈칸이었다. pykrx KRX 공식 일별 PER/PBR 로 보강하면 회계감리/
+    거래정지 케이스(코오롱티슈진 등) 빼곤 다 채워진다.
+    """
+    result = await db.execute(select(Stock).where(Stock.ticker == "005930"))
+    stock = result.scalar_one()
+    stock.market_cap = None
+
+    mock_raw = {
+        "margin": [],  # DART IS 빈
+        "return": [],
+        "yf": {"market_cap": None, "trailing_pe": None, "price_to_book": None, "dividend_yield": None},
+        "pykrx": {
+            "per": 18.7,
+            "pbr": 1.42,
+            "div_yield": 1.8,
+            "market_cap": 5_000_000_000_000,
+            "as_of": "2026-05-14",
+        },
+    }
+
+    with patch("app.collectors.financials.fetch_kr_financials_raw", return_value=mock_raw):
+        result = await sync_financials(db, stock)
+
+    assert result["financials_synced"] == 1
+    assert result["source"] == "yfinance-KR"  # revenue None 이라 label 은 그대로
+    assert result["per"] == 18.7
+    assert result["pbr"] == 1.42
+    assert result["market_cap"] == 5_000_000_000_000
+    assert result["revenue"] is None
 
 
 @pytest.mark.asyncio
