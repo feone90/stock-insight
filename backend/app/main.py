@@ -44,6 +44,7 @@ async def _run_startup_purge() -> None:
     from app.services.ontology.purge import (
         purge_cross_market_sector_match,
         purge_llm_hallucinations,
+        purge_self_negating_rationales,
     )
 
     try:
@@ -51,11 +52,14 @@ async def _run_startup_purge() -> None:
             n_hall = await purge_llm_hallucinations(db)
         async with async_session() as db:
             n_xmkt = await purge_cross_market_sector_match(db)
-        total = n_hall + n_xmkt
+        async with async_session() as db:
+            n_neg = await purge_self_negating_rationales(db)
+        total = n_hall + n_xmkt + n_neg
         if total > 0:
             logger.info(
-                "startup purge: hallucination=%d cross_market_sector=%d total=%d",
-                n_hall, n_xmkt, total,
+                "startup purge: hallucination=%d cross_market_sector=%d "
+                "self_negating=%d total=%d",
+                n_hall, n_xmkt, n_neg, total,
             )
     except Exception as e:  # noqa: BLE001
         logger.warning("startup purge failed: %s", e)

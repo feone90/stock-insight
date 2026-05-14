@@ -25,6 +25,7 @@ from app.models import Stock, StockRelation
 from app.services.ontology.evidence import (
     LLM_SOURCES_REQUIRING_EVIDENCE,
     has_target_evidence,
+    rationale_admits_no_relationship,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,43 @@ async def purge_cross_market_sector_match(session: AsyncSession) -> int:
     await session.commit()
     logger.info(
         "purge_cross_market_sector_match: deleted %d rows (sample=%s)",
+        len(bad_ids), bad_ids[:5],
+    )
+    return len(bad_ids)
+
+
+async def purge_self_negating_rationales(session: AsyncSession) -> int:
+    """LLM 이 rationale 안에 "관계 없음" 자백한 row 영구 삭제.
+
+    2026-05-15 발견: Beyond Meat 기사로 NVDA↔McDonald's complementary 박혔는데
+    rationale 이 "NVDA와의 직접 관계는 없음" 명시. 자료가 자기 부정 — 100%
+    환상. deploy 마다 startup 시 일괄 청소.
+    """
+    rows = (
+        await session.execute(
+            select(StockRelation.id, StockRelation.extra_metadata).where(
+                StockRelation.source.in_(LLM_SOURCES_REQUIRING_EVIDENCE)
+            )
+        )
+    ).all()
+    if not rows:
+        return 0
+
+    bad_ids: list[int] = []
+    for r in rows:
+        meta = r.extra_metadata or {}
+        rationale = meta.get("rationale") if isinstance(meta, dict) else None
+        if rationale_admits_no_relationship(rationale):
+            bad_ids.append(r.id)
+
+    if not bad_ids:
+        return 0
+    await session.execute(
+        delete(StockRelation).where(StockRelation.id.in_(bad_ids))
+    )
+    await session.commit()
+    logger.info(
+        "purge_self_negating_rationales: deleted %d rows (sample=%s)",
         len(bad_ids), bad_ids[:5],
     )
     return len(bad_ids)

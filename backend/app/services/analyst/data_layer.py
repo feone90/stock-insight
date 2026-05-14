@@ -47,7 +47,11 @@ from app.services.analyst.tools import (
     llm_classify_news,
     llm_discover_relations,
 )
-from app.services.ontology.evidence import has_target_evidence, is_llm_source
+from app.services.ontology.evidence import (
+    has_target_evidence,
+    is_llm_source,
+    rationale_admits_no_relationship,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -852,6 +856,18 @@ async def _fetch_relations_data(ticker: str) -> dict:
             # 자체에서 제외.
             if is_llm_source(r.source):
                 target_name = tgt.name if tgt else None
+                # (a) 자기 부정 rationale ("NVDA와의 직접 관계는 없음" 류).
+                # (b) target name/ticker 본문 substring 부재.
+                # 두 케이스 모두 hide + soft-delete.
+                if rationale_admits_no_relationship(rationale):
+                    hallucination_ids.append(r.id)
+                    logger.warning(
+                        "data_layer hide+soft-delete self-negating rationale: "
+                        "%s→%s src=%s rationale=%r",
+                        ticker, r.to_target, r.source,
+                        (rationale or "")[:120],
+                    )
+                    continue
                 if not has_target_evidence(rationale, target_name, r.to_target):
                     hallucination_ids.append(r.id)
                     logger.warning(

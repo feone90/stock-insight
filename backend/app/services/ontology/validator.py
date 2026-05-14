@@ -111,6 +111,7 @@ async def _route(
     dropped_low_conf = 0
     dropped_no_rationale = 0
     dropped_no_target_name_evidence = 0
+    dropped_self_negating = 0
 
     requires_rationale = source in _LLM_SOURCES_REQUIRING_RATIONALE
 
@@ -134,6 +135,22 @@ async def _route(
                     "type=%s conf=%.2f rationale_len=%d",
                     source, rel.from_ticker, rel.to_ticker, rel.relation_type,
                     rel.confidence, longest,
+                )
+                continue
+
+            # 2026-05-15 — self-negating rationale (LLM 이 자기 입으로
+            # "관계 없음" 자백). 실제 발견: NVDA↔McDonald's rationale 이
+            # "NVDA와의 직접 관계는 없음". 100% 환상 — hard drop.
+            from app.services.ontology.evidence import (
+                rationale_admits_no_relationship,
+            )
+            combined_rationale = (rat + " " + meta_rat).strip()
+            if rationale_admits_no_relationship(combined_rationale):
+                dropped_self_negating += 1
+                logger.info(
+                    "validator drop self-negating: src=%s %s→%s rationale=%r",
+                    source, rel.from_ticker, rel.to_ticker,
+                    combined_rationale[:120],
                 )
                 continue
 
@@ -226,6 +243,7 @@ async def _route(
         "low_conf_dropped": dropped_low_conf,
         "no_rationale_dropped": dropped_no_rationale,
         "no_target_name_evidence_dropped": dropped_no_target_name_evidence,
+        "self_negating_dropped": dropped_self_negating,
         "upserted": upserted,
         "buffered": buffered,
     }

@@ -151,6 +151,9 @@ async def _run_for_ticker(
     )
 
     skipped_rationale_etf = 0
+    skipped_self_negating = 0
+
+    from app.services.ontology.evidence import rationale_admits_no_relationship
 
     # Phase 3 — per-relation evidence gate (focal already verified; check OTHER side).
     for art, rels, haystack_low, _focal_in in pending:
@@ -181,6 +184,12 @@ async def _run_for_ticker(
             if any(pat in rationale_low for pat in _ETF_INDEX_PATTERNS):
                 skipped_rationale_etf += 1
                 continue
+            # 2026-05-15 — self-negating rationale ("NVDA와의 직접 관계는 없음"
+            # 같이 LLM 이 자기 입으로 부정한 케이스) 차단.
+            combined = (rel.rationale or "") + " " + metadata_rationale
+            if rationale_admits_no_relationship(combined):
+                skipped_self_negating += 1
+                continue
             relations.append(rel)
 
     summary = await validate_and_route(relations, source=_SOURCE, session=session)
@@ -191,6 +200,7 @@ async def _run_for_ticker(
     summary["evidence_dropped_no_focal"] = skipped_no_focal_evidence
     summary["evidence_dropped_target_missing"] = skipped_target_not_in_article
     summary["evidence_dropped_etf_pattern"] = skipped_rationale_etf
+    summary["evidence_dropped_self_negating"] = skipped_self_negating
     return summary
 
 

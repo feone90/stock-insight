@@ -18,7 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session
 from app.markets import KR_MARKETS, US_MARKETS
 from app.models import Stock, StockRelation
-from app.services.ontology.evidence import has_target_evidence, is_llm_source
+from app.services.ontology.evidence import (
+    has_target_evidence,
+    is_llm_source,
+    rationale_admits_no_relationship,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ontology", tags=["ontology"])
@@ -88,6 +92,15 @@ async def get_subgraph(
                         md = r.extra_metadata or {}
                         rationale = md.get("rationale") if isinstance(md, dict) else None
                         target_name = target_stock.name if target_stock else None
+                        if rationale_admits_no_relationship(rationale):
+                            hallucination_ids.append(r.id)
+                            logger.warning(
+                                "graph hide+soft-delete self-negating: "
+                                "%s→%s src=%s rationale=%r",
+                                stock.ticker, r.to_target, r.source,
+                                (rationale or "")[:120],
+                            )
+                            continue
                         if not has_target_evidence(rationale, target_name, r.to_target):
                             hallucination_ids.append(r.id)
                             logger.warning(
