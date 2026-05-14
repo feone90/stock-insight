@@ -195,6 +195,36 @@ class Flow(BaseModel):
     as_of: str | None = None                 # 최근 거래일 (YYYY-MM-DD)
 
 
+class Earnings(BaseModel):
+    """US 종목 — Finnhub free tier earnings calendar 다음 발표 1건.
+
+    매수/매도 판단 시점 결정에 핵심. 카드 노출 시 "다음 실적 발표 D-N (1주일 뒤)"
+    가족 친화 카피로 frontend 변환.
+    """
+    date: str                       # YYYY-MM-DD
+    days_until: int = 0             # 카드 생성 시점 기준 D-N (0 이면 오늘)
+    eps_estimate: float | None = None
+    revenue_estimate: int | None = None
+    hour: str | None = None         # bmo / amc / dmh
+
+
+class AnalystRating(BaseModel):
+    """US 종목 — Finnhub analyst recommendation consensus 가장 최신 월.
+
+    카피 가이드: "전문가 12명 의견: 매수 8 / 보유 3 / 매도 1".
+    """
+    month: str                      # YYYY-MM
+    buy: int = 0
+    hold: int = 0
+    sell: int = 0
+    strong_buy: int = 0
+    strong_sell: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.buy + self.hold + self.sell + self.strong_buy + self.strong_sell
+
+
 class InsiderFiling(BaseModel):
     filing_date: str
     accession: str
@@ -301,8 +331,10 @@ class StockCard(BaseModel):
     political_signals: list[PoliticalSignalCard] = []
     macro: MacroContext
     fundamentals: Fundamentals
-    flow: Flow | None = None      # KR-only: 외국인/기관 수급 + 공매도.
-    insider: Insider | None = None  # US-only: SEC Form 4 최근 30일 요약.
+    flow: Flow | None = None              # KR-only: 외국인/기관 수급 + 공매도.
+    insider: Insider | None = None        # US-only: SEC Form 4 최근 30일 요약.
+    earnings: Earnings | None = None      # US-only: Finnhub 다음 실적 발표 D-N.
+    analyst_rating: AnalystRating | None = None  # US-only: Finnhub 매수/보유/매도.
     decision: Decision
 
     citations: list[Citation] = []
@@ -328,8 +360,10 @@ class DataLayer(BaseModel):
     technical: TechMomentum | None = None
     macro: MacroContext | None = None
     fundamentals: Fundamentals | None = None
-    flow: Flow | None = None       # KR-only (pykrx 수급 + 공매도)
-    insider: Insider | None = None  # US-only (SEC Form 4 30d)
+    flow: Flow | None = None              # KR-only (pykrx 수급 + 공매도)
+    insider: Insider | None = None        # US-only (SEC Form 4 30d)
+    earnings: Earnings | None = None      # US-only (Finnhub 다음 발표)
+    analyst_rating: AnalystRating | None = None  # US-only (Finnhub consensus)
     news: list[NewsItem] = []
     political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []

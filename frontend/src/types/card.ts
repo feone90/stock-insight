@@ -142,6 +142,25 @@ export interface Fundamentals {
   citations: number[];
 }
 
+// US-only — Finnhub free tier 다음 실적 발표 1건.
+export interface Earnings {
+  date: string;          // YYYY-MM-DD
+  days_until: number;    // 카드 생성 시점 기준 D-N (음수면 과거)
+  eps_estimate: number | null;
+  revenue_estimate: number | null;
+  hour: string | null;   // bmo / amc / dmh
+}
+
+// US-only — Finnhub analyst recommendation consensus 가장 최근 월.
+export interface AnalystRating {
+  month: string;
+  buy: number;
+  hold: number;
+  sell: number;
+  strong_buy: number;
+  strong_sell: number;
+}
+
 // US-only — SEC Form 4 (임원 매매 신고) 최근 N일 요약.
 // KR 종목은 null. 매수/매도 transaction code 분류는 follow-up (Form 4 XML 파싱).
 export interface InsiderFiling {
@@ -244,8 +263,10 @@ export interface StockCard {
   political_signals: PoliticalSignalCard[];
   macro: MacroContext;
   fundamentals: Fundamentals;
-  flow?: Flow | null;        // KR-only pykrx 수급+공매도.
-  insider?: Insider | null;  // US-only SEC Form 4 임원 매매 신고.
+  flow?: Flow | null;                  // KR-only pykrx 수급+공매도.
+  insider?: Insider | null;            // US-only SEC Form 4 임원 매매 신고.
+  earnings?: Earnings | null;          // US-only Finnhub 다음 실적 발표 D-N.
+  analyst_rating?: AnalystRating | null; // US-only Finnhub 분석가 의견 consensus.
   decision: Decision;
 
   citations: Citation[];

@@ -24,8 +24,10 @@ from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.relation import StockRelation
 from app.collectors.krx_flow import fetch_kr_flow
 from app.schemas.card import (
+    AnalystRating,
     Citation,
     DataLayer,
+    Earnings,
     Flow,
     Fundamentals,
     Insider,
@@ -92,7 +94,8 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     ticker = ticker.strip().upper()
 
     (
-        indicators_co, macro_co, fund_co, news_co, rel_co, pol_co, flow_co, ins_co,
+        indicators_co, macro_co, fund_co, news_co, rel_co, pol_co,
+        flow_co, ins_co, earn_co, anal_co,
     ) = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
@@ -102,6 +105,8 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         _fetch_political_signals(ticker),
         _fetch_flow(ticker),
         _fetch_insider(ticker),
+        _fetch_earnings(ticker),
+        _fetch_analyst_rating(ticker),
         return_exceptions=True,
     )
 
@@ -115,6 +120,8 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     political_signals = _build_political_signals(pol_co)
     flow = _build_flow(flow_co, pool)
     insider = _build_insider(ins_co, pool)
+    earnings = _build_earnings(earn_co, pool)
+    analyst_rating = _build_analyst_rating(anal_co, pool)
 
     if isinstance(rel_co, dict) and rel_co.get("is_stale"):
         # Fire-and-forget background refresh — do NOT await
@@ -126,6 +133,8 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         fundamentals=fundamentals,
         flow=flow,
         insider=insider,
+        earnings=earnings,
+        analyst_rating=analyst_rating,
         news=news,
         political_signals=political_signals,
         relations_data=relations_data,
@@ -180,6 +189,50 @@ def _build_macro(res: Any, pool: _CitationPool) -> MacroContext | None:
         upcoming_events=res.get("upcoming_events", []),
         citations=[cid],
     )
+
+
+def _build_earnings(res: Any, pool: _CitationPool) -> Earnings | None:
+    if res is None or isinstance(res, Exception) or not isinstance(res, dict):
+        if isinstance(res, Exception):
+            logger.warning("data_layer earnings failed: %s", res)
+        return None
+    iso = res.get("date")
+    if not iso:
+        return None
+    try:
+        target = datetime.fromisoformat(iso).date()
+        days_until = (target - datetime.utcnow().date()).days
+    except Exception:  # noqa: BLE001
+        days_until = 0
+    pool.add("market_data", f"Finnhub · Earnings ({iso})")
+    return Earnings(
+        date=iso,
+        days_until=days_until,
+        eps_estimate=res.get("eps_estimate"),
+        revenue_estimate=res.get("revenue_estimate"),
+        hour=res.get("hour"),
+    )
+
+
+def _build_analyst_rating(res: Any, pool: _CitationPool) -> AnalystRating | None:
+    if res is None or isinstance(res, Exception) or not isinstance(res, dict):
+        if isinstance(res, Exception):
+            logger.warning("data_layer analyst rating failed: %s", res)
+        return None
+    if not res.get("month"):
+        return None
+    rating = AnalystRating(
+        month=res["month"],
+        buy=res.get("buy", 0),
+        hold=res.get("hold", 0),
+        sell=res.get("sell", 0),
+        strong_buy=res.get("strong_buy", 0),
+        strong_sell=res.get("strong_sell", 0),
+    )
+    if rating.total == 0:
+        return None
+    pool.add("market_data", f"Finnhub · 분석가 의견 ({res['month']})")
+    return rating
 
 
 _SEC_ARCHIVE_URL = (
@@ -375,6 +428,32 @@ def _build_relations(
 # ---------------------------------------------------------------------------
 # DB-backed fetchers (own session)
 # ---------------------------------------------------------------------------
+
+
+async def _fetch_earnings(ticker: str) -> dict | None:
+    from app.collectors.finnhub import fetch_earnings_calendar
+    from app.markets import is_us
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock or not is_us(stock.market):
+            return None
+    return await fetch_earnings_calendar(ticker)
+
+
+async def _fetch_analyst_rating(ticker: str) -> dict | None:
+    from app.collectors.finnhub import fetch_analyst_recommendation
+    from app.markets import is_us
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock or not is_us(stock.market):
+            return None
+    return await fetch_analyst_recommendation(ticker)
 
 
 _FORM4_WINDOW_DAYS = 30

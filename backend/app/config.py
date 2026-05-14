@@ -57,6 +57,11 @@ class Settings(BaseSettings):
 
     # FRED (Federal Reserve Economic Data) — VIX, US10Y, FedFunds, etc.
     fred_api_key: str | None = None
+
+    # Finnhub free tier — US earnings calendar + analyst rating consensus.
+    # 60 req/min. Gracefully skipped when missing (collector pattern).
+    # 키 발급: https://finnhub.io/dashboard (이메일 가입만, free tier 자동).
+    finnhub_api_key: str | None = None
     # 기존 `cors_origins: list[str]` (line 14)이 origin allow-list. Vercel 배포 시
     # Railway env에 CORS_ORIGINS=["https://your-app.vercel.app"] JSON 형식으로 설정.
 

@@ -297,8 +297,10 @@ def compose(
         political_signals=data.political_signals,
         macro=macro,
         fundamentals=fundamentals,
-        flow=data.flow,        # KR-only pykrx 수급+공매도.
-        insider=data.insider,  # US-only SEC Form 4 30일. None 이면 frontend 섹션 숨김.
+        flow=data.flow,                  # KR-only pykrx 수급+공매도.
+        insider=data.insider,            # US-only SEC Form 4 30일.
+        earnings=data.earnings,          # US-only Finnhub 다음 실적 발표 D-N.
+        analyst_rating=data.analyst_rating,  # US-only Finnhub analyst consensus.
         decision=decision,
         citations=final_citations,
         analysis_id=str(uuid.uuid4()),
