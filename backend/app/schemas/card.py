@@ -138,6 +138,14 @@ class Relation(BaseModel):
     # 면 frontend 에서 risk badge 강조 (lock-in risk).
     customer_concentration_pct: float | None = Field(default=None, ge=0, le=100)
 
+    # 2026-05-15 — LLM knowledge 기반 관계 표현력 확장.
+    # `target_is_public=False` 면 비상장 entity (OpenAI, SpaceX 등). frontend
+    # 가 가격/차트 link 없이 read-only chip 으로 표시.
+    target_is_public: bool = True
+    # 1 (주변) ~ 5 (매수 결정 핵심). knowledge_relations 가 채움; 다른 source
+    # 는 None. frontend 가 ★ 1-5 시각화에 사용.
+    business_importance: int | None = Field(default=None, ge=1, le=5)
+
 
 class RelationsSummary(BaseModel):
     one_line: str

@@ -32,6 +32,7 @@ const SOURCE_LABEL: Record<string, string> = {
   curated_relation: "AI 큐레이션",
   candidate_promote: "후보 승격",
   llm_web_search: "웹 탐색",
+  llm_knowledge: "분석가 시각",
 };
 
 // 2026-05-14: 양적 축소(cap 24→6) 가 아닌 3-tier 시각 차별 — 정보 손실 0,
@@ -52,6 +53,12 @@ function classifyTier(r: Relation): Tier {
   if (CONTEXT_TYPES.has(r.relation_type) || r.source === "sector_match") {
     return "context";
   }
+  // 2026-05-15: llm_knowledge — 시니어 펀더멘털 분석가 페르소나 LLM 사전
+  // 지식. business_importance ≥ 3, confidence ≥ 0.7 가드 통과한 것만 박힘.
+  // 사용자가 *진짜* 보고 싶어 했던 관계 (MS↔OpenAI/NVDA/Apple 등) — core 로 승격.
+  if (r.source === "llm_knowledge") {
+    return "core";
+  }
   // core: filing 증거 또는 고신뢰 news rationale. 카드 첫 줄에 시니어가 봐야 할 신호.
   const conf = r.confidence ?? 0.5;
   if (
@@ -66,6 +73,7 @@ function classifyTier(r: Relation): Tier {
 }
 
 const SOURCE_CLASS_PRIORITY: Record<string, number> = {
+  llm_knowledge: 0,  // 분석가 시각 — 가장 위
   sec_8k: 0,
   dart_contract: 0,
   sec_10k_risk: 0,
@@ -352,18 +360,39 @@ function TierRow({ rel, isCore }: { rel: Relation; isCore: boolean }) {
   const rationale = rel.rationale?.trim() || null;
 
   const cc = rel.customer_concentration_pct;
+  const importance = rel.business_importance ?? null;
+  const isPrivate = rel.target_is_public === false;
   return (
     <li className={rowText}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className={targetWeight}>{rel.target_name}</span>
-        {rel.target_ticker && rel.target_ticker !== rel.target_name ? (
+        {rel.target_ticker && rel.target_ticker !== rel.target_name && !isPrivate ? (
           <span className="text-[11px] text-[var(--surface-text-muted)]">
             ({rel.target_ticker})
+          </span>
+        ) : null}
+        {isPrivate ? (
+          <span
+            className="inline-flex items-center rounded bg-[var(--surface-section-hover)] px-1.5 py-0.5 text-[10px] text-[var(--surface-text-muted)] border border-[var(--surface-border)]"
+            title="비상장 회사 — 차트/시세 없음. 사업 관계 정보만."
+          >
+            비상장
           </span>
         ) : null}
         <span className="text-[11px] text-[var(--surface-text-muted)]">
           · {RELATION_LABEL[rel.relation_type] ?? rel.relation_type}
         </span>
+        {importance != null && importance >= 3 ? (
+          <span
+            className="text-[11px] text-amber-600 dark:text-amber-400"
+            title={`매수 결정 영향도 ${importance}/5 (분석가 시각)`}
+          >
+            {"★".repeat(importance)}
+            <span className="text-[var(--surface-text-subtle)]">
+              {"★".repeat(Math.max(0, 5 - importance))}
+            </span>
+          </span>
+        ) : null}
         <SignalBadge direction={rel.signal_direction} />
         {change != null ? (
           <span className={`text-[11px] tabular-nums ${changeColor}`}>

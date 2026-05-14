@@ -267,8 +267,12 @@ def compose(
                 confidence=rel.confidence,
                 source=rel.source,
                 source_url=rel.source_url,
+                rationale=rel.rationale,
                 valid_from=rel.valid_from,
                 valid_until=rel.valid_until,
+                customer_concentration_pct=rel.customer_concentration_pct,
+                target_is_public=rel.target_is_public,
+                business_importance=rel.business_importance,
             )
         )
 

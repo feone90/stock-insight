@@ -101,6 +101,11 @@ export interface Relation {
   // 10-K Item 1A LLM RAG (Codex I) 가 contract_customer rationale 안에서
   // 추출한 정량 매출 의존 % (0~100). 30%+ 면 frontend 가 lock-in risk 강조.
   customer_concentration_pct?: number | null;
+  // 2026-05-15 — llm_knowledge source 가 채움. target_is_public=false 면
+  // 비상장 (OpenAI/SpaceX 등) → 가격/차트 link 없이 read-only chip 표시.
+  // business_importance 1-5 ★ 시각화.
+  target_is_public?: boolean;
+  business_importance?: number | null;
 }
 
 export interface RelationsSummary {

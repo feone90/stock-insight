@@ -23,6 +23,7 @@ from app.database import async_session
 from app.models import Financial, News, PriceHistory, Stock
 from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.relation import StockRelation
+from app.models.relation_candidate import RelationCandidate
 from app.collectors.krx_flow import fetch_kr_flow
 from app.schemas.card import (
     AnalystRating,
@@ -463,6 +464,8 @@ def _build_relations(
                 valid_from=r.get("valid_from"),
                 valid_until=r.get("valid_until"),
                 customer_concentration_pct=cc,
+                target_is_public=bool(r.get("target_is_public", True)),
+                business_importance=r.get("business_importance"),
             )
         )
     return out
@@ -873,6 +876,11 @@ async def _fetch_relations_data(ticker: str) -> dict:
                     "customer_concentration_pct": (
                         metadata.get("customer_concentration_pct") if isinstance(metadata, dict) else None
                     ),
+                    # 2026-05-15 — llm_knowledge source 가 metadata 에 박는다.
+                    "business_importance": (
+                        metadata.get("business_importance") if isinstance(metadata, dict) else None
+                    ),
+                    "target_is_public": True,  # StockRelation 은 항상 상장 universe
                     "valid_from": r.valid_from.isoformat() if r.valid_from else None,
                     "valid_until": r.valid_until.isoformat() if r.valid_until else None,
                 }
@@ -887,6 +895,44 @@ async def _fetch_relations_data(ticker: str) -> dict:
         # 별도 background task — read 응답 지연 X.
         if hallucination_ids:
             asyncio.create_task(_soft_delete_relations(hallucination_ids))
+
+        # 2026-05-15 — knowledge_relations 의 비상장 entity (OpenAI, SpaceX 등)
+        # 는 RelationCandidate 에 source="llm_knowledge" 로 buffer. 카드에 별도
+        # "전략 파트너 (비상장)" 으로 surface 해서 사용자가 진짜 중요한 관계 봄.
+        # candidate 는 universe gap 으로 promote 안 됐을 뿐, 데이터 quality 동일.
+        cand_rows = (
+            await db.execute(
+                select(RelationCandidate).where(
+                    RelationCandidate.from_ticker == ticker,
+                    RelationCandidate.source == "llm_knowledge",
+                    RelationCandidate.promoted_at.is_(None),
+                )
+            )
+        ).scalars().all()
+        for c in cand_rows:
+            c_meta = c.extra_metadata or {}
+            target_name = (
+                c_meta.get("target_name") if isinstance(c_meta, dict) else None
+            ) or c.to_ticker
+            relations.append({
+                "target_ticker": c.to_ticker,
+                "target_name": target_name,
+                "relation_type": c.relation_type,
+                "strength": c.strength if c.strength is not None else 0.6,
+                "today_change_pct": None,  # 비상장 — 시세 없음
+                "signal_direction": c.signal_direction or "positive",
+                "confidence": c.confidence if c.confidence is not None else 0.7,
+                "source": c.source,
+                "source_url": None,
+                "rationale": c_meta.get("rationale") if isinstance(c_meta, dict) else None,
+                "customer_concentration_pct": None,
+                "business_importance": (
+                    c_meta.get("business_importance") if isinstance(c_meta, dict) else None
+                ),
+                "target_is_public": False,  # 비상장 — frontend 가 다르게 그림
+                "valid_from": None,
+                "valid_until": None,
+            })
 
         is_stale = (
             latest_refresh is not None
