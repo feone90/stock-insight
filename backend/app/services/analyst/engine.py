@@ -308,6 +308,8 @@ def compose(
         generated_at=datetime.now(timezone.utc),
         persona_version=PERSONA_VERSION,
         schema_version="v2",
+        price_asof=data.price_asof,
+        news_latest_at=data.news_latest_at,
     )
 
 

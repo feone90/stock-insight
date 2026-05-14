@@ -370,6 +370,13 @@ class StockCard(BaseModel):
     schema_version: str = "v1"
     refresh_state: Literal["fresh", "stale", "loading", "error"] = "fresh"
 
+    # Per-layer freshness (3-way refresh split, 2026-05-14). Each data layer
+    # decays at a different rate — price intraday, news hourly, AI 의견 only when
+    # thesis changes — so the card surfaces a separate "마지막 갱신" timestamp
+    # under each refresh button instead of one global generated_at.
+    price_asof: datetime | None = None
+    news_latest_at: datetime | None = None
+
 
 # === Layered output (data vs analyst) — composed into StockCard at engine ===
 
@@ -393,6 +400,13 @@ class DataLayer(BaseModel):
     political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []
     data_citations: list[Citation] = []
+
+    # Per-layer freshness — surfaced to the card so each refresh button can
+    # render its own "마지막 갱신: N분 전" badge. compose() pipes these into
+    # StockCard.{price_asof,news_latest_at}. None means we couldn't determine
+    # (no rows in PriceHistory/News yet).
+    price_asof: datetime | None = None
+    news_latest_at: datetime | None = None
 
 
 class RelationsNarrative(BaseModel):

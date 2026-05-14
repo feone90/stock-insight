@@ -134,11 +134,20 @@ export async function refreshStockCard(ticker: string): Promise<StockCard> {
 }
 
 /**
- * LLM 0 — underlying 데이터(가격/뉴스/공시/재무) 만 동기화. 카드 분석 narrative
- * 는 안 건드림. 차트·가격 즉시 갱신, 카드 내 펀더멘털/수급 등은 다음 'AI 의견
- * 다시' 시점에 반영. 1분 cooldown.
+ * 가격만 즉시 갱신 (sync_prices 1개 콜렉터). LLM 0, 외부 API 1회.
+ * 차트·헤더 가격 즉시 fresh. 30s cooldown.
  */
-export async function dataRefreshStock(
+export async function priceRefreshStock(
+  ticker: string,
+): Promise<{ status: string; ticker: string }> {
+  return postJson(`/api/stocks/${ticker}/price_refresh`);
+}
+
+/**
+ * 뉴스·공시 갱신 + 새 뉴스 ≥ 2건이면 AI narrative 자동 재생성. 2분 cooldown.
+ * 가격은 별도 `/price_refresh`. 재무는 분기 단위라 야간 cron 처리.
+ */
+export async function newsRefreshStock(
   ticker: string,
 ): Promise<{ status: string; ticker: string }> {
   return postJson(`/api/stocks/${ticker}/data_refresh`);

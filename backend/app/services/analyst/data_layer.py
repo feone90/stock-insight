@@ -16,10 +16,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func as _f
 from sqlalchemy import select
 
 from app.database import async_session
-from app.models import Financial, News, Stock
+from app.models import Financial, News, PriceHistory, Stock
 from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.relation import StockRelation
 from app.collectors.krx_flow import fetch_kr_flow
@@ -96,7 +97,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
 
     (
         indicators_co, macro_co, fund_co, news_co, rel_co, pol_co,
-        flow_co, ins_co, earn_co, anal_co, pt_co,
+        flow_co, ins_co, earn_co, anal_co, pt_co, ts_co,
     ) = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
@@ -109,6 +110,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         _fetch_earnings(ticker),
         _fetch_analyst_rating(ticker),
         _fetch_price_target(ticker),
+        _fetch_data_timestamps(ticker),
         return_exceptions=True,
     )
 
@@ -130,6 +132,8 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         # Fire-and-forget background refresh — do NOT await
         asyncio.create_task(_bg_refresh_relations(ticker))
 
+    price_asof, news_latest_at = _unpack_timestamps(ts_co)
+
     return DataLayer(
         technical=technical,
         macro=macro,
@@ -143,6 +147,8 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         political_signals=political_signals,
         relations_data=relations_data,
         data_citations=pool.items,
+        price_asof=price_asof,
+        news_latest_at=news_latest_at,
     )
 
 
@@ -699,6 +705,59 @@ def _build_political_signals(res: Any) -> list[PoliticalSignalCard]:
         except Exception as e:  # noqa: BLE001
             logger.warning("political signal validation skip: %s", e)
     return out
+
+
+async def _fetch_data_timestamps(ticker: str) -> dict:
+    """Per-layer "마지막 갱신" 시각을 한 번에 계산해 카드에 넘긴다.
+
+    sync_prices / sync_news 가 새 row 를 박을 때마다 자동 갱신 — 별도 sync
+    log 테이블 필요 없음.
+
+    - price_asof : MAX(PriceHistory.date) — 가장 최근 봉 (sync_prices 가
+      오늘 봉을 박으면 즉시 today). date 컬럼이라 자정 UTC 로 변환.
+    - news_latest_at : MAX(News.published_at) — 우리가 가지고 있는 가장
+      최신 뉴스 발행 시각.
+    """
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock:
+            return {"price_asof": None, "news_latest_at": None}
+        price_row = (
+            await db.execute(
+                select(_f.max(PriceHistory.date)).where(
+                    PriceHistory.stock_id == stock.id
+                )
+            )
+        ).scalar()
+        news_row = (
+            await db.execute(
+                select(_f.max(News.published_at)).where(News.stock_id == stock.id)
+            )
+        ).scalar()
+
+    price_asof: datetime | None = None
+    if price_row is not None:
+        if isinstance(price_row, datetime):
+            price_asof = price_row
+        else:
+            # SQLAlchemy Date column → datetime.date — promote to UTC midnight.
+            price_asof = datetime.combine(price_row, datetime.min.time(), tzinfo=timezone.utc)
+
+    news_latest_at: datetime | None = None
+    if isinstance(news_row, datetime):
+        news_latest_at = news_row
+
+    return {"price_asof": price_asof, "news_latest_at": news_latest_at}
+
+
+def _unpack_timestamps(res: Any) -> tuple[datetime | None, datetime | None]:
+    if isinstance(res, Exception) or not isinstance(res, dict):
+        if isinstance(res, Exception):
+            logger.warning("data_layer timestamps failed: %s", res)
+        return None, None
+    return res.get("price_asof"), res.get("news_latest_at")
 
 
 async def _fetch_recent_news(ticker: str) -> dict:

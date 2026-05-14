@@ -166,9 +166,64 @@ async def trigger_analyze(
     return {"status": "queued", "ticker": ticker.upper()}
 
 
+# 3-way refresh split (2026-05-14, user 피드백 + Codex 시니어 리뷰).
+# "데이터 새로고침" 한 버튼에 가격/뉴스/재무/공시 + smart analyze 까지 묶어
+# 두니 (a) 라벨이 모호하고 (b) "주가만 새로고침" 이 외부 API 4-5 개 다 도느라
+# 늘리고 (c) "언제 갱신됐는지" 가 통째로만 표시돼 사용자가 가격이 fresh 인지
+# 뉴스가 fresh 인지 분간 못 함. → 각 layer 자기 cooldown + 자기 timestamp.
+_last_price_refresh: dict[str, float] = {}
+_PRICE_REFRESH_COOLDOWN_S = 30  # 30s — 가격은 가벼움. 클릭 즉시 fresh quote.
+
 _last_data_refresh: dict[str, float] = {}
-_DATA_REFRESH_COOLDOWN_S = 60  # 1분 — 외부 API rate limit 보호. AI 의견 다시 의
-# 300s(5분)보다 가볍게 — LLM cost 0 이라 더 자주 가능.
+_DATA_REFRESH_COOLDOWN_S = 120  # 2분 — 뉴스/공시는 외부 API 무거움. 1분 시
+# 가족 5명 새로고침 갈겨도 외부 rate-limit 보호.
+
+
+@router.post("/{ticker}/price_refresh", status_code=202)
+async def price_refresh(
+    ticker: str,
+    bg: BackgroundTasks,
+    stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """가격만 동기화 — sync_prices 1개 콜렉터. LLM 0, 외부 API 1개.
+
+    2026-05-14 사용자 통찰: "주가만 새로고침하면 더 빨라야 하는데 늦어 —
+    불필요한 작업하고있는거 아니야?". 옛 `data_refresh` 는 sync_prices +
+    sync_news + sync_financials + sync_disclosures 를 직렬로 돌려서 가격
+    하나 갱신에 외부 API 4-5 곳을 두드렸다. 가격은 가장 빨리 변하고 (1-2 분),
+    가장 가볍게 (yfinance 1 콜) 받을 수 있어야 한다.
+
+    효과 (즉시): 차트·헤더 가격 endpoint (`GET /prices`, `GET /stocks/{ticker}`)
+    가 매번 fresh DB query → 이 엔드포인트 호출 직후 즉시 새 가격 + price_asof
+    노출.
+
+    30s cooldown — 외부 yfinance rate limit + 가족이 무지성 클릭해도 안전.
+    """
+    key = ticker.upper()
+    now = time.monotonic()
+    last = _last_price_refresh.get(key, 0.0)
+    if now - last < _PRICE_REFRESH_COOLDOWN_S:
+        remaining = int(_PRICE_REFRESH_COOLDOWN_S - (now - last))
+        raise HTTPException(429, f"cooldown: try again in {remaining}s")
+    _last_price_refresh[key] = now
+
+    async def _sync_price_only() -> None:
+        async with async_session() as own_db:
+            fresh = (
+                await own_db.execute(
+                    select(Stock).where(Stock.ticker == ticker)
+                )
+            ).scalar_one_or_none()
+            if not fresh:
+                return
+            try:
+                await sync_prices(own_db, fresh)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("price_refresh %s sync_prices failed: %s", ticker, e)
+
+    bg.add_task(_sync_price_only)
+    return {"status": "price_refresh_queued", "ticker": key}
 
 
 @router.post("/{ticker}/data_refresh", status_code=202)
@@ -178,21 +233,17 @@ async def data_refresh(
     stock: Stock = Depends(get_stock_or_404),
     db: AsyncSession = Depends(get_db),
 ):
-    """LLM 0 — underlying 데이터만 동기화 (price/news/financials/disclosures).
+    """뉴스·공시 동기화 + 새 뉴스 임계치 도달 시 AI narrative 자동 재생성.
 
-    2026-05-14 사용자 통찰: "실시간값이랑 새로 추가된 뉴스가 있으면 그정도
-    + 의견변경 정도 말고는 없지않나". `/refresh` 는 LLM 2-stage 파이프라인
-    풀로 다시 돌아 $0.25 → cost 낭비. 데이터만 새로 받고 AI 의견은 기존
-    유지가 가족 dev 비용 효율.
+    2026-05-14 split: 가격(별도 `/price_refresh`) 과 재무(분기 단위 → 야간 cron)
+    는 빠짐. 이 엔드포인트가 책임지는 layer:
+      - News (sync_news)
+      - 공시 (sync_disclosures)
+      - smart-trigger: 마지막 카드 생성 시점 이후 새 뉴스 ≥ 2건이면 `analyze()`
+        자동 호출 (의견 자체가 바뀔만한 trigger 일 때만 LLM $0.25 지출).
 
-    효과:
-    - 차트·가격: 별도 GET /prices · /stocks/{ticker} endpoint 가 매번 fresh
-      DB query → 이 endpoint 호출 후 즉시 새 가격 노출.
-    - 카드 내 펀더멘털/수급/관계/실적·분석가 등: card_data JSON 에 박혀
-      있어 이 endpoint 로는 안 바뀜. AI 의견 다시 (`/refresh`) 클릭 시
-      그 시점에 새 data + new LLM narrative 로 풀 rebuild.
-
-    1분 cooldown — 외부 API rate limit 보호.
+    URL 은 `/data_refresh` 그대로 둠 — frontend rename 만 (`refreshNews`)
+    하고 backend path 는 호환성 위해 유지. 2분 cooldown — 외부 API 보호.
     """
     key = ticker.upper()
     now = time.monotonic()
@@ -202,16 +253,11 @@ async def data_refresh(
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
     _last_data_refresh[key] = now
 
-    # 사용자 vision(2026-05-14): "news가 영향력있는게 올라왔는지 재수집 하고
-    # 없으면 없는거고 있으면 전체적인 의견자체가 바뀔수있는거고". 새 뉴스가
-    # 마지막 분석 시점 이후 N건 이상이면 narrative LLM 자동 trigger. 미만이면
-    # LLM 호출 0 — 가족 dev 비용 효율 + 사용자가 한 번 click 으로 정직한
-    # decision-fresh card 받음.
     _NEWS_TRIGGER_THRESHOLD = 2  # 새 뉴스 2건+ → AI 의견 자동 재생성
 
-    async def _sync_underlying_and_maybe_analyze() -> None:
+    async def _sync_news_and_maybe_analyze() -> None:
+        from app.models import News as _News
         from app.models import Stock as _Stock
-        from app.models import News
         from sqlalchemy import func as _f
 
         async with async_session() as own_db:
@@ -223,8 +269,6 @@ async def data_refresh(
             if not fresh:
                 return
 
-            # 1) 마지막 카드 생성 시점 (narrative 시점) — 이걸 baseline 으로
-            #    "이후 새로 들어온 뉴스" 만 영향력 평가 대상.
             last_card = (
                 await own_db.execute(
                     select(Analysis.generated_at)
@@ -237,8 +281,7 @@ async def data_refresh(
                 )
             ).scalar_one_or_none()
 
-            # 2) underlying sync — 가격/뉴스/재무/공시 (LLM 0)
-            for fn in (sync_prices, sync_news, sync_financials, sync_disclosures):
+            for fn in (sync_news, sync_disclosures):
                 try:
                     await fn(own_db, fresh)
                 except Exception as e:  # noqa: BLE001
@@ -247,19 +290,16 @@ async def data_refresh(
                         ticker, fn.__name__, e,
                     )
 
-            # 3) significance 평가 — 마지막 분석 이후 새 뉴스 N건+ 이면 AI
-            #    narrative 자동 trigger. 없으면 sync 만 끝.
             if last_card is None:
-                # 한 번도 분석 안 된 종목 — analyze 가 카드 생성. trigger.
                 new_news_count = 999
             else:
                 new_news_count = (
                     await own_db.execute(
                         select(_f.count())
-                        .select_from(News)
+                        .select_from(_News)
                         .where(
-                            News.stock_id == fresh.id,
-                            News.published_at > last_card,
+                            _News.stock_id == fresh.id,
+                            _News.published_at > last_card,
                         )
                     )
                 ).scalar() or 0
@@ -281,7 +321,7 @@ async def data_refresh(
                 ticker, new_news_count, _NEWS_TRIGGER_THRESHOLD,
             )
 
-    bg.add_task(_sync_underlying_and_maybe_analyze)
+    bg.add_task(_sync_news_and_maybe_analyze)
     return {
         "status": "data_refresh_queued",
         "ticker": key,

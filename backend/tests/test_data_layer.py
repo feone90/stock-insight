@@ -13,11 +13,12 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 
-from app.models import News, Stock
+from app.models import News, PriceHistory, Stock
 from app.models.relation import StockRelation
 from app.schemas.card import DataLayer
 from app.services.analyst.data_layer import (
     _CitationPool,
+    _fetch_data_timestamps,
     _fetch_recent_news,
     _fetch_relations_data,
     assemble_data_layer,
@@ -96,6 +97,7 @@ def _patch_all_fetches(
     news=None,
     relations=None,
     classify=None,
+    timestamps=None,
 ):
     monkeypatch.setattr(
         "app.services.analyst.data_layer.get_indicators",
@@ -116,6 +118,14 @@ def _patch_all_fetches(
     monkeypatch.setattr(
         "app.services.analyst.data_layer._fetch_relations_data",
         AsyncMock(return_value=relations if relations is not None else _full_relations_response()),
+    )
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer._fetch_data_timestamps",
+        AsyncMock(
+            return_value=timestamps
+            if timestamps is not None
+            else {"price_asof": None, "news_latest_at": None}
+        ),
     )
     monkeypatch.setattr(
         "app.services.analyst.data_layer.llm_classify_news",
@@ -217,6 +227,7 @@ async def test_assemble_uses_asyncio_gather(monkeypatch):
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_earnings", slow)
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_analyst_rating", slow)
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_price_target", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_data_timestamps", slow)
     monkeypatch.setattr(
         "app.services.analyst.data_layer.llm_classify_news",
         AsyncMock(return_value={"items": []}),
@@ -327,6 +338,58 @@ async def test_fetch_stock_identity_returns_db_fields(db_for_data_layer):
     assert out["sector"] == "반도체"
     assert out["price"] == 88.5
     assert isinstance(out["asof"], datetime)
+
+
+@pytest.mark.asyncio
+async def test_fetch_data_timestamps_reads_latest_rows(db_for_data_layer):
+    """price_asof = MAX(PriceHistory.date), news_latest_at = MAX(News.published_at).
+
+    카드 헤더의 "가격: N분 전" / "최신 뉴스: HH:MM" 표시는 이 두 값으로
+    결정된다. 새 가격/뉴스 sync 가 들어오면 즉시 카드에 반영되어야 함.
+    """
+    db = db_for_data_layer
+    s = Stock(ticker="TS1", name="x", market="KRX", sector="x", current_price=10)
+    db.add(s)
+    await db.flush()
+
+    latest_news_at = datetime.utcnow() - timedelta(hours=2)
+    db.add_all([
+        PriceHistory(stock_id=s.id, date=date.today(), open=1, high=1, low=1, close=1, volume=1),
+        PriceHistory(stock_id=s.id, date=date.today() - timedelta(days=5), open=1, high=1, low=1, close=1, volume=1),
+        News(stock_id=s.id, title="recent", source="src", url="https://e.com/recent", published_at=latest_news_at, content="x"),
+        News(stock_id=s.id, title="older", source="src", url="https://e.com/older", published_at=datetime.utcnow() - timedelta(days=4), content="x"),
+    ])
+    await db.commit()
+
+    res = await _fetch_data_timestamps("TS1")
+    # PriceHistory.date 는 date — fetcher 가 UTC midnight 으로 promote.
+    assert res["price_asof"] is not None
+    assert res["price_asof"].date() == date.today()
+    # News.published_at 는 datetime — 가장 최근(2시간 전) 값이 그대로.
+    assert res["news_latest_at"] == latest_news_at
+
+
+@pytest.mark.asyncio
+async def test_fetch_data_timestamps_returns_none_for_empty_stock(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="TS2", name="x", market="KRX", sector="x", current_price=10)
+    db.add(s)
+    await db.commit()
+    res = await _fetch_data_timestamps("TS2")
+    assert res == {"price_asof": None, "news_latest_at": None}
+
+
+@pytest.mark.asyncio
+async def test_assemble_propagates_timestamps_into_data_layer(monkeypatch):
+    """DataLayer.price_asof / news_latest_at 가 채워져야 카드 헤더에 노출됨."""
+    now = datetime.utcnow()
+    _patch_all_fetches(
+        monkeypatch,
+        timestamps={"price_asof": now, "news_latest_at": now - timedelta(minutes=30)},
+    )
+    out = await assemble_data_layer("DL_TS")
+    assert out.price_asof == now
+    assert out.news_latest_at == now - timedelta(minutes=30)
 
 
 def test_citation_pool_assigns_sequential_ids():

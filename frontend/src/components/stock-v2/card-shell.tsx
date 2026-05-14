@@ -1,7 +1,7 @@
 "use client";
 
-import { Moon, RefreshCw, Star, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Brain, LineChart, Moon, Newspaper, RefreshCw, Star, Sun } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { addFavorite, getStock, removeFavorite } from "@/services/api";
 import { onUserChanged } from "@/services/user";
 import { useStockCard } from "@/lib/use-stock-card";
@@ -51,17 +51,29 @@ function formatKoRelative(d: Date | null, now: number): string {
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
-  const { card, state, refresh, refreshData, triggerAnalyze } = useStockCard(ticker);
+  const { card, state, refresh, refreshPrice, refreshNews, triggerAnalyze } =
+    useStockCard(ticker);
   const refreshing = state === "analyzing";
-  const [dataRefreshing, setDataRefreshing] = useState(false);
+  const [priceRefreshing, setPriceRefreshing] = useState(false);
+  const [newsRefreshing, setNewsRefreshing] = useState(false);
 
-  const handleDataRefresh = async () => {
-    if (dataRefreshing) return;
-    setDataRefreshing(true);
+  const handlePriceRefresh = async () => {
+    if (priceRefreshing) return;
+    setPriceRefreshing(true);
     try {
-      await refreshData();
+      await refreshPrice();
     } finally {
-      setDataRefreshing(false);
+      setPriceRefreshing(false);
+    }
+  };
+
+  const handleNewsRefresh = async () => {
+    if (newsRefreshing) return;
+    setNewsRefreshing(true);
+    try {
+      await refreshNews();
+    } finally {
+      setNewsRefreshing(false);
     }
   };
 
@@ -77,6 +89,8 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   }, []);
 
   const generatedAt = card?.generated_at ? new Date(card.generated_at) : null;
+  const priceAsof = card?.price_asof ? new Date(card.price_asof) : null;
+  const newsLatestAt = card?.news_latest_at ? new Date(card.news_latest_at) : null;
   const sinceMs = generatedAt ? now - generatedAt.getTime() : Infinity;
   const cooldownActive = sinceMs < REFRESH_COOLDOWN_MS;
   const cooldownLeftMin = cooldownActive
@@ -108,7 +122,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
       <div className="mx-auto max-w-[1200px] px-4 py-6 md:py-8">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between">
           <div className="text-xs text-[var(--surface-text-subtle)]">
             {card ? card.ticker : ticker}
           </div>
@@ -126,52 +140,6 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                 className={isFav ? "fill-yellow-400 text-yellow-400" : ""}
               />
             </button>
-            {card ? (
-              <>
-                {generatedAt && (
-                  <span
-                    className="hidden md:inline text-xs text-[var(--surface-text-subtle)]"
-                    title={generatedAt.toLocaleString("ko-KR")}
-                  >
-                    {cooldownActive
-                      ? `AI 의견 ${cooldownLeftMin}분 뒤 가능`
-                      : `AI 의견 ${formatKoRelative(generatedAt, now)}`}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleDataRefresh}
-                  disabled={dataRefreshing}
-                  aria-label="데이터 새로고침"
-                  title="가격·뉴스·재무·공시만 새로 받기 — LLM 비용 0, 1분 cooldown. AI 의견은 그대로 유지."
-                  className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw size={16} className={dataRefreshing ? "animate-spin" : ""} />
-                  <span className="hidden sm:inline">
-                    {dataRefreshing ? "받는 중..." : "데이터 새로고침"}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={refresh}
-                  disabled={refreshing || cooldownActive}
-                  aria-label="AI 의견 다시 실행"
-                  title={
-                    refreshing
-                      ? "AI 분석 중..."
-                      : cooldownActive
-                      ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
-                      : "AI 의견 다시 실행 (~$0.25 LLM, 1분 소요)"
-                  }
-                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
-                  <span className="hidden sm:inline">
-                    {refreshing ? "분석 중..." : "AI 의견 다시"}
-                  </span>
-                </button>
-              </>
-            ) : null}
             <button
               type="button"
               onClick={toggle}
@@ -182,6 +150,55 @@ export function StockCardPage({ ticker }: { ticker: string }) {
             </button>
           </div>
         </div>
+
+        {card ? (
+          <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <RefreshAction
+              icon={<LineChart size={16} />}
+              label="가격 새로고침"
+              busyLabel="받는 중..."
+              busy={priceRefreshing}
+              onClick={handlePriceRefresh}
+              timestamp={priceAsof}
+              timestampPrefix="가격"
+              now={now}
+              tone="neutral"
+              title="현재가·차트만 즉시 갱신 — 외부 API 1콜, ~2초. 30초 cooldown."
+            />
+            <RefreshAction
+              icon={<Newspaper size={16} />}
+              label="뉴스·공시 새로고침"
+              busyLabel="받는 중..."
+              busy={newsRefreshing}
+              onClick={handleNewsRefresh}
+              timestamp={newsLatestAt}
+              timestampPrefix="최신 뉴스"
+              now={now}
+              tone="info"
+              title="새 뉴스/공시 수집 — 새 뉴스 2건+이면 AI 의견도 자동 재생성. 2분 cooldown."
+            />
+            <RefreshAction
+              icon={<Brain size={16} />}
+              label={refreshing ? "분석 중..." : "AI 의견 다시"}
+              busyLabel="분석 중..."
+              busy={refreshing}
+              disabled={cooldownActive}
+              onClick={refresh}
+              timestamp={generatedAt}
+              timestampPrefix="AI 의견"
+              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤 가능` : null}
+              now={now}
+              tone="warning"
+              title={
+                refreshing
+                  ? "AI 분석 중..."
+                  : cooldownActive
+                  ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
+                  : "전체 의견 재생성 — LLM 2-stage (~$0.25, 30~60초). 5분 cooldown."
+              }
+            />
+          </div>
+        ) : null}
 
         {state === "loading" && !card ? (
           <SkeletonCard />
@@ -233,6 +250,74 @@ export function StockCardPage({ ticker }: { ticker: string }) {
           </article>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+interface RefreshActionProps {
+  icon: ReactNode;
+  label: string;
+  busyLabel: string;
+  busy: boolean;
+  disabled?: boolean;
+  onClick: () => void | Promise<void>;
+  timestamp: Date | null;
+  timestampPrefix: string;
+  cooldownLabel?: string | null;
+  now: number;
+  tone: "neutral" | "info" | "warning";
+  title: string;
+}
+
+const TONE_CLASSES: Record<RefreshActionProps["tone"], string> = {
+  neutral:
+    "border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] text-[var(--surface-text)]",
+  info: "border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300",
+  warning:
+    "border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300",
+};
+
+function RefreshAction({
+  icon,
+  label,
+  busyLabel,
+  busy,
+  disabled,
+  onClick,
+  timestamp,
+  timestampPrefix,
+  cooldownLabel,
+  now,
+  tone,
+  title,
+}: RefreshActionProps) {
+  const relative = formatKoRelative(timestamp, now);
+  // cooldown 메시지가 있으면 그쪽이 더 actionable — "N분 뒤 가능" 가 사용자
+  // 입장에선 "마지막 갱신" 보다 즉시 의미 있는 정보. 없으면 timestamp 표시.
+  const subtext = cooldownLabel
+    ? cooldownLabel
+    : timestamp
+    ? `${timestampPrefix}: ${relative}`
+    : `${timestampPrefix} 데이터 없음`;
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy || disabled}
+        aria-label={label}
+        title={title}
+        className={`inline-flex items-center justify-center gap-1.5 rounded-md transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed ${TONE_CLASSES[tone]}`}
+      >
+        {busy ? <RefreshCw size={16} className="animate-spin" /> : icon}
+        <span>{busy ? busyLabel : label}</span>
+      </button>
+      <span
+        className="text-[11px] text-center text-[var(--surface-text-subtle)]"
+        title={timestamp ? timestamp.toLocaleString("ko-KR") : undefined}
+      >
+        {subtext}
+      </span>
     </div>
   );
 }

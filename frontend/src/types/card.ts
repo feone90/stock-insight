@@ -289,4 +289,10 @@ export interface StockCard {
   persona_version: string;
   schema_version: string;
   refresh_state: RefreshState;
+
+  // Per-layer freshness (3-way refresh split, 2026-05-14). Each refresh
+  // button renders its own "마지막 갱신 N분 전" badge under itself —
+  // generated_at is no longer the only timestamp shown.
+  price_asof?: string | null;
+  news_latest_at?: string | null;
 }

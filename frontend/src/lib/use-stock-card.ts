@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
   analyzeStock,
-  dataRefreshStock,
   getStockCard,
+  newsRefreshStock,
+  priceRefreshStock,
   refreshStockCard,
 } from "@/services/api";
 import type { StockCard } from "@/types/card";
@@ -56,7 +57,8 @@ export function useStockCard(ticker: string): {
   state: CardLoadState;
   error: string | null;
   refresh: () => Promise<void>;
-  refreshData: () => Promise<void>;
+  refreshPrice: () => Promise<void>;
+  refreshNews: () => Promise<void>;
   triggerAnalyze: () => Promise<void>;
 } {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -122,19 +124,37 @@ export function useStockCard(ticker: string): {
     });
   }, [ticker]);
 
-  const refreshData = useCallback(async () => {
-    // LLM 0 — underlying sync. card_data 안 바뀜 → 같은 generated_at 으로
-    // re-fetch 해도 카드 표면 변경 X. 차트·가격(별도 endpoint) 만 fresh.
-    // 진행 중 spinner 만 잠시 보임.
+  const refreshPrice = useCallback(async () => {
+    // sync_prices 1개만 — 외부 API 1콜, 가볍게. 카드 표면은 price_asof 만
+    // 바뀜 (generated_at 동일). 차트·헤더 가격은 즉시 fresh.
     try {
-      await dataRefreshStock(ticker);
+      await priceRefreshStock(ticker);
     } catch (e) {
-      // 429 (cooldown) 또는 transport 에러 — 무시 (button 그냥 다시 enable).
+      console.warn("price_refresh:", e);
+    }
+    // sync_prices 평균 2-3초 — 3초 후 re-fetch 면 새 PriceHistory 행이 박혀
+    // price_asof 가 update 된 카드 받음.
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const c = await getStockCard(ticker);
+      dispatch({ type: "loadOk", card: c });
+    } catch {
+      /* keep existing card */
+    }
+  }, [ticker]);
+
+  const refreshNews = useCallback(async () => {
+    // 뉴스+공시 sync + smart-trigger (≥ 2 new → analyze 자동). 카드 표면:
+    // news_latest_at 즉시 변경. 새 뉴스가 임계치 넘으면 backend 가 analyze()
+    // 호출해 generated_at 도 갱신되지만, 그건 별도 polling 안 함 — 사용자가
+    // 후속으로 카드를 다시 열거나 'AI 의견 다시' 누를 때 반영. (시니어
+    // 트레이더 리뷰: 한 버튼이 LLM trigger 까지 책임지면 사용자가 비용 발생
+    // 시점을 못 예측한다 — auto-trigger 는 의식적으로 silent 처리.)
+    try {
+      await newsRefreshStock(ticker);
+    } catch (e) {
       console.warn("data_refresh:", e);
     }
-    // 잠시 대기 (backend background sync 짧게 — 가격 sync ~2-5초). 그 후
-    // card 한 번 re-fetch 해서 generated_at 같지만 React state 새 ref 로
-    // 갱신 → 차트/가격 컴포넌트 re-render trigger.
     await new Promise((r) => setTimeout(r, 3000));
     try {
       const c = await getStockCard(ticker);
@@ -178,7 +198,8 @@ export function useStockCard(ticker: string): {
     state: state.status,
     error: state.error,
     refresh,
-    refreshData,
+    refreshPrice,
+    refreshNews,
     triggerAnalyze,
   };
 }
