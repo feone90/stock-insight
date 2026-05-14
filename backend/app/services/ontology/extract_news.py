@@ -192,6 +192,16 @@ async def _run_for_ticker(
                 continue
             relations.append(rel)
 
+    # 2026-05-15 — 2-pass LLM verification. 옛 substring 가드가 못 잡는
+    # paraphrase ("직접적인 관계까지는 아니지만 ~"), hedge ("관련 가능성"),
+    # mention-only ("같이 언급됨") 등을 의미 단위로 판정. batch 호출 1회
+    # ~$0.005-0.01. 실패 시 pass-through (boundary 안전).
+    from app.services.ontology.rationale_verifier import verify_rationales
+
+    pre_verify_count = len(relations)
+    relations = await verify_rationales(relations)
+    verifier_dropped = pre_verify_count - len(relations)
+
     summary = await validate_and_route(relations, source=_SOURCE, session=session)
     summary["ticker"] = ticker
     summary["articles_seen"] = len(articles)
@@ -201,6 +211,7 @@ async def _run_for_ticker(
     summary["evidence_dropped_target_missing"] = skipped_target_not_in_article
     summary["evidence_dropped_etf_pattern"] = skipped_rationale_etf
     summary["evidence_dropped_self_negating"] = skipped_self_negating
+    summary["verifier_dropped"] = verifier_dropped
     return summary
 
 
