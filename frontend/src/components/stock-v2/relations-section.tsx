@@ -106,6 +106,10 @@ function summariseRelations(rels: Relation[]): string {
   return `${actionable.length}개 · ${parts.join(", ")}`;
 }
 
+function isInverseCompetitor(r: Relation): boolean {
+  return r.relation_type === "competitor" && r.signal_direction === "inverse";
+}
+
 function RelationsExpanded({
   relations,
   selfTicker,
@@ -120,10 +124,20 @@ function RelationsExpanded({
   const filtered = (relations.relations ?? []).filter((r) =>
     CARD_ACTIONABLE_TYPES.has(r.relation_type),
   );
-  const sorted = [...filtered].sort((a, b) =>
-    compareRelations(a, b, selfIsKR),
-  );
-  if (sorted.length === 0) {
+  // Codex 권고 D: inverse competitor(=zero-sum)는 시니어가 가장 먼저 봐야 할
+  // 신호. 표 안 ⇄ 배지가 아니라 dedicated callout 으로 표 위에 띄움.
+  // 표에서는 제외 — 같은 정보 두 번 노출 방지 (cap 자리 절약).
+  const inverseCompetitors = filtered
+    .filter(isInverseCompetitor)
+    .sort((a, b) => {
+      const ca = (a.confidence ?? 0.5) * a.strength;
+      const cb = (b.confidence ?? 0.5) * b.strength;
+      return cb - ca;
+    });
+  const restSorted = [...filtered]
+    .filter((r) => !isInverseCompetitor(r))
+    .sort((a, b) => compareRelations(a, b, selfIsKR));
+  if (inverseCompetitors.length === 0 && restSorted.length === 0) {
     return (
       <div className="space-y-2">
         <p className="text-sm text-[var(--surface-text-muted)]">
@@ -144,27 +158,32 @@ function RelationsExpanded({
   const CAP = 6;
   return (
     <div className="space-y-3 text-sm">
-      <table className="w-full text-xs">
-        <thead className="text-[var(--surface-text-muted)]">
-          <tr>
-            <th className="text-left font-medium pb-1.5">종목 / 테마</th>
-            <th className="text-left font-medium pb-1.5">유형</th>
-            <th className="text-left font-medium pb-1.5">방향</th>
-            <th className="text-right font-medium pb-1.5">강도</th>
-            <th className="text-right font-medium pb-1.5">신뢰</th>
-            <th className="text-right font-medium pb-1.5">변동</th>
-            <th className="text-left font-medium pb-1.5 pl-2">출처</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.slice(0, CAP).map((r, i) => (
-            <RelationRow key={`${r.target_ticker}-${r.relation_type}-${r.source ?? i}`} rel={r} />
-          ))}
-        </tbody>
-      </table>
-      {sorted.length > CAP ? (
+      {inverseCompetitors.length > 0 ? (
+        <InverseCallout inverses={inverseCompetitors} />
+      ) : null}
+      {restSorted.length > 0 ? (
+        <table className="w-full text-xs">
+          <thead className="text-[var(--surface-text-muted)]">
+            <tr>
+              <th className="text-left font-medium pb-1.5">종목 / 테마</th>
+              <th className="text-left font-medium pb-1.5">유형</th>
+              <th className="text-left font-medium pb-1.5">방향</th>
+              <th className="text-right font-medium pb-1.5">강도</th>
+              <th className="text-right font-medium pb-1.5">신뢰</th>
+              <th className="text-right font-medium pb-1.5">변동</th>
+              <th className="text-left font-medium pb-1.5 pl-2">출처</th>
+            </tr>
+          </thead>
+          <tbody>
+            {restSorted.slice(0, CAP).map((r, i) => (
+              <RelationRow key={`${r.target_ticker}-${r.relation_type}-${r.source ?? i}`} rel={r} />
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+      {restSorted.length > CAP ? (
         <p className="text-xs text-[var(--surface-text-subtle)]">
-          + 핵심 관계 {sorted.length - CAP}개 더 + 동종업계/그룹/테마 등 부가
+          + 핵심 관계 {restSorted.length - CAP}개 더 + 동종업계/그룹/테마 등 부가
           관계 — 그래프에서 전체 보기
         </p>
       ) : (
@@ -179,6 +198,77 @@ function RelationsExpanded({
         >
           Ontology 그래프 →
         </a>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Zero-sum (inverse competitor) dedicated callout.
+ *
+ * 2026-05-14 Codex 시니어 트레이더 권고 D: "한쪽이 이기면 다른 쪽이 진다"
+ * 식 신호는 매매 판단에서 가장 먼저 보는 정보. 표 안 ⇄ 배지로는 묻힘 —
+ * 표 위에 큰 박스로 띄워 시니어가 첫 줄에서 잡도록.
+ *
+ * 카피 가이드(memory: feedback_card_user_facing_copy): 약어 X, 비유 자연어.
+ */
+function InverseCallout({ inverses }: { inverses: Relation[] }) {
+  const TOP = 3;
+  return (
+    <div className="relative rounded-md border-2 border-blue-500/40 dark:border-blue-500/30 bg-blue-500/5 pl-4 pr-3 py-3 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-blue-500 before:rounded-l-md before:content-['']">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded text-[10px] font-semibold">
+          zero-sum 신호
+        </span>
+        <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+          ⇄ 한쪽이 이기면 다른 쪽이 진다
+        </span>
+      </div>
+      <ul className="space-y-2">
+        {inverses.slice(0, TOP).map((r, i) => {
+          const conf = Math.round((r.confidence ?? 0.5) * 100);
+          const sourceLabel = r.source ? SOURCE_LABEL[r.source] ?? r.source : null;
+          return (
+            <li key={`${r.target_ticker}-${i}`} className="text-sm">
+              <div className="flex flex-wrap items-baseline gap-1.5">
+                <span className="font-medium">{r.target_name}</span>
+                {r.target_ticker && r.target_ticker !== r.target_name ? (
+                  <span className="text-xs text-[var(--surface-text-muted)]">
+                    ({r.target_ticker})
+                  </span>
+                ) : null}
+                <span className="text-xs text-[var(--surface-text-subtle)]">
+                  · 신뢰 {conf}%
+                  {sourceLabel ? ` · 출처 ${sourceLabel}` : ""}
+                </span>
+              </div>
+              {r.rationale ? (
+                <p className="mt-0.5 text-xs text-[var(--surface-text-muted)] leading-snug">
+                  {r.rationale}
+                </p>
+              ) : (
+                <p className="mt-0.5 text-xs text-[var(--surface-text-subtle)] italic">
+                  같은 시장에서 직접 경쟁 — 점유율 이동에 반대로 반응
+                </p>
+              )}
+              {r.source_url ? (
+                <a
+                  href={r.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  원문 보기 ↗
+                </a>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {inverses.length > TOP ? (
+        <p className="mt-2 text-[11px] text-[var(--surface-text-subtle)]">
+          + zero-sum 경쟁자 {inverses.length - TOP}명 더 — 그래프에서 전체 보기
+        </p>
       ) : null}
     </div>
   );
