@@ -28,6 +28,8 @@ from app.schemas.card import (
     DataLayer,
     Flow,
     Fundamentals,
+    Insider,
+    InsiderFiling,
     MacroContext,
     NewsItem,
     PoliticalSignalCard,
@@ -90,7 +92,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     ticker = ticker.strip().upper()
 
     (
-        indicators_co, macro_co, fund_co, news_co, rel_co, pol_co, flow_co,
+        indicators_co, macro_co, fund_co, news_co, rel_co, pol_co, flow_co, ins_co,
     ) = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
@@ -99,6 +101,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         _fetch_relations_data(ticker),
         _fetch_political_signals(ticker),
         _fetch_flow(ticker),
+        _fetch_insider(ticker),
         return_exceptions=True,
     )
 
@@ -111,6 +114,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     relations_data = _build_relations(rel_co, ticker, pool)
     political_signals = _build_political_signals(pol_co)
     flow = _build_flow(flow_co, pool)
+    insider = _build_insider(ins_co, pool)
 
     if isinstance(rel_co, dict) and rel_co.get("is_stale"):
         # Fire-and-forget background refresh — do NOT await
@@ -121,6 +125,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         macro=macro,
         fundamentals=fundamentals,
         flow=flow,
+        insider=insider,
         news=news,
         political_signals=political_signals,
         relations_data=relations_data,
@@ -174,6 +179,43 @@ def _build_macro(res: Any, pool: _CitationPool) -> MacroContext | None:
         sensitivities=[],
         upcoming_events=res.get("upcoming_events", []),
         citations=[cid],
+    )
+
+
+_SEC_ARCHIVE_URL = (
+    "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=4"
+)
+
+
+def _build_insider(res: Any, pool: _CitationPool) -> Insider | None:
+    """SEC Form 4 fetch 결과 → Insider. filing 0건 또는 fail 이면 None."""
+    if res is None or isinstance(res, Exception) or not isinstance(res, dict):
+        if isinstance(res, Exception):
+            logger.warning("data_layer insider failed: %s", res)
+        return None
+    filings = res.get("filings") or []
+    if not filings:
+        return None
+    cik = res.get("cik")
+    pool.add(
+        "disclosure",
+        f"SEC EDGAR · Form 4 (최근 {res.get('window_days', 30)}일)",
+        url=_SEC_ARCHIVE_URL.format(cik=cik) if cik else None,
+    )
+    recent = [
+        InsiderFiling(
+            filing_date=f.get("filing_date"),
+            accession=f.get("accession"),
+            url=f.get("url"),
+        )
+        for f in filings[:10]  # cap UI 노출
+        if f.get("filing_date") and f.get("accession")
+    ]
+    return Insider(
+        window_days=res.get("window_days", 30),
+        filing_count=len(filings),
+        recent=recent,
+        as_of=res.get("as_of"),
     )
 
 
@@ -333,6 +375,65 @@ def _build_relations(
 # ---------------------------------------------------------------------------
 # DB-backed fetchers (own session)
 # ---------------------------------------------------------------------------
+
+
+_FORM4_WINDOW_DAYS = 30
+
+
+async def _fetch_insider(ticker: str) -> dict | None:
+    """US 종목 한정 — SEC Form 4 최근 30일 filings. KR 종목은 None."""
+    from app.markets import is_us
+    from app.services.external_data_adapters import get_adapter_for
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock or not is_us(stock.market):
+            return None
+
+    adapter = get_adapter_for(ticker)
+    if adapter is None or not hasattr(adapter, "fetch_form4_filings"):
+        return None
+
+    since = (datetime.utcnow() - timedelta(days=_FORM4_WINDOW_DAYS)).date()
+    try:
+        filings = await adapter.fetch_form4_filings(ticker, since=since)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Form 4 fetch failed for %s: %s", ticker, e)
+        return None
+
+    if not filings:
+        return None
+    cik = filings[0].get("cik")
+    cik_int = str(int(cik)) if cik else None
+    out_filings: list[dict] = []
+    for f in filings:
+        acc = f.get("accession") or ""
+        primary = f.get("primary_document")
+        url = None
+        if cik_int and acc and primary:
+            acc_no_dashes = acc.replace("-", "")
+            url = (
+                f"https://www.sec.gov/Archives/edgar/data/"
+                f"{cik_int}/{acc_no_dashes}/{primary}"
+            )
+        out_filings.append(
+            {
+                "filing_date": f.get("filing_date"),
+                "accession": acc,
+                "url": url,
+            }
+        )
+    return {
+        "cik": cik,
+        "window_days": _FORM4_WINDOW_DAYS,
+        "filings": out_filings,
+        "as_of": (
+            max((f.get("filing_date") or "" for f in out_filings), default=None)
+            or None
+        ),
+    }
 
 
 async def _fetch_flow(ticker: str) -> dict | None:

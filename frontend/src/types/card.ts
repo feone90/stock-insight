@@ -142,6 +142,20 @@ export interface Fundamentals {
   citations: number[];
 }
 
+// US-only — SEC Form 4 (임원 매매 신고) 최근 N일 요약.
+// KR 종목은 null. 매수/매도 transaction code 분류는 follow-up (Form 4 XML 파싱).
+export interface InsiderFiling {
+  filing_date: string;
+  accession: string;
+  url: string | null;
+}
+export interface Insider {
+  window_days: number;
+  filing_count: number;
+  recent: InsiderFiling[];
+  as_of: string | null;
+}
+
 // KR-only — pykrx 수급(외국인/기관 5d 순매수) + 공매도 잔고/회전.
 // US 종목은 null. 가족 친화 카피는 frontend 책임 — 정량값만 raw 로 받음.
 export interface Flow {
@@ -230,7 +244,8 @@ export interface StockCard {
   political_signals: PoliticalSignalCard[];
   macro: MacroContext;
   fundamentals: Fundamentals;
-  flow?: Flow | null;  // KR-only pykrx 수급+공매도. US/없는 종목은 null/undefined.
+  flow?: Flow | null;        // KR-only pykrx 수급+공매도.
+  insider?: Insider | null;  // US-only SEC Form 4 임원 매매 신고.
   decision: Decision;
 
   citations: Citation[];

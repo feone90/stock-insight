@@ -195,6 +195,31 @@ class Flow(BaseModel):
     as_of: str | None = None                 # 최근 거래일 (YYYY-MM-DD)
 
 
+class InsiderFiling(BaseModel):
+    filing_date: str
+    accession: str
+    url: str | None = None
+
+
+class Insider(BaseModel):
+    """US 종목 — SEC Form 4 (임원 매매 신고) 요약.
+
+    Codex 권고(2026-05-14): "insider buying/selling and institutional position
+    changes are table-stakes context, especially for small/mid caps".
+
+    카피 가이드: "최근 30일 임원 매매 신고 N건 — 자세히 보기" 식으로 frontend
+    에서 풀어 표현. KR 종목은 항상 None (KR 대량보유공시 5% 별도 collector
+    필요 — follow-up).
+
+    transaction code 별 매수/매도 분류는 Form 4 XML 파싱 추가 작업으로 별도
+    sub-phase.
+    """
+    window_days: int = 30
+    filing_count: int = 0
+    recent: list[InsiderFiling] = []
+    as_of: str | None = None
+
+
 class PoliticalSignalCard(BaseModel):
     """카드의 뉴스/이슈 섹션에 별도 highlight되는 정치 발언. 미래 자동매매
     trigger row의 read-only view. ticker별로 영향 metadata 포함."""
@@ -276,7 +301,8 @@ class StockCard(BaseModel):
     political_signals: list[PoliticalSignalCard] = []
     macro: MacroContext
     fundamentals: Fundamentals
-    flow: Flow | None = None   # KR-only: 외국인/기관 수급 + 공매도. US/누락 종목은 None.
+    flow: Flow | None = None      # KR-only: 외국인/기관 수급 + 공매도.
+    insider: Insider | None = None  # US-only: SEC Form 4 최근 30일 요약.
     decision: Decision
 
     citations: list[Citation] = []
@@ -302,7 +328,8 @@ class DataLayer(BaseModel):
     technical: TechMomentum | None = None
     macro: MacroContext | None = None
     fundamentals: Fundamentals | None = None
-    flow: Flow | None = None  # KR-only (pykrx 수급 + 공매도)
+    flow: Flow | None = None       # KR-only (pykrx 수급 + 공매도)
+    insider: Insider | None = None  # US-only (SEC Form 4 30d)
     news: list[NewsItem] = []
     political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []

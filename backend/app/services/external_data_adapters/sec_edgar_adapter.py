@@ -217,6 +217,48 @@ class SecEdgarAdapter(ExternalAdapter):
             )
         return out
 
+    async def fetch_form4_filings(
+        self,
+        ticker: str,
+        *,
+        since,
+    ) -> list[dict]:
+        """List Form 4 (insider transactions) filings filed >= `since`.
+
+        2026-05-14 Codex 시니어 트레이더 리뷰 권고 priority 3 — US 소/중형주
+        insider 매수/매도가 매매 결정 context 의 절반. 8-K 패턴 그대로,
+        form=='4' 필터.
+
+        Returns: [{accession, filing_date, primary_document, cik}]. transaction
+        code (P/S/A 등) 분류는 primary_document XML 파싱이 추가로 필요해 별도
+        follow-up. 본 메서드는 filing 메타만.
+        """
+        cik = await self._ticker_to_cik(ticker)
+        sub = await self._fetch_submissions(cik)
+        recent = sub.get("filings", {}).get("recent", {})
+
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        accs = recent.get("accessionNumber", [])
+        docs = recent.get("primaryDocument", [])
+        since_str = since.isoformat() if hasattr(since, "isoformat") else str(since)
+
+        out: list[dict] = []
+        for i, f in enumerate(forms):
+            if f != "4":
+                continue
+            if dates[i] < since_str:
+                continue
+            out.append(
+                {
+                    "cik": cik,
+                    "accession": accs[i],
+                    "filing_date": dates[i],
+                    "primary_document": docs[i] if i < len(docs) else None,
+                }
+            )
+        return out
+
     async def fetch_filing_body(
         self, *, cik: str, accession: str, primary_document: str
     ) -> str:

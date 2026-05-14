@@ -12,6 +12,7 @@ import { DecisionSection } from "./decision-section";
 import { FlowSection } from "./flow-section";
 import { FundamentalsSection } from "./fundamentals-section";
 import { HeroChart } from "./hero-chart";
+import { InsiderSection } from "./insider-section";
 import { MacroSection } from "./macro-section";
 import { NewsSection } from "./news-section";
 import { CardFooter } from "./placeholders";
@@ -179,6 +180,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                 <MacroSection macro={card.macro} />
                 <FundamentalsSection fundamentals={card.fundamentals} />
                 {card.flow ? <FlowSection flow={card.flow} /> : null}
+                {card.insider ? <InsiderSection insider={card.insider} /> : null}
                 <TechMomentumSection technical={card.technical} />
               </div>
 
