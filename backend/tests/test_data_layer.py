@@ -210,6 +210,13 @@ async def test_assemble_uses_asyncio_gather(monkeypatch):
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_fundamentals", slow)
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_recent_news", slow)
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_relations_data", slow)
+    # 2026-05-14 — 추가된 새 fetcher 6 개도 monkeypatch (concurrent 검증 fair).
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_political_signals", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_flow", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_insider", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_earnings", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_analyst_rating", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_price_target", slow)
     monkeypatch.setattr(
         "app.services.analyst.data_layer.llm_classify_news",
         AsyncMock(return_value={"items": []}),
