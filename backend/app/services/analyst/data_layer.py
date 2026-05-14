@@ -682,6 +682,15 @@ async def _fetch_recent_news(ticker: str) -> dict:
 
 
 async def _fetch_relations_data(ticker: str) -> dict:
+    """카드용 큐레이션된 관계만 반환. graph endpoint 와 분리.
+
+    2026-05-14 Codex 시니어 트레이더 리뷰 권고: sector_match 같은 mechanical
+    source(c(N,2)×2 sector pair, confidence 0.4 일괄) 는 카드 의사결정에
+    noise. card endpoint 에서 server-side 제외. graph endpoint 는 그대로.
+    사용자 진단 "나열 수준" 직접 fix.
+
+    project_ontology_codex_review_2026_05_14 메모 참조.
+    """
     async with async_session() as db:
         stock = (
             await db.execute(select(Stock).where(Stock.ticker == ticker))
@@ -690,7 +699,10 @@ async def _fetch_relations_data(ticker: str) -> dict:
             return {"relations": [], "is_stale": False}
         rows = (
             await db.execute(
-                select(StockRelation).where(StockRelation.from_stock_id == stock.id)
+                select(StockRelation).where(
+                    StockRelation.from_stock_id == stock.id,
+                    StockRelation.source != "sector_match",
+                )
             )
         ).scalars().all()
 

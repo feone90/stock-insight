@@ -3,19 +3,33 @@
 import type { Relation, RelationType, RelationsSummary, SignalDirection } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
+// 가족 친화 자연어 라벨 — 약어 / 영어 노출 X (feedback_card_user_facing_copy).
 const RELATION_LABEL: Record<RelationType, string> = {
   peer: "동종업계",
-  supply_upstream: "공급-상류",
-  supply_downstream: "공급-하류",
-  group: "그룹",
+  supply_upstream: "공급망 (상류)",
+  supply_downstream: "공급망 (하류)",
+  group: "그룹사",
   theme: "테마",
   macro: "매크로",
   competitor: "경쟁",
-  contract_supplier: "공급계약",
-  contract_customer: "구매계약",
-  complementary: "상호보완",
-  regulatory_link: "규제연동",
+  contract_supplier: "공급 계약",
+  contract_customer: "구매 계약",
+  complementary: "상호 보완",
+  regulatory_link: "규제 연동",
 };
+
+// 2026-05-14 Codex 권고: 카드는 시니어 매매 의사결정용 — actionable type
+// 만 노출. peer / group / theme / macro 는 graph 전용 (sector context 정도).
+// project_ontology_codex_review_2026_05_14 메모 §우선순위 A/B/E.
+const CARD_ACTIONABLE_TYPES: ReadonlySet<RelationType> = new Set([
+  "contract_supplier",
+  "contract_customer",
+  "competitor",
+  "complementary",
+  "supply_upstream",
+  "supply_downstream",
+  "regulatory_link",
+]);
 
 // Highest information density first — discovery-driven types beat plain peer.
 const TYPE_PRIORITY: Record<RelationType, number> = {
@@ -66,14 +80,16 @@ export function RelationsSection({
 }
 
 function summariseRelations(rels: Relation[]): string {
-  if (rels.length === 0) return "관계 데이터 없음";
+  // compact 라인은 actionable 관계만 카운트 — peer/group/theme/macro 는 graph 전용.
+  const actionable = rels.filter((r) => CARD_ACTIONABLE_TYPES.has(r.relation_type));
+  if (actionable.length === 0) return "핵심 관계 없음";
   const counts: Partial<Record<RelationType, number>> = {};
-  for (const r of rels) counts[r.relation_type] = (counts[r.relation_type] ?? 0) + 1;
+  for (const r of actionable) counts[r.relation_type] = (counts[r.relation_type] ?? 0) + 1;
   const parts: string[] = [];
   for (const t of Object.keys(counts) as RelationType[]) {
     parts.push(`${RELATION_LABEL[t] ?? t} ${counts[t]}`);
   }
-  return `${rels.length}개 · ${parts.join(", ")}`;
+  return `${actionable.length}개 · ${parts.join(", ")}`;
 }
 
 function RelationsExpanded({
@@ -84,13 +100,34 @@ function RelationsExpanded({
   selfTicker?: string;
 }) {
   const selfIsKR = selfTicker ? isKRTicker(selfTicker) : null;
-  const sorted = [...(relations.relations ?? [])].sort((a, b) =>
+  // Codex 권고 A+B: 카드는 actionable type 만 + cap 24 → 6 (인지 한계).
+  // mechanical sector peer 양적 압도로 진짜 신호 묻히던 패턴 fix.
+  // 전체 관계망은 "Ontology 그래프 →" 링크에서 확인.
+  const filtered = (relations.relations ?? []).filter((r) =>
+    CARD_ACTIONABLE_TYPES.has(r.relation_type),
+  );
+  const sorted = [...filtered].sort((a, b) =>
     compareRelations(a, b, selfIsKR),
   );
   if (sorted.length === 0) {
-    return <p className="text-sm text-[var(--surface-text-muted)]">등록된 관계 없음</p>;
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-[var(--surface-text-muted)]">
+          핵심 관계 없음 — 계약·경쟁·공급망·규제 같은 의사결정 가능한 신호
+          아직 추출되지 않음
+        </p>
+        {selfTicker ? (
+          <a
+            href={`/stock/${selfTicker}/graph`}
+            className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            그래프에서 전체 관계망 보기 →
+          </a>
+        ) : null}
+      </div>
+    );
   }
-  const CAP = 24;
+  const CAP = 6;
   return (
     <div className="space-y-3 text-sm">
       <table className="w-full text-xs">
@@ -113,9 +150,14 @@ function RelationsExpanded({
       </table>
       {sorted.length > CAP ? (
         <p className="text-xs text-[var(--surface-text-subtle)]">
-          + {sorted.length - CAP}개 더 — 아래 그래프에서 모두 보기
+          + 핵심 관계 {sorted.length - CAP}개 더 + 동종업계/그룹/테마 등 부가
+          관계 — 그래프에서 전체 보기
         </p>
-      ) : null}
+      ) : (
+        <p className="text-xs text-[var(--surface-text-subtle)]">
+          동종업계·그룹·테마 같은 부가 관계는 그래프에서만 표시
+        </p>
+      )}
       {selfTicker ? (
         <a
           href={`/stock/${selfTicker}/graph`}
