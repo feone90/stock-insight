@@ -9,7 +9,10 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/azure-deploy.yml'
-      - 'infra/**'
+      # NOTE: 'infra/**' 는 일부러 제외 — 이 workflow 는 az webapp config
+      # container set + restart 만 수행하지 `az deployment group create` 를
+      # 돌리지 않는다. infra 변경이 backend image 재빌드를 trigger 하면 오해를
+      # 부르고 무의미한 deploy 가 돈다. infra 적용은 수동으로 (Codex 권장).
   workflow_dispatch:
 
 permissions:
