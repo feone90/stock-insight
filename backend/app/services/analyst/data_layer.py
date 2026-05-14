@@ -53,6 +53,10 @@ logger = logging.getLogger(__name__)
 NEWS_WINDOW_DAYS = 14
 NEWS_SUMMARY_MAX = 300
 RELATIONS_STALE_DAYS = 7
+# 2026-05-15 — sector_match (confidence=0.4) 가 카드에 노이즈 도배되는 문제.
+# read 시점 floor — 0.5 미만은 카드에 X. sector_match 자동 제외. LLM 추출
+# (≥0.7) 와 dart_contract (≥0.6) 는 통과.
+RELATIONS_MIN_CONFIDENCE = 0.5
 _VALID_RELATION_TYPES = {
     "peer", "supply_upstream", "supply_downstream", "group", "theme", "macro",
     # P1.6 v0+ — extracted via sector_match / sec_8k / news / dart_contract.
@@ -813,6 +817,7 @@ async def _fetch_relations_data(ticker: str) -> dict:
                 select(StockRelation).where(
                     StockRelation.from_stock_id == stock.id,
                     StockRelation.is_active.is_(True),
+                    StockRelation.confidence >= RELATIONS_MIN_CONFIDENCE,
                 )
             )
         ).scalars().all()

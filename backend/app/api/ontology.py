@@ -26,6 +26,8 @@ router = APIRouter(prefix="/api/ontology", tags=["ontology"])
 _MAX_NODES = 200
 _DEFAULT_DEPTH = 1
 _DEFAULT_TOP_N = 15  # per-node neighbor cap — 약한 sector_match가 카드를 도배하지 않게.
+# 2026-05-15 — sector_match (0.4) 자동 제외. 데이터 quality 확보된 source 만.
+_DEFAULT_MIN_CONFIDENCE = 0.5
 
 
 @router.get("/graph")
@@ -36,7 +38,7 @@ async def get_subgraph(
         None,
         description="콤마 구분 source 필터 (sector_match,sec_8k,news,dart_contract). 미지정 = 모두",
     ),
-    min_confidence: float = Query(0.0, ge=0, le=1, description="confidence 하한"),
+    min_confidence: float = Query(_DEFAULT_MIN_CONFIDENCE, ge=0, le=1, description="confidence 하한 (기본 0.5 — sector_match 0.4 자동 제외)"),
     cap: int = Query(_MAX_NODES, ge=10, le=400, description="노드 개수 총 cap"),
     top_n: int = Query(_DEFAULT_TOP_N, ge=3, le=50, description="노드별 최강 N개만"),
 ) -> dict:

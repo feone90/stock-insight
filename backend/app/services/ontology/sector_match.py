@@ -16,6 +16,13 @@ worst-case sector emits ~870 rows; total network sits in the ~30-60K range.
 Cap ordering: market_cap DESC (NULLS LAST), then ticker ASC. Phase A leaves
 market_cap=None for all KR rows so the tiebreaker (ticker ASC) is the
 de-facto Phase A ordering — deterministic and stable across re-runs.
+
+2026-05-15 cross-market 제거 (사용자 + Codex 시니어 product 리뷰):
+같은 GICS sector 만으로 KR↔US peer 만드는 건 *비즈니스 관점* 무의미. MS
+(IT) 가 두산/DB하이텍/그린광학 (KR IT) 과 "peer" 라는 표현은 사용자한테
+"왜 한국 반도체가 여기?" 혼란만 야기. 핵심 가치는 same-market peer (예:
+삼성전자 ↔ SK하이닉스 둘 다 메모리). Cross-market 매크로 노출은 별도
+macro 섹션이 처리. 따라서 KR/US/OTHER 그룹 각자 내부 combinations 만.
 """
 from __future__ import annotations
 
@@ -126,10 +133,13 @@ async def _run(session: AsyncSession) -> dict:
         ):
             capped_sectors += 1
 
-        ranked = kr_capped + us_capped + other_capped
-        for a, b in combinations(ranked, 2):
-            rows.append(_make_peer_row(a, b))
-            rows.append(_make_peer_row(b, a))
+        # Same-market only — 각 market bucket 안에서만 combinations.
+        # KR↔US cross-market peer 는 의도적으로 안 만든다 (위 module docstring
+        # 2026-05-15 결정 참조).
+        for bucket in (kr_capped, us_capped, other_capped):
+            for a, b in combinations(bucket, 2):
+                rows.append(_make_peer_row(a, b))
+                rows.append(_make_peer_row(b, a))
 
     upserted = await bulk_upsert_relations(rows, session=session)
     summary = {

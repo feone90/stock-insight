@@ -34,20 +34,29 @@ async def _run_prewarm() -> None:
 
 
 async def _run_startup_purge() -> None:
-    """Deploy 마다 1회 환상 row 청소 (2026-05-14 SK하이닉스→동화약품 사례).
+    """Deploy 마다 1회 누적 noise 청소.
 
-    옛 validator 가드 이전에 박힌 row 가 prod 에 남아있어 카드/그래프에
-    계속 노출됨. 사용자가 admin endpoint 수동 호출하지 않게 startup 시
-    자동 cleanup. 비용 0 — single SELECT + bulk DELETE, 보통 < 1s.
+    옛 validator 가드 이전에 박힌 환상 row + 옛 sector_match cross-market
+    peer (MS↔두산 같은 무의미 페어) 둘 다 한 번에. 사용자가 admin endpoint
+    수동 호출하지 않게 startup 시 자동 cleanup.
     """
     from app.database import async_session
-    from app.services.ontology.purge import purge_llm_hallucinations
+    from app.services.ontology.purge import (
+        purge_cross_market_sector_match,
+        purge_llm_hallucinations,
+    )
 
     try:
         async with async_session() as db:
-            n = await purge_llm_hallucinations(db)
-        if n > 0:
-            logger.info("startup purge: removed %d hallucination relations", n)
+            n_hall = await purge_llm_hallucinations(db)
+        async with async_session() as db:
+            n_xmkt = await purge_cross_market_sector_match(db)
+        total = n_hall + n_xmkt
+        if total > 0:
+            logger.info(
+                "startup purge: hallucination=%d cross_market_sector=%d total=%d",
+                n_hall, n_xmkt, total,
+            )
     except Exception as e:  # noqa: BLE001
         logger.warning("startup purge failed: %s", e)
 
