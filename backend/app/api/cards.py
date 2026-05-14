@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
@@ -199,11 +199,21 @@ async def get_card(
         )
 
     # 2026-05-14: Per-layer freshness overlay. card_data JSONB 는 analyze()
-    # 실행 시점의 스냅샷. 그 후 /price_refresh, /data_refresh 가 새 PriceHistory
-    # / News row 박아도 card_data 안의 price_asof / news_latest_at 은 옛 값
-    # 그대로 → 카드 헤더에 "가격 데이터 없음" / 옛 시각 표시되는 버그.
-    # 두 필드만 DB MAX 로 항상 fresh 하게 overlay. card_data 본체 X.
-    card = dict(row.card_data)  # JSONB → mutable dict copy
+    # 실행 시점 스냅샷. 그 후 sync_prices / sync_news 가 새 row 박아도 JSON
+    # 안의 price/change/asof/price_asof/news_latest_at 옛 값 — 카드 헤더에
+    # 옛 가격, 옛 시각, 관계 카드의 화살표 % 까지 stale.
+    # 2026-05-15: price/change/change_pct/asof + relations 의 target
+    # today_change_pct 까지 overlay 확장 — analyze 안 다시 돌려도 카드 표면
+    # fresh. card_data 본체는 안 건드림.
+    card = dict(row.card_data)
+
+    # 1) 헤더 가격 — get_stock_or_404 가 이미 fresh Stock row 줌.
+    card["price"] = stock.current_price or 0.0
+    card["change"] = stock.change or 0.0
+    card["change_pct"] = stock.change_percent or 0.0
+    card["asof"] = datetime.now(timezone.utc).isoformat()
+
+    # 2) Per-layer 마지막 갱신 시각.
     price_max = (
         await db.execute(
             select(func.max(PriceHistory.date)).where(
@@ -212,7 +222,9 @@ async def get_card(
         )
     ).scalar()
     if price_max is not None:
-        card["price_asof"] = price_max.isoformat() if hasattr(price_max, "isoformat") else str(price_max)
+        card["price_asof"] = (
+            price_max.isoformat() if hasattr(price_max, "isoformat") else str(price_max)
+        )
     news_max = (
         await db.execute(
             select(func.max(News.published_at)).where(News.stock_id == stock.id)
@@ -222,6 +234,27 @@ async def get_card(
         card["news_latest_at"] = (
             news_max.isoformat() if hasattr(news_max, "isoformat") else str(news_max)
         )
+
+    # 3) 관계 카드의 target today_change_pct — 각 target ticker 의 현재
+    # change_percent. 한 번에 batch lookup.
+    relations_payload = (card.get("relations") or {}).get("relations") or []
+    target_tickers = [
+        r.get("target_ticker") for r in relations_payload if r.get("target_ticker")
+    ]
+    if target_tickers:
+        target_rows = (
+            await db.execute(
+                select(Stock.ticker, Stock.change_percent).where(
+                    Stock.ticker.in_(target_tickers)
+                )
+            )
+        ).all()
+        change_map = {t: cp for t, cp in target_rows}
+        for r in relations_payload:
+            t = r.get("target_ticker")
+            if t in change_map:
+                r["today_change_pct"] = change_map[t]
+
     return card
 
 
