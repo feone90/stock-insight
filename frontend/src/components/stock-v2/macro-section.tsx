@@ -22,6 +22,21 @@ export function MacroSection({ macro }: { macro: MacroContext }) {
         </span>
       }
       expanded={<MacroExpanded macro={macro} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            <strong>지금 시장 전체 분위기</strong>를 보여주는 거시 지표들. 개별
+            종목과 무관해 보여도 환율·금리가 흔들리면 한국/미국 주식 전체가
+            같이 움직임.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>VIX (공포 지수)</strong> — 20 이상이면 시장 불안, 30+ 면 공포. 평소엔 12~18</li>
+            <li><strong>USD/KRW (환율)</strong> — 원화 약세 = 한국 수출주 유리, 강세 = 내수주 유리</li>
+            <li><strong>미 10년 국채 금리</strong> — 높을수록 성장주 부담. 4%+ 면 IT/AI 같은 고PER 종목 압박</li>
+            <li><strong>연준 기준금리</strong> — 인하 사이클 = 위험자산 유리, 인상 = 안전자산 유리</li>
+          </ul>
+        </div>
+      }
     />
   );
 }

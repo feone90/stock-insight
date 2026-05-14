@@ -29,6 +29,22 @@ export function EarningsAnalystSection({
       title="실적·분석가 의견"
       compact={<span>{compact}</span>}
       expanded={<ExpandedBody earnings={earnings} rating={rating} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            <strong>다음 분기 실적 발표까지 며칠 + 전문가들의 매수/보유/매도
+            의견 분포</strong>.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>실적 발표 D-N</strong> — 발표일까지 N일 남음. 발표 전후엔 주가 변동성 커지는 게 일반적</li>
+            <li><strong>주당이익 예상</strong> — 전문가들이 이번 분기 1주당 얼마 벌 거라고 추정. 발표값이 이보다 높으면 보통 주가 상승</li>
+            <li><strong>매수 N명 · 보유 N명 · 매도 N명</strong> — 전문가 N명의 의견 분포. 매수 우세면 긍정 sentiment</li>
+          </ul>
+          <p className="text-[var(--surface-text-muted)] mt-1">
+            US 종목만. 출처: Finnhub (이메일 가입 무료). KR 종목은 별도 출처 (추후).
+          </p>
+        </div>
+      }
     />
   );
 }

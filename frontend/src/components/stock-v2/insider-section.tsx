@@ -24,6 +24,22 @@ export function InsiderSection({ insider }: { insider: Insider }) {
       title="임원 매매 신고"
       compact={<span>{compact}</span>}
       expanded={<InsiderExpanded insider={insider} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            <strong>회사 임원·이사·5%+ 대주주가 자기 회사 주식을 매수·매도하면
+            미국 증권관리위원회(SEC)에 의무 신고</strong>. 그 신고 건수를 보여줘요.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>임원 매수가 많음</strong> — 회사 내부 사람들이 미래에 자신감 있다는 신호</li>
+            <li><strong>임원 매도가 많음</strong> — 위험 신호일 수도, 단순 세금/옵션 행사일 수도</li>
+            <li>매수/매도 분류는 "원문 보기" 클릭으로 SEC 원본에서 확인</li>
+          </ul>
+          <p className="text-[var(--surface-text-muted)] mt-1">
+            US 종목만. KR 대량보유공시(5%) 는 별도 출처 (추후).
+          </p>
+        </div>
+      }
     />
   );
 }

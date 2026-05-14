@@ -26,6 +26,24 @@ export function FlowSection({ flow }: { flow: Flow }) {
       title="수급 (외국인·기관)"
       compact={<span>{compact}</span>}
       expanded={<FlowExpanded flow={flow} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            <strong>외국인·기관 투자자가 최근 5거래일 동안 얼마 사고 팔았는지</strong>.
+            한국 retail 매매 판단의 baseline — "외국인이 사들이는 종목"인지 "팔고
+            있는 종목"인지 한눈에.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>양수</strong> = 순매수 (사들이는 중) — 보통 긍정 신호</li>
+            <li><strong>음수</strong> = 순매도 (팔고 있음) — 보통 부정 신호</li>
+            <li><strong>5일 연속 순매수</strong> 같은 연속 일수 = 추세의 강도</li>
+            <li>5일 동안 <strong>1억원 미만</strong>은 의미 있는 매매 신호 아님</li>
+          </ul>
+          <p className="text-[var(--surface-text-muted)] mt-1">
+            출처: KRX 공식 일별 거래대금 (한국거래소).
+          </p>
+        </div>
+      }
     />
   );
 }

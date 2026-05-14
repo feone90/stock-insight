@@ -59,6 +59,20 @@ export function NewsSection({
       title="뉴스 / 이슈"
       compact={<span>{compact}</span>}
       expanded={<NewsExpanded news={news} political={political} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            <strong>최근 14일 이 종목 관련 뉴스</strong>. 블로그·SEO 스팸·aggregator
+            는 자동 제외하고 <em>정통 매체</em>(한국경제·매일경제·연합뉴스·Bloomberg·Reuters
+            등) 만 통과.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>▲ 빨강</strong> = 긍정 영향 · <strong>▼ 파랑</strong> = 부정 · ◆ = 양면 · ○ = 중립</li>
+            <li><strong>🇺🇸 정치 시그널</strong> — 트럼프 Truth Social 발언이 이 종목에 미치는 영향 (LLM 자동 매핑)</li>
+            <li>제목 클릭 시 원문 매체 이동</li>
+          </ul>
+        </div>
+      }
     />
   );
 }

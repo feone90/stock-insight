@@ -107,6 +107,23 @@ export function RelationsSection({
       title="관계"
       compact={<span>{summary || "관계 데이터 없음"}</span>}
       expanded={<RelationsExpanded relations={relations} selfTicker={ticker} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            이 종목과 <strong>사업·계약·경쟁·규제로 얽힌 다른 종목들</strong>.
+            "한쪽이 잘되면 다른 쪽이 어떻게 되는지" 를 미리 보는 layer.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>🔑 핵심 신호</strong> — 계약 공시·고신뢰 뉴스 인용. 매매 의사결정 직결</li>
+            <li><strong>📝 사업 관계</strong> — 기사·공시에 명시된 supplier·customer·competitor</li>
+            <li><strong>🔗 컨텍스트</strong> — 같은 섹터·테마 lookup (분위기 파악용, 매매 baseline 아님)</li>
+            <li><strong>⇄ zero-sum</strong> — 한쪽이 점유율 가져가면 다른 쪽이 잃는 직접 경쟁 (별도 callout 으로 강조)</li>
+          </ul>
+          <p className="text-[var(--surface-text-muted)] mt-1">
+            "Ontology 그래프 →" 클릭 시 전체 관계망 시각화.
+          </p>
+        </div>
+      }
     />
   );
 }

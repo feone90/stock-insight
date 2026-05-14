@@ -29,6 +29,20 @@ export function FundamentalsSection({
         <span>{parts.length > 0 ? parts.join(" · ") : "재무 데이터 부족"}</span>
       }
       expanded={<FundamentalsExpanded fundamentals={fundamentals} />}
+      helpText={
+        <div className="space-y-1.5">
+          <p>
+            회사가 <strong>얼마 버는지·자산이 얼마인지</strong> 와 주가를 비교한
+            "가격이 비싼지 싼지" 평가. 단순 주가만으로는 못 보고, 이익·자산
+            대비 봐야 의미.
+          </p>
+          <ul className="ml-3 space-y-0.5 list-disc">
+            <li><strong>이익 대비 주가</strong> — 1년 이익의 N배. 낮을수록 저평가 가능성 (성장 기대 없는 종목엔 정상)</li>
+            <li><strong>순자산 대비 주가</strong> — 회사 자산의 N배. 1배 미만이면 자산 가치 미반영</li>
+            <li><strong>배당수익률</strong> — 1년 배당 / 주가. 예금 금리 수준이면 안정 배당주</li>
+          </ul>
+        </div>
+      }
     />
   );
 }
