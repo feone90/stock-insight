@@ -401,6 +401,15 @@ def _build_relations(
         signal = r.get("signal_direction") or "positive"
         if signal not in {"positive", "negative", "inverse"}:
             signal = "positive"
+        cc_raw = r.get("customer_concentration_pct")
+        cc: float | None
+        try:
+            cc = float(cc_raw) if cc_raw is not None else None
+            if cc is not None and not (0 <= cc <= 100):
+                cc = None
+        except (TypeError, ValueError):
+            cc = None
+
         out.append(
             Relation(
                 target_ticker=target_ticker,
@@ -414,8 +423,10 @@ def _build_relations(
                 confidence=confidence,
                 source=r.get("source") or "curated_relation",
                 source_url=r.get("source_url"),
+                rationale=r.get("rationale"),
                 valid_from=r.get("valid_from"),
                 valid_until=r.get("valid_until"),
+                customer_concentration_pct=cc,
             )
         )
     return out
@@ -733,6 +744,9 @@ async def _fetch_relations_data(ticker: str) -> dict:
                     "source": r.source,
                     "source_url": metadata.get("source_url") if isinstance(metadata, dict) else None,
                     "rationale": metadata.get("rationale") if isinstance(metadata, dict) else None,
+                    "customer_concentration_pct": (
+                        metadata.get("customer_concentration_pct") if isinstance(metadata, dict) else None
+                    ),
                     "valid_from": r.valid_from.isoformat() if r.valid_from else None,
                     "valid_until": r.valid_until.isoformat() if r.valid_until else None,
                 }

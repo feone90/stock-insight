@@ -334,6 +334,7 @@ function TierRow({ rel, isCore }: { rel: Relation; isCore: boolean }) {
   const rowText = isCore ? "text-sm" : "text-xs";
   const rationale = rel.rationale?.trim() || null;
 
+  const cc = rel.customer_concentration_pct;
   return (
     <li className={rowText}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -351,6 +352,22 @@ function TierRow({ rel, isCore }: { rel: Relation; isCore: boolean }) {
           <span className={`text-[11px] tabular-nums ${changeColor}`}>
             {change > 0 ? "+" : ""}
             {change.toFixed(1)}%
+          </span>
+        ) : null}
+        {/* Codex I — 매출 의존 30%+ 면 lock-in risk 강조 badge. */}
+        {cc != null && cc >= 30 ? (
+          <span
+            className="inline-flex items-center gap-0.5 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-300 border border-red-500/30"
+            title="매출 의존도 높음 — 이 고객의 발주가 끊기면 매출 직격"
+          >
+            🚨 매출 {cc.toFixed(0)}%
+          </span>
+        ) : cc != null && cc > 0 ? (
+          <span
+            className="text-[10px] text-[var(--surface-text-subtle)]"
+            title="매출 의존도 정량 명시"
+          >
+            매출 {cc.toFixed(0)}%
           </span>
         ) : null}
       </div>

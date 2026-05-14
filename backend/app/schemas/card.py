@@ -106,6 +106,10 @@ class TechMomentum(BaseModel):
 
 
 class Relation(BaseModel):
+    # 표시용 모델 — 카드 응답에 직렬화됨. customer_concentration_pct 는
+    # 10-K Item 1A LLM RAG (Codex I) 가 contract_customer rationale 안에서
+    # "X accounted for 25% of revenue" 같은 정량 명시를 추출한 결과.
+    # None 이면 frontend 가 일반 contract_customer row 로 표시.
     target_ticker: str
     target_name: str
     relation_type: Literal[
@@ -128,6 +132,11 @@ class Relation(BaseModel):
     # LLM 추출 시 prompt 가 요구한 "근거 한 줄" — 왜 이 관계로 분류했는지.
     # sector_match 같은 rule 기반 source 에는 비어있을 수 있음.
     rationale: str | None = None
+
+    # Codex I — 10-K Item 1A 에 "X accounted for 25% of revenue" 같은 정량
+    # 매출 의존 표현이 있을 때 contract_customer relation 에 박힌다. 30%+
+    # 면 frontend 에서 risk badge 강조 (lock-in risk).
+    customer_concentration_pct: float | None = Field(default=None, ge=0, le=100)
 
 
 class RelationsSummary(BaseModel):

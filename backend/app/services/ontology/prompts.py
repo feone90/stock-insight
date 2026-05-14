@@ -178,7 +178,16 @@ confidence 기준 (엄격):
 - from_ticker 는 반드시 `{focal_ticker}` (본 10-K 의 발행자). to_ticker 만 다양함.
 - ticker 추출 우선: 본문에 "(NASDAQ: XYZ)" 같이 ticker 명시되면 그대로. 회사명만 명시되고 ticker 미명시면 가장 잘 알려진 ticker 사용 (예: "ASML Holding" → "ASML", "Taiwan Semiconductor" → "TSM"). 모호하면 추출 X.
 - rationale 은 paraphrase 금지 — 텍스트 표현 그대로 인용. 인용할 표현이 없으면 그 관계 자체 추출 X.
-- 회사 이름이 본문 *어디에도 명시되지 않으면* `"relations": []`"""
+- 회사 이름이 본문 *어디에도 명시되지 않으면* `"relations": []`
+
+### Customer concentration 보강 (Codex review I)
+contract_customer 추출 시 본문에 *정량적 매출 의존* 표현이 있으면 metadata에 같이 박아라:
+- "X accounted for 25% of [our|total] revenue" / "X represents 30% of [net sales|consolidated revenue]" / "Three customers ... represented N% of revenue" 같은 명시적 % 수치.
+- 위 경우 metadata 에 다음 두 키 추가:
+  - `customer_concentration_pct`: 숫자 (예: 25)
+  - `concentration_phrase`: 본문 *그대로 인용한* 한 줄 (paraphrase 금지)
+- 추정/계산 금지. 본문에 % 가 명시 안 됐으면 두 키 모두 생략.
+- "Top N customers ... 50% of revenue" 같이 합산값만 명시되면 customer_concentration_pct = 합산값 (50). top_customer_names 도 metadata 에 list 로 박을 수 있으면 박아라."""
 
 
 # Generic schema reminder appended at the end of every prompt for retry-on-fail.

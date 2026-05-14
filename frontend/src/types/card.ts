@@ -98,6 +98,9 @@ export interface Relation {
   valid_from?: string | null;
   valid_until?: string | null;
   rationale?: string | null;
+  // 10-K Item 1A LLM RAG (Codex I) 가 contract_customer rationale 안에서
+  // 추출한 정량 매출 의존 % (0~100). 30%+ 면 frontend 가 lock-in risk 강조.
+  customer_concentration_pct?: number | null;
 }
 
 export interface RelationsSummary {
