@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import date, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -22,7 +21,7 @@ from app.collectors.stock_price import sync_prices
 from app.config import settings
 from app.database import async_session, get_db
 from app.dependencies import get_stock_or_404
-from app.models import News, PriceHistory, Stock
+from app.models import News, PriceHistory, RefreshCooldown, Stock
 from app.models.analysis import Analysis
 from app.models.financial import Financial
 from app.services.analyst.cost import can_proceed
@@ -33,8 +32,60 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/stocks", tags=["cards"])
 
-# In-memory per-ticker cooldown tracker.
-_last_refresh: dict[str, float] = {}
+
+async def _try_acquire_cooldown(
+    db: AsyncSession, ticker: str, action: str, cooldown_s: int
+) -> tuple[bool, int]:
+    """DB-backed atomic cooldown — multi-worker safe.
+
+    옛 in-memory `_last_*: dict` 는 gunicorn worker 별 분리되어 production
+    correctness 없음. 이 헬퍼는 `INSERT ... ON CONFLICT DO UPDATE WHERE` 한
+    번으로 acquire 시도 + 잔여 시간 반환.
+
+    Returns:
+        (True, 0) — 잠금 획득, last_at 새로 박힘. 호출자는 작업 진행.
+        (False, remaining_seconds) — 아직 cooldown 중. 429 반환 권장.
+    """
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    now = _dt.utcnow()
+    cutoff = now - _td(seconds=cooldown_s)
+    key = ticker.upper()
+
+    stmt = (
+        pg_insert(RefreshCooldown)
+        .values(ticker=key, action=action, last_at=now)
+        .on_conflict_do_update(
+            index_elements=["ticker", "action"],
+            set_={"last_at": now},
+            where=(RefreshCooldown.last_at < cutoff),
+        )
+        .returning(RefreshCooldown.last_at)
+    )
+    result = await db.execute(stmt)
+    row = result.scalar_one_or_none()
+    if row is None:
+        # ON CONFLICT 발동했지만 WHERE 조건 (last_at < cutoff) 미충족 →
+        # 옛 last_at 그대로. 별도 query 로 잔여 계산.
+        existing = (
+            await db.execute(
+                select(RefreshCooldown.last_at).where(
+                    RefreshCooldown.ticker == key,
+                    RefreshCooldown.action == action,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            # 이론적으로 발생 안 함 (acquire 했어야 함). race 안전을 위해 허용.
+            await db.commit()
+            return True, 0
+        remaining = int(cooldown_s - (now - existing).total_seconds())
+        return False, max(1, remaining)
+    await db.commit()
+    return True, 0
 
 
 _MIN_NEWS_FOR_ANALYZE = 5
@@ -196,12 +247,9 @@ async def trigger_analyze(
 # 두니 (a) 라벨이 모호하고 (b) "주가만 새로고침" 이 외부 API 4-5 개 다 도느라
 # 늘리고 (c) "언제 갱신됐는지" 가 통째로만 표시돼 사용자가 가격이 fresh 인지
 # 뉴스가 fresh 인지 분간 못 함. → 각 layer 자기 cooldown + 자기 timestamp.
-_last_price_refresh: dict[str, float] = {}
 _PRICE_REFRESH_COOLDOWN_S = 30  # 30s — 가격은 가벼움. 클릭 즉시 fresh quote.
-
-_last_data_refresh: dict[str, float] = {}
-_DATA_REFRESH_COOLDOWN_S = 120  # 2분 — 뉴스/공시는 외부 API 무거움. 1분 시
-# 가족 5명 새로고침 갈겨도 외부 rate-limit 보호.
+_DATA_REFRESH_COOLDOWN_S = 120  # 2분 — 뉴스/공시는 외부 API 무거움. 가족 5명
+# 새로고침 갈겨도 외부 rate-limit 보호.
 
 
 @router.post("/{ticker}/price_refresh", status_code=202)
@@ -226,12 +274,11 @@ async def price_refresh(
     30s cooldown — 외부 yfinance rate limit + 가족이 무지성 클릭해도 안전.
     """
     key = ticker.upper()
-    now = time.monotonic()
-    last = _last_price_refresh.get(key, 0.0)
-    if now - last < _PRICE_REFRESH_COOLDOWN_S:
-        remaining = int(_PRICE_REFRESH_COOLDOWN_S - (now - last))
+    ok_cd, remaining = await _try_acquire_cooldown(
+        db, ticker, "price", _PRICE_REFRESH_COOLDOWN_S
+    )
+    if not ok_cd:
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
-    _last_price_refresh[key] = now
 
     async def _sync_price_only() -> None:
         async with async_session() as own_db:
@@ -271,18 +318,46 @@ async def data_refresh(
     하고 backend path 는 호환성 위해 유지. 2분 cooldown — 외부 API 보호.
     """
     key = ticker.upper()
-    now = time.monotonic()
-    last = _last_data_refresh.get(key, 0.0)
-    if now - last < _DATA_REFRESH_COOLDOWN_S:
-        remaining = int(_DATA_REFRESH_COOLDOWN_S - (now - last))
+    ok_cd, remaining = await _try_acquire_cooldown(
+        db, ticker, "data", _DATA_REFRESH_COOLDOWN_S
+    )
+    if not ok_cd:
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
-    _last_data_refresh[key] = now
 
     # 사용자 피드백 (2026-05-14): "AI 의견은 뉴스공시가 새로고침되면 당연히
     # 변경되어야 한다" — Codex 시니어 리뷰 동의. ≥1건 으로 낮춤. 0건이면
     # sync 만 끝 (외부 API 변화 없는 시점에 LLM $0.25 낭비 방지). 전체
     # 새로고침 (`/full_refresh`) 은 threshold 무시 무조건 trigger.
     _NEWS_TRIGGER_THRESHOLD = 1
+
+    # sync_news 전 시점에 last_card 기준 새 뉴스 수 hint — frontend 가 polling
+    # 시작 전 "AI 의견도 같이 갱신될 가능성" 표시 가능. 정확한 값은 background
+    # 안에서 sync 후 다시 count — 이건 ballpark hint.
+    last_card_gen_pre = (
+        await db.execute(
+            select(Analysis.generated_at)
+            .where(
+                Analysis.stock_id == stock.id,
+                Analysis.schema_version == "v2",
+            )
+            .order_by(Analysis.date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if last_card_gen_pre is None:
+        ai_refresh_likely_pre = True  # 첫 분석 — 무조건 trigger
+    else:
+        unseen_count_pre = (
+            await db.execute(
+                select(func.count())
+                .select_from(News)
+                .where(
+                    News.stock_id == stock.id,
+                    News.published_at > last_card_gen_pre,
+                )
+            )
+        ).scalar() or 0
+        ai_refresh_likely_pre = unseen_count_pre >= _NEWS_TRIGGER_THRESHOLD
 
     async def _sync_news_and_maybe_analyze() -> None:
         from app.models import News as _News
@@ -355,10 +430,10 @@ async def data_refresh(
         "status": "data_refresh_queued",
         "ticker": key,
         "auto_analyze_threshold_news": _NEWS_TRIGGER_THRESHOLD,
+        # frontend hint — sync 가 새 뉴스 0건 추가하면 actual analyze trigger
+        # 안 됨. 그래도 sync 전 시점 count 가 ≥1 이거나 첫 분석이면 likely.
+        "ai_refresh_likely": ai_refresh_likely_pre,
     }
-
-
-_last_full_refresh: dict[str, float] = {}
 
 
 @router.post("/{ticker}/full_refresh", status_code=202)
@@ -385,16 +460,15 @@ async def full_refresh(
         raise HTTPException(503, "daily analysis budget exceeded")
 
     key = ticker.upper()
-    now = time.monotonic()
-    last = _last_full_refresh.get(key, 0.0)
-    if now - last < settings.analysis_cooldown_seconds:
-        remaining = int(settings.analysis_cooldown_seconds - (now - last))
+    ok_cd, remaining = await _try_acquire_cooldown(
+        db, ticker, "full", settings.analysis_cooldown_seconds
+    )
+    if not ok_cd:
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
 
     ok, reason = await _ensure_analyzable(ticker, stock, db)
     if not ok:
         raise HTTPException(422, f"not analyzable: {reason}")
-    _last_full_refresh[key] = now
 
     async def _sync_all_then_analyze() -> None:
         import asyncio as _asyncio
@@ -445,15 +519,14 @@ async def force_refresh(
         raise HTTPException(503, "daily analysis budget exceeded")
 
     key = ticker.upper()
-    now = time.monotonic()
-    last = _last_refresh.get(key, 0.0)
-    if now - last < settings.analysis_cooldown_seconds:
-        remaining = int(settings.analysis_cooldown_seconds - (now - last))
+    ok_cd, remaining = await _try_acquire_cooldown(
+        db, ticker, "refresh", settings.analysis_cooldown_seconds
+    )
+    if not ok_cd:
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
     ok, reason = await _ensure_analyzable(ticker, stock, db)
     if not ok:
         raise HTTPException(422, f"not analyzable: {reason}")
-    _last_refresh[key] = now
     bg.add_task(analyze, ticker)
     bg.add_task(_extract_relations_safe, ticker)
     return {"status": "refresh_queued", "ticker": key}

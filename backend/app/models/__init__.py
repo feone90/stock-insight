@@ -11,6 +11,7 @@ from app.models.relation import StockRelation
 from app.models.relation_candidate import RelationCandidate
 from app.models.macro_factor import MacroFactor
 from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
+from app.models.refresh_cooldown import RefreshCooldown
 
 __all__ = [
     "Base",
@@ -30,4 +31,5 @@ __all__ = [
     "MacroFactor",
     "PoliticalSignal",
     "PoliticalSignalTicker",
+    "RefreshCooldown",
 ]

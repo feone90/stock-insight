@@ -56,6 +56,9 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   const refreshing = state === "analyzing";
   const [priceRefreshing, setPriceRefreshing] = useState(false);
   const [newsRefreshing, setNewsRefreshing] = useState(false);
+  // refreshNews 후 backend hint 표시용 — "AI 의견도 갱신 중" / "그대로".
+  // 7초 뒤 자동 사라짐 (timestamp 줄로 돌아감).
+  const [newsHint, setNewsHint] = useState<string | null>(null);
 
   const handlePriceRefresh = async () => {
     if (priceRefreshing) return;
@@ -70,8 +73,17 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   const handleNewsRefresh = async () => {
     if (newsRefreshing) return;
     setNewsRefreshing(true);
+    setNewsHint(null);
     try {
-      await refreshNews();
+      const result = await refreshNews();
+      if (result) {
+        setNewsHint(
+          result.aiRefreshLikely
+            ? "AI 의견도 같이 갱신 중..."
+            : "새 뉴스 없음 — AI 의견은 그대로",
+        );
+        setTimeout(() => setNewsHint(null), 7000);
+      }
     } finally {
       setNewsRefreshing(false);
     }
@@ -198,7 +210,8 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               timestampPrefix="최신 뉴스"
               now={now}
               tone="info"
-              title="새 뉴스/공시 수집 — 새 뉴스 2건+이면 AI 의견도 자동 재생성. 2분 cooldown."
+              title="새 뉴스/공시 수집 — 새 뉴스 1건+이면 AI 의견도 자동 재생성. 2분 cooldown."
+              overrideSubtext={newsHint}
             />
             <RefreshAction
               icon={<Brain size={16} />}
@@ -288,6 +301,7 @@ interface RefreshActionProps {
   timestamp: Date | null;
   timestampPrefix: string;
   cooldownLabel?: string | null;
+  overrideSubtext?: string | null;
   now: number;
   tone: "neutral" | "info" | "warning";
   title: string;
@@ -311,14 +325,17 @@ function RefreshAction({
   timestamp,
   timestampPrefix,
   cooldownLabel,
+  overrideSubtext,
   now,
   tone,
   title,
 }: RefreshActionProps) {
   const relative = formatKoRelative(timestamp, now);
-  // cooldown 메시지가 있으면 그쪽이 더 actionable — "N분 뒤 가능" 가 사용자
-  // 입장에선 "마지막 갱신" 보다 즉시 의미 있는 정보. 없으면 timestamp 표시.
-  const subtext = cooldownLabel
+  // 우선순위: overrideSubtext (action 직후 status) > cooldownLabel > timestamp.
+  // overrideSubtext 는 짧게 (~7초) 표시되는 backend hint (예: "AI 의견 갱신 중").
+  const subtext = overrideSubtext
+    ? overrideSubtext
+    : cooldownLabel
     ? cooldownLabel
     : timestamp
     ? `${timestampPrefix}: ${relative}`

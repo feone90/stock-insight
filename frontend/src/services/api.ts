@@ -146,10 +146,22 @@ export async function priceRefreshStock(
 /**
  * 뉴스·공시 갱신 + 새 뉴스 ≥ 1건이면 AI narrative 자동 재생성. 2분 cooldown.
  * 가격은 별도 `/price_refresh`. 재무는 분기 단위라 야간 cron 처리.
+ *
+ * `ai_refresh_likely` — sync 전 시점에 last_card 기준 새 뉴스 count 가 ≥ 1
+ * 이거나 첫 분석이면 true. background sync 후 count 가 0 이면 backend 가
+ * 실제로 analyze 안 함 (낭비 방지). 즉 hint 일 뿐 — frontend 는 generated_at
+ * advance polling 으로 actual 결과 확인.
  */
+export interface NewsRefreshResult {
+  status: string;
+  ticker: string;
+  auto_analyze_threshold_news: number;
+  ai_refresh_likely: boolean;
+}
+
 export async function newsRefreshStock(
   ticker: string,
-): Promise<{ status: string; ticker: string }> {
+): Promise<NewsRefreshResult> {
   return postJson(`/api/stocks/${ticker}/data_refresh`);
 }
 

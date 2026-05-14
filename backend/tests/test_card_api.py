@@ -139,7 +139,9 @@ async def test_refresh_blocked_by_cooldown(client, db, monkeypatch):
     monkeypatch.setattr(
         "app.api.cards.is_analyzable", AsyncMock(return_value=(True, None))
     )
-    monkeypatch.setattr("app.api.cards._last_refresh", {})
+    # 2026-05-14: in-memory `_last_refresh` dict → DB-backed `refresh_cooldowns`
+    # 테이블로 교체 (multi-worker safe). 별도 monkeypatch 불필요 — db fixture
+    # 가 테스트마다 깔끔하니 cooldown row 도 isolated.
 
     r1 = await client.post("/api/stocks/COOL/refresh")
     assert r1.status_code == 202

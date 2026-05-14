@@ -93,7 +93,7 @@ export function useStockCard(ticker: string): {
   refresh: () => Promise<void>;
   refreshAll: () => Promise<void>;
   refreshPrice: () => Promise<void>;
-  refreshNews: () => Promise<void>;
+  refreshNews: () => Promise<{ aiRefreshLikely: boolean } | null>;
   triggerAnalyze: () => Promise<void>;
 } {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -211,11 +211,14 @@ export function useStockCard(ticker: string): {
     // Backend 가 새 뉴스 ≥ 1건이면 analyze() 자동 trigger — 그건 더 오래 걸려서
     // (30-60s LLM) 여기 light polling 으로 못 감지. 사용자에게는 일단
     // news_latest_at advance 시점에 success 표시하고, AI 의견은 generated_at
-    // 비교로 후속 polling.
+    // 비교로 후속 polling. Backend 응답의 `ai_refresh_likely` hint 반환해
+    // UI 가 "AI 의견도 갱신 중" / "그대로" 즉시 표시 가능.
     const prevNewsLatest = cardRef.current?.news_latest_at;
     const prevGeneratedAt = cardRef.current?.generated_at;
+    let aiRefreshLikely = false;
     try {
-      await newsRefreshStock(ticker);
+      const meta = await newsRefreshStock(ticker);
+      aiRefreshLikely = !!meta.ai_refresh_likely;
     } catch (e) {
       console.warn("data_refresh:", e);
     }
@@ -229,12 +232,13 @@ export function useStockCard(ticker: string): {
         const c2 = await getStockCard(ticker);
         if (prevGeneratedAt && c2.generated_at !== prevGeneratedAt) {
           dispatch({ type: "loadOk", card: c2 });
-          return;
+          return { aiRefreshLikely };
         }
       } catch {
         /* keep polling */
       }
     }
+    return { aiRefreshLikely };
   }, [ticker]);
 
   const triggerAnalyze = useCallback(async () => {
