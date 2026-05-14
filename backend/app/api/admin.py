@@ -136,6 +136,12 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
       - sector_match        : universe-wide KSIC→GICS sector_match
       - news_extraction     : 뉴스 LLM RAG competitor/inverse 추출
       - sec_8k              : SEC 8-K Item 1.01 contract 추출
+      - sec_10k_risk        : SEC 10-K Item 1A Risk Factors LLM RAG (Codex G)
+      - dart_contract       : DART 단일판매·공급계약 LLM RAG (Codex F, KR 8-K)
+      - regulatory_coshock  : political_signal_tickers → regulatory_link (Codex H)
+      - ontology_refresh_all: 위 ontology 추출 5종 (news + sec_8k + 10k + dart + coshock)
+                              + sector_match 한 번에 실행. 사용자가 카드에 새 관계를
+                              제대로 노출시키고 싶을 때 최초 backfill / 주기 refresh 용
       - inverse_verify      : inverse signal 가격 상관관계 검증
       - universe_refresh    : reference universe (KOSPI + S&P 500) refresh
       - sync_favorites      : 즐겨찾기 종목 가격/재무/뉴스/공시 동기화
@@ -147,7 +153,12 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
         run_sec_8k_extraction,
         scheduled_sync_job,
     )
-    from app.services.ontology import universe_wide_sector_match
+    from app.services.ontology import (
+        extract_10k_risk_for_universe,
+        extract_dart_contracts_for_universe,
+        extract_regulatory_coshock,
+        universe_wide_sector_match,
+    )
     from app.services.universe import nightly_universe_refresh
 
     from app.collectors.truth_social import sync_truth_social
@@ -162,11 +173,46 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
         async with _async_session() as db:
             return await analyze_pending_signals(db)
 
+    async def _ontology_refresh_all():
+        """F/G/H + 기존 news/sec_8k + sector_match 한 번에. 첫 backfill 또는
+        주기 refresh 용. 시간 오래 걸림 (universe 전체, LLM 다회 호출). 결과는
+        summary dict."""
+        out: dict = {}
+        try:
+            out["sector_match"] = await universe_wide_sector_match()
+        except Exception as e:  # noqa: BLE001
+            out["sector_match"] = {"error": str(e)}
+        try:
+            out["news_extraction"] = await run_news_extraction()
+        except Exception as e:  # noqa: BLE001
+            out["news_extraction"] = {"error": str(e)}
+        try:
+            out["sec_8k"] = await run_sec_8k_extraction()
+        except Exception as e:  # noqa: BLE001
+            out["sec_8k"] = {"error": str(e)}
+        try:
+            out["sec_10k_risk"] = await extract_10k_risk_for_universe()
+        except Exception as e:  # noqa: BLE001
+            out["sec_10k_risk"] = {"error": str(e)}
+        try:
+            out["dart_contract"] = await extract_dart_contracts_for_universe()
+        except Exception as e:  # noqa: BLE001
+            out["dart_contract"] = {"error": str(e)}
+        try:
+            out["regulatory_coshock"] = await extract_regulatory_coshock()
+        except Exception as e:  # noqa: BLE001
+            out["regulatory_coshock"] = {"error": str(e)}
+        return out
+
     jobs = {
         "fred": run_fred_macro_sync,
         "sector_match": universe_wide_sector_match,
         "news_extraction": run_news_extraction,
         "sec_8k": run_sec_8k_extraction,
+        "sec_10k_risk": extract_10k_risk_for_universe,
+        "dart_contract": extract_dart_contracts_for_universe,
+        "regulatory_coshock": extract_regulatory_coshock,
+        "ontology_refresh_all": _ontology_refresh_all,
         "inverse_verify": run_inverse_verification,
         "universe_refresh": nightly_universe_refresh,
         "sync_favorites": scheduled_sync_job,
