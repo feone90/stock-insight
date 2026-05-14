@@ -90,6 +90,35 @@ const TIER_COLOR_DARK: Record<number, string> = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ForceGraphRef = any;
 
+// 2026-05-14: 카드 3-tier(core/business/context)와 그래프 시각 hierarchy 일치
+// 시키려는 분류. classifyEdgeTier 는 edge 의 source/relation_type/confidence
+// 셋으로 강도 판정. core = filing 또는 high-conf news, business = news rationale,
+// context = sector_match peer. project_ontology_codex_review §사용자 정정.
+type EdgeTier = "core" | "business" | "context";
+
+function classifyEdgeTier(link: GraphLink): EdgeTier {
+  // context: mechanical sector match 또는 peer/group/theme/macro
+  if (
+    link.src_label === "sector_match" ||
+    link.relation_type === "peer" ||
+    link.relation_type === "group" ||
+    link.relation_type === "theme" ||
+    link.relation_type === "macro"
+  ) {
+    return "context";
+  }
+  // core: filing 증거 or confidence >= 0.8
+  if (
+    link.src_label === "sec_8k" ||
+    link.src_label === "sec_10k_risk" ||
+    link.src_label === "dart_contract" ||
+    (link.confidence ?? 0) >= 0.8
+  ) {
+    return "core";
+  }
+  return "business";
+}
+
 export function OntologyGraph({ ticker }: { ticker: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fgRef = useRef<ForceGraphRef>(null);
@@ -98,6 +127,8 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [depth, setDepth] = useState(1);
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
+  // 카드 3-tier UI 와 일관 — sector peer 숨기면 진짜 신호만 한눈에.
+  const [showContext, setShowContext] = useState(true);
   const { mode } = useTheme();
 
   // 노드 간 거리 / charge 강하게 — 라벨 안 겹치게.
@@ -147,17 +178,38 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
   }, []);
 
   // Data shape that react-force-graph mutates in place — useMemo so the
-  // simulation isn't reset on every parent re-render.
-  const graphData = useMemo(
-    () =>
-      data
-        ? {
-            nodes: data.nodes.map((n) => ({ ...n })),
-            links: data.links.map((l) => ({ ...l })),
-          }
-        : null,
-    [data],
-  );
+  // simulation isn't reset on every parent re-render. Context filter 도
+  // 이 시점에 적용 — toggle 시 새 simulation 으로 re-layout.
+  const graphData = useMemo(() => {
+    if (!data) return null;
+    const links = data.links
+      .map((l) => ({ ...l }))
+      .filter((l) => showContext || classifyEdgeTier(l) !== "context");
+    // context hide 시 고립 노드도 제거. center 는 항상 keep.
+    const linkedTickers = new Set<string>();
+    for (const l of links) {
+      const s = typeof l.source === "string" ? l.source : (l.source as unknown as { ticker?: string })?.ticker;
+      const t = typeof l.target === "string" ? l.target : (l.target as unknown as { ticker?: string })?.ticker;
+      if (s) linkedTickers.add(s);
+      if (t) linkedTickers.add(t);
+    }
+    const nodes = data.nodes
+      .map((n) => ({ ...n }))
+      .filter((n) => showContext || n.is_center || linkedTickers.has(n.ticker));
+    return { nodes, links };
+  }, [data, showContext]);
+
+  const tierCounts = useMemo(() => {
+    if (!data) return { core: 0, business: 0, context: 0 };
+    let core = 0, business = 0, context = 0;
+    for (const l of data.links) {
+      const t = classifyEdgeTier(l);
+      if (t === "core") core++;
+      else if (t === "business") business++;
+      else context++;
+    }
+    return { core, business, context };
+  }, [data]);
 
   if (error) {
     return (
@@ -183,7 +235,15 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <span className="font-medium">{data.center}</span>
         <span className="text-[var(--surface-text-muted)]">
-          노드 {data.nodes.length} · 연결 {data.links.length}
+          <span className="text-amber-700 dark:text-amber-300 font-medium">
+            핵심 {tierCounts.core}
+          </span>
+          {" · "}
+          <span>사업 {tierCounts.business}</span>
+          {" · "}
+          <span className="text-[var(--surface-text-subtle)]">
+            컨텍스트 {tierCounts.context}
+          </span>
         </span>
         <div className="flex gap-1">
           {[1, 2].map((d) => (
@@ -201,6 +261,18 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={() => setShowContext((v) => !v)}
+          className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+            showContext
+              ? "border-[var(--surface-border)] text-[var(--surface-text-muted)] hover:bg-[var(--surface-section-hover)]"
+              : "bg-amber-500 text-white border-amber-500"
+          }`}
+          title="동종업계 / 그룹 / 테마 같은 컨텍스트 관계 숨기기 → 핵심 신호만 한눈에"
+        >
+          {showContext ? "🎯 핵심만 보기" : "🔗 컨텍스트도 보기"}
+        </button>
         <Legend />
       </div>
       <div
@@ -260,14 +332,27 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             }}
             linkColor={(l) => {
               const link = l as GraphLink;
-              return (
-                RELATION_COLOR[link.relation_type] ?? RELATION_COLOR.peer
-              );
+              const tier = classifyEdgeTier(link);
+              // Tier 기반 색/투명도 — 카드 3-tier 와 일관. core 는 진하고,
+              // context 는 매우 옅어 진짜 신호가 시각적으로 떠오름.
+              if (tier === "context") {
+                return mode === "dark"
+                  ? "rgba(148, 163, 184, 0.18)"  // slate 400 18%
+                  : "rgba(148, 163, 184, 0.22)";
+              }
+              if (tier === "core") {
+                // core 는 amber 강조 + relation_type 색 mix. 가장 두드러지게.
+                return RELATION_COLOR[link.relation_type] ?? "#f59e0b";
+              }
+              // business — 원 relation_type 색
+              return RELATION_COLOR[link.relation_type] ?? RELATION_COLOR.peer;
             }}
             linkWidth={(l) => {
               const link = l as GraphLink;
-              // peer (sector) 는 가는 옅은 선, 그 외 의미 있는 관계는 굵게.
-              const base = link.relation_type === "peer" ? 0.6 : 1.5;
+              const tier = classifyEdgeTier(link);
+              // Tier 별 굵기 차이를 크게. context 는 매우 가늘게, core 는 굵게.
+              if (tier === "context") return 0.4;
+              const base = tier === "core" ? 2.5 : 1.5;
               return base + link.strength * link.confidence * 3.5;
             }}
             linkLineDash={(l) =>
@@ -413,33 +498,20 @@ function Legend() {
   return (
     <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--surface-text-muted)]">
       <span className="flex items-center gap-1">
-        <Dot color="#f59e0b" /> 중심
+        <LineSwatch color="#dc2626" thick /> 🔑 핵심 (filing·고신뢰)
       </span>
       <span className="flex items-center gap-1">
-        <Dot color="#0ea5e9" /> tier 2 (관심)
+        <LineSwatch color="#a855f7" /> 📝 사업 (뉴스 인용)
       </span>
       <span className="flex items-center gap-1">
-        <Dot color="#94a3b8" /> tier 1
-      </span>
-      <span className="text-[var(--surface-text-subtle)]">|</span>
-      <span className="flex items-center gap-1">
-        <LineSwatch color="#dc2626" thick /> 경쟁
-      </span>
-      <span className="flex items-center gap-1">
-        <LineSwatch color="#2563eb" thick /> 공급계약
-      </span>
-      <span className="flex items-center gap-1">
-        <LineSwatch color="#a855f7" thick /> 상호보완
-      </span>
-      <span className="flex items-center gap-1">
-        <LineSwatch color="rgba(148,163,184,0.7)" /> 동종업계
+        <LineSwatch color="rgba(148,163,184,0.4)" /> 🔗 컨텍스트 (동종)
       </span>
       <span className="flex items-center gap-1">
         <span
           className="inline-block w-4 h-0 border-t border-dashed"
           style={{ borderColor: "#dc2626" }}
         />
-        역신호
+        ⇄ 역신호
       </span>
     </div>
   );
