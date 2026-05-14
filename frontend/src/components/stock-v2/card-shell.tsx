@@ -9,6 +9,7 @@ import { useTheme } from "@/lib/use-theme";
 import { AtAGlancePanel } from "./at-a-glance-panel";
 import { CardHeader } from "./card-header";
 import { DecisionSection } from "./decision-section";
+import { FlowSection } from "./flow-section";
 import { FundamentalsSection } from "./fundamentals-section";
 import { HeroChart } from "./hero-chart";
 import { MacroSection } from "./macro-section";
@@ -177,6 +178,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                 <NewsSection news={card.news} political={card.political_signals} />
                 <MacroSection macro={card.macro} />
                 <FundamentalsSection fundamentals={card.fundamentals} />
+                {card.flow ? <FlowSection flow={card.flow} /> : null}
                 <TechMomentumSection technical={card.technical} />
               </div>
 

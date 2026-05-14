@@ -142,6 +142,19 @@ export interface Fundamentals {
   citations: number[];
 }
 
+// KR-only — pykrx 수급(외국인/기관 5d 순매수) + 공매도 잔고/회전.
+// US 종목은 null. 가족 친화 카피는 frontend 책임 — 정량값만 raw 로 받음.
+export interface Flow {
+  foreign_net_5d_krw: number | null;
+  inst_net_5d_krw: number | null;
+  foreign_streak_days: number;
+  inst_streak_days: number;
+  short_balance_ratio: number | null;
+  short_balance_30d_avg: number | null;
+  short_turnover_today_pct: number | null;
+  as_of: string | null;
+}
+
 export interface Catalyst {
   when: string;
   event: string;
@@ -217,6 +230,7 @@ export interface StockCard {
   political_signals: PoliticalSignalCard[];
   macro: MacroContext;
   fundamentals: Fundamentals;
+  flow?: Flow | null;  // KR-only pykrx 수급+공매도. US/없는 종목은 null/undefined.
   decision: Decision;
 
   citations: Citation[];

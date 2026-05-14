@@ -22,9 +22,11 @@ from app.database import async_session
 from app.models import Financial, News, Stock
 from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.relation import StockRelation
+from app.collectors.krx_flow import fetch_kr_flow
 from app.schemas.card import (
     Citation,
     DataLayer,
+    Flow,
     Fundamentals,
     MacroContext,
     NewsItem,
@@ -87,13 +89,16 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     """
     ticker = ticker.strip().upper()
 
-    indicators_co, macro_co, fund_co, news_co, rel_co, pol_co = await asyncio.gather(
+    (
+        indicators_co, macro_co, fund_co, news_co, rel_co, pol_co, flow_co,
+    ) = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
         _fetch_fundamentals(ticker),
         _fetch_recent_news(ticker),
         _fetch_relations_data(ticker),
         _fetch_political_signals(ticker),
+        _fetch_flow(ticker),
         return_exceptions=True,
     )
 
@@ -105,6 +110,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     news = await _build_news(news_co, pool)
     relations_data = _build_relations(rel_co, ticker, pool)
     political_signals = _build_political_signals(pol_co)
+    flow = _build_flow(flow_co, pool)
 
     if isinstance(rel_co, dict) and rel_co.get("is_stale"):
         # Fire-and-forget background refresh — do NOT await
@@ -114,6 +120,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         technical=technical,
         macro=macro,
         fundamentals=fundamentals,
+        flow=flow,
         news=news,
         political_signals=political_signals,
         relations_data=relations_data,
@@ -167,6 +174,40 @@ def _build_macro(res: Any, pool: _CitationPool) -> MacroContext | None:
         sensitivities=[],
         upcoming_events=res.get("upcoming_events", []),
         citations=[cid],
+    )
+
+
+def _build_flow(res: Any, pool: _CitationPool) -> Flow | None:
+    """pykrx 결과 → Flow. 모든 필드가 비어있으면 None (섹션 숨김).
+
+    카드 노출 시 가족 친화 카피로 변환은 frontend 책임 — 여기선 raw 정량값만.
+    """
+    if res is None or isinstance(res, Exception) or not isinstance(res, dict):
+        if isinstance(res, Exception):
+            logger.warning("data_layer flow failed: %s", res)
+        return None
+    if res.get("error"):
+        return None
+    has_flow = (
+        res.get("foreign_net_5d_krw") is not None
+        or res.get("inst_net_5d_krw") is not None
+    )
+    has_short = res.get("short_balance_ratio") is not None
+    if not (has_flow or has_short):
+        return None  # 모든 source 가 비어있으면 섹션 자체를 숨긴다
+    pool.add(
+        "market_data",
+        f"KRX 수급·공매도 ({res.get('as_of') or '최근'})",
+    )
+    return Flow(
+        foreign_net_5d_krw=res.get("foreign_net_5d_krw"),
+        inst_net_5d_krw=res.get("inst_net_5d_krw"),
+        foreign_streak_days=res.get("foreign_streak_days") or 0,
+        inst_streak_days=res.get("inst_streak_days") or 0,
+        short_balance_ratio=res.get("short_balance_ratio"),
+        short_balance_30d_avg=res.get("short_balance_30d_avg"),
+        short_turnover_today_pct=res.get("short_turnover_today_pct"),
+        as_of=res.get("as_of"),
     )
 
 
@@ -292,6 +333,19 @@ def _build_relations(
 # ---------------------------------------------------------------------------
 # DB-backed fetchers (own session)
 # ---------------------------------------------------------------------------
+
+
+async def _fetch_flow(ticker: str) -> dict | None:
+    """KR 종목 한정 — pykrx 수급/공매도 스냅샷. US/없는 종목은 None."""
+    from app.markets import is_kr
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock or not is_kr(stock.market):
+            return None
+    return await asyncio.to_thread(fetch_kr_flow, ticker)
 
 
 async def _fetch_fundamentals(ticker: str) -> dict:

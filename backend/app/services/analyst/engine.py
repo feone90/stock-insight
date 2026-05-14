@@ -297,6 +297,7 @@ def compose(
         political_signals=data.political_signals,
         macro=macro,
         fundamentals=fundamentals,
+        flow=data.flow,  # KR-only pykrx 수급+공매도. US/누락은 None → frontend 섹션 숨김.
         decision=decision,
         citations=final_citations,
         analysis_id=str(uuid.uuid4()),

@@ -175,6 +175,26 @@ class Fundamentals(BaseModel):
     citations: list[int] = []
 
 
+class Flow(BaseModel):
+    """KR 종목 — 외국인/기관 수급 + 공매도 잔고/회전.
+
+    pykrx 보강(2026-05-14, Codex 시니어 트레이더 리뷰 권고). yfinance / dartlab
+    이 못 채우는 영역. US 종목은 항상 None.
+
+    카드 노출 시 가족 친화 카피로 변환 — feedback_card_user_facing_copy 메모
+    참조. 예: foreign_net_5d_krw=+120억 → "외국인이 최근 5일 동안 120억원
+    순매수 (사들이고 있음)".
+    """
+    foreign_net_5d_krw: int | None = None    # 외국인 5거래일 순매수 (원)
+    inst_net_5d_krw: int | None = None       # 기관 5거래일 순매수 (원)
+    foreign_streak_days: int = 0             # +N 연속 매수 / -N 연속 매도
+    inst_streak_days: int = 0
+    short_balance_ratio: float | None = None     # 공매도 잔고 / 상장주식 (%)
+    short_balance_30d_avg: float | None = None   # 30일 평균 (비교 baseline)
+    short_turnover_today_pct: float | None = None  # 오늘 공매도 거래량 비중
+    as_of: str | None = None                 # 최근 거래일 (YYYY-MM-DD)
+
+
 class PoliticalSignalCard(BaseModel):
     """카드의 뉴스/이슈 섹션에 별도 highlight되는 정치 발언. 미래 자동매매
     trigger row의 read-only view. ticker별로 영향 metadata 포함."""
@@ -256,6 +276,7 @@ class StockCard(BaseModel):
     political_signals: list[PoliticalSignalCard] = []
     macro: MacroContext
     fundamentals: Fundamentals
+    flow: Flow | None = None   # KR-only: 외국인/기관 수급 + 공매도. US/누락 종목은 None.
     decision: Decision
 
     citations: list[Citation] = []
@@ -281,6 +302,7 @@ class DataLayer(BaseModel):
     technical: TechMomentum | None = None
     macro: MacroContext | None = None
     fundamentals: Fundamentals | None = None
+    flow: Flow | None = None  # KR-only (pykrx 수급 + 공매도)
     news: list[NewsItem] = []
     political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []
