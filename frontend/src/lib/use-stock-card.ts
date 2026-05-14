@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { analyzeStock, getStockCard, refreshStockCard } from "@/services/api";
 import type { StockCard } from "@/types/card";
 
@@ -55,6 +55,14 @@ export function useStockCard(ticker: string): {
 } {
   const [state, dispatch] = useReducer(reducer, initialState);
 
+  // refresh polling 이 옛 카드를 새 카드로 오판하지 않게, 현재 카드의
+  // generated_at 을 ref 로 추적. backend 가 background 로 재분석하는 동안
+  // 첫 200 응답은 옛 row 그대로 — 옛 generated_at 과 같으면 계속 polling.
+  const cardRef = useRef<StockCard | null>(null);
+  useEffect(() => {
+    cardRef.current = state.card;
+  }, [state.card]);
+
   useEffect(() => {
     let cancelled = false;
     dispatch({ type: "loadStart" });
@@ -75,6 +83,7 @@ export function useStockCard(ticker: string): {
   }, [ticker]);
 
   const refresh = useCallback(async () => {
+    const prevGeneratedAt = cardRef.current?.generated_at;
     dispatch({ type: "analyzeStart" });
     try {
       // Backend returns `{status, ticker}` (background task), not a card.
@@ -90,10 +99,15 @@ export function useStockCard(ticker: string): {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       try {
         const c = await getStockCard(ticker);
-        dispatch({ type: "loadOk", card: c });
-        return;
+        // 옛 카드면(같은 generated_at) backend 가 아직 새 row 안 만든 상태 —
+        // 계속 polling. 그래야 사용자 화면의 "마지막 분석 N분 전"이 정말 새
+        // 시각으로 갱신된다.
+        if (!prevGeneratedAt || c.generated_at !== prevGeneratedAt) {
+          dispatch({ type: "loadOk", card: c });
+          return;
+        }
       } catch {
-        // Old row may still be returned briefly — accept any non-error read.
+        // 404 / 일시 에러 가능 — 계속 polling.
       }
     }
     dispatch({
