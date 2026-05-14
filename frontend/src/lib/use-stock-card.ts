@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
   analyzeStock,
+  fullRefreshStock,
   getStockCard,
   newsRefreshStock,
   priceRefreshStock,
@@ -14,6 +15,39 @@ export type CardLoadState = "loading" | "analyzing" | "ready" | "error";
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_MAX_ATTEMPTS = 18; // ~90s — typical analyze pipeline finishes in 30-60s
+
+// Light refresh (price / news) polling — server-side overlay 가 즉시 fresh
+// price_asof / news_latest_at 반환 보장하지만, sync_prices/sync_news background
+// task 가 완료될 때까지 약간의 지연 (yfinance 1콜 + DB INSERT 평균 1-2s).
+// 500ms 간격 최대 6회 (3s 예산) — 옛 인위 3s sleep 보다 평균 빠름 + worst-case 동일.
+const LIGHT_POLL_INTERVAL_MS = 500;
+const LIGHT_POLL_MAX_ATTEMPTS = 6;
+
+async function pollUntilAdvanced(
+  ticker: string,
+  pickTimestamp: (c: StockCard) => string | null | undefined,
+  prevValue: string | null | undefined,
+): Promise<StockCard | null> {
+  for (let i = 0; i < LIGHT_POLL_MAX_ATTEMPTS; i++) {
+    await new Promise((r) => setTimeout(r, LIGHT_POLL_INTERVAL_MS));
+    try {
+      const c = await getStockCard(ticker);
+      const next = pickTimestamp(c);
+      // 새 값이 옛 값보다 advance 했거나, 옛 값이 null 이었는데 새 값 박힘 — done.
+      if (next && next !== prevValue) {
+        return c;
+      }
+    } catch {
+      /* transient — keep polling */
+    }
+  }
+  // budget 소진 — 그래도 최신 카드 1회 반환 시도 (적어도 React state 새 ref).
+  try {
+    return await getStockCard(ticker);
+  } catch {
+    return null;
+  }
+}
 
 interface State {
   card: StockCard | null;
@@ -57,6 +91,7 @@ export function useStockCard(ticker: string): {
   state: CardLoadState;
   error: string | null;
   refresh: () => Promise<void>;
+  refreshAll: () => Promise<void>;
   refreshPrice: () => Promise<void>;
   refreshNews: () => Promise<void>;
   triggerAnalyze: () => Promise<void>;
@@ -124,43 +159,81 @@ export function useStockCard(ticker: string): {
     });
   }, [ticker]);
 
+  const refreshAll = useCallback(async () => {
+    // 전체 새로고침 — backend 가 sync_prices + sync_news + sync_disclosures
+    // 후 analyze() 무조건. LLM $0.25, 5분 cooldown. generated_at advance 까지
+    // long poll (analyze 평균 30-60s).
+    const prevGeneratedAt = cardRef.current?.generated_at;
+    dispatch({ type: "analyzeStart" });
+    try {
+      await fullRefreshStock(ticker);
+    } catch (e) {
+      dispatch({
+        type: "loadErr",
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const c = await getStockCard(ticker);
+        if (!prevGeneratedAt || c.generated_at !== prevGeneratedAt) {
+          dispatch({ type: "loadOk", card: c });
+          return;
+        }
+      } catch {
+        /* keep polling */
+      }
+    }
+    dispatch({
+      type: "loadErr",
+      error: "전체 새로고침이 1분 30초 안에 끝나지 않았어요. 잠시 후 새로고침 해보세요.",
+    });
+  }, [ticker]);
+
   const refreshPrice = useCallback(async () => {
-    // sync_prices 1개만 — 외부 API 1콜, 가볍게. 카드 표면은 price_asof 만
-    // 바뀜 (generated_at 동일). 차트·헤더 가격은 즉시 fresh.
+    // sync_prices 1개만 — 외부 API 1콜, 가볍게. server-side overlay 가 fresh
+    // price_asof 즉시 반환하지만 backend background task 끝나기 전엔 옛 값.
+    // 500ms × 6회 polling 으로 price_asof advance 감지하면 stop.
+    const prevPriceAsof = cardRef.current?.price_asof;
     try {
       await priceRefreshStock(ticker);
     } catch (e) {
       console.warn("price_refresh:", e);
     }
-    // sync_prices 평균 2-3초 — 3초 후 re-fetch 면 새 PriceHistory 행이 박혀
-    // price_asof 가 update 된 카드 받음.
-    await new Promise((r) => setTimeout(r, 3000));
-    try {
-      const c = await getStockCard(ticker);
-      dispatch({ type: "loadOk", card: c });
-    } catch {
-      /* keep existing card */
-    }
+    const c = await pollUntilAdvanced(ticker, (x) => x.price_asof, prevPriceAsof);
+    if (c) dispatch({ type: "loadOk", card: c });
   }, [ticker]);
 
   const refreshNews = useCallback(async () => {
-    // 뉴스+공시 sync + smart-trigger (≥ 2 new → analyze 자동). 카드 표면:
-    // news_latest_at 즉시 변경. 새 뉴스가 임계치 넘으면 backend 가 analyze()
-    // 호출해 generated_at 도 갱신되지만, 그건 별도 polling 안 함 — 사용자가
-    // 후속으로 카드를 다시 열거나 'AI 의견 다시' 누를 때 반영. (시니어
-    // 트레이더 리뷰: 한 버튼이 LLM trigger 까지 책임지면 사용자가 비용 발생
-    // 시점을 못 예측한다 — auto-trigger 는 의식적으로 silent 처리.)
+    // 뉴스+공시 sync. server-side overlay 가 news_latest_at fresh 보장.
+    // Backend 가 새 뉴스 ≥ 1건이면 analyze() 자동 trigger — 그건 더 오래 걸려서
+    // (30-60s LLM) 여기 light polling 으로 못 감지. 사용자에게는 일단
+    // news_latest_at advance 시점에 success 표시하고, AI 의견은 generated_at
+    // 비교로 후속 polling.
+    const prevNewsLatest = cardRef.current?.news_latest_at;
+    const prevGeneratedAt = cardRef.current?.generated_at;
     try {
       await newsRefreshStock(ticker);
     } catch (e) {
       console.warn("data_refresh:", e);
     }
-    await new Promise((r) => setTimeout(r, 3000));
-    try {
-      const c = await getStockCard(ticker);
-      dispatch({ type: "loadOk", card: c });
-    } catch {
-      /* keep existing card */
+    const c1 = await pollUntilAdvanced(ticker, (x) => x.news_latest_at, prevNewsLatest);
+    if (c1) dispatch({ type: "loadOk", card: c1 });
+    // Best-effort: AI 의견 자동 재생성 polling (longer budget). generated_at
+    // advance 안 하면 (새 뉴스 0건 → backend 가 trigger 스킵) 그대로 끝.
+    for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const c2 = await getStockCard(ticker);
+        if (prevGeneratedAt && c2.generated_at !== prevGeneratedAt) {
+          dispatch({ type: "loadOk", card: c2 });
+          return;
+        }
+      } catch {
+        /* keep polling */
+      }
     }
   }, [ticker]);
 
@@ -198,6 +271,7 @@ export function useStockCard(ticker: string): {
     state: state.status,
     error: state.error,
     refresh,
+    refreshAll,
     refreshPrice,
     refreshNews,
     triggerAnalyze,

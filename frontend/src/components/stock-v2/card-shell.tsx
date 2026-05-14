@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, LineChart, Moon, Newspaper, RefreshCw, Star, Sun } from "lucide-react";
+import { Brain, LineChart, Moon, Newspaper, RefreshCw, RotateCw, Star, Sun } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { addFavorite, getStock, removeFavorite } from "@/services/api";
 import { onUserChanged } from "@/services/user";
@@ -51,7 +51,7 @@ function formatKoRelative(d: Date | null, now: number): string {
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const { mode, toggle } = useTheme();
-  const { card, state, refresh, refreshPrice, refreshNews, triggerAnalyze } =
+  const { card, state, refresh, refreshAll, refreshPrice, refreshNews, triggerAnalyze } =
     useStockCard(ticker);
   const refreshing = state === "analyzing";
   const [priceRefreshing, setPriceRefreshing] = useState(false);
@@ -152,7 +152,30 @@ export function StockCardPage({ ticker }: { ticker: string }) {
         </div>
 
         {card ? (
-          <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <>
+            <div className="mb-3">
+              <button
+                type="button"
+                onClick={refreshAll}
+                disabled={refreshing || cooldownActive}
+                aria-label="전체 새로고침"
+                title={
+                  refreshing
+                    ? "분석 중..."
+                    : cooldownActive
+                    ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
+                    : "가격·뉴스·공시 다 받고 AI 의견까지 새로 만들기 — LLM ~$0.25, 약 1분 소요. 5분 cooldown."
+                }
+                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-blue-500/50 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 transition-colors px-4 min-h-11 text-sm font-medium w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RotateCw size={16} className={refreshing ? "animate-spin" : ""} />
+                <span>{refreshing ? "전체 새로고침 중..." : "전체 새로고침 (가격·뉴스·AI 의견)"}</span>
+              </button>
+              <p className="mt-1 text-[11px] text-[var(--surface-text-subtle)]">
+                급할 땐 이 버튼 하나로 끝 — 약 1분, $0.25. 부분만 받고 싶으면 아래 3개.
+              </p>
+            </div>
+            <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
             <RefreshAction
               icon={<LineChart size={16} />}
               label="가격 새로고침"
@@ -197,7 +220,8 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                   : "전체 의견 재생성 — LLM 2-stage (~$0.25, 30~60초). 5분 cooldown."
               }
             />
-          </div>
+            </div>
+          </>
         ) : null}
 
         {state === "loading" && !card ? (

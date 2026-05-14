@@ -22,7 +22,7 @@ from app.collectors.stock_price import sync_prices
 from app.config import settings
 from app.database import async_session, get_db
 from app.dependencies import get_stock_or_404
-from app.models import News, Stock
+from app.models import News, PriceHistory, Stock
 from app.models.analysis import Analysis
 from app.models.financial import Financial
 from app.services.analyst.cost import can_proceed
@@ -146,7 +146,32 @@ async def get_card(
             status_code=404,
             detail=f"v2 card for {ticker.upper()} not yet generated. POST /analyze first.",
         )
-    return row.card_data
+
+    # 2026-05-14: Per-layer freshness overlay. card_data JSONB 는 analyze()
+    # 실행 시점의 스냅샷. 그 후 /price_refresh, /data_refresh 가 새 PriceHistory
+    # / News row 박아도 card_data 안의 price_asof / news_latest_at 은 옛 값
+    # 그대로 → 카드 헤더에 "가격 데이터 없음" / 옛 시각 표시되는 버그.
+    # 두 필드만 DB MAX 로 항상 fresh 하게 overlay. card_data 본체 X.
+    card = dict(row.card_data)  # JSONB → mutable dict copy
+    price_max = (
+        await db.execute(
+            select(func.max(PriceHistory.date)).where(
+                PriceHistory.stock_id == stock.id
+            )
+        )
+    ).scalar()
+    if price_max is not None:
+        card["price_asof"] = price_max.isoformat() if hasattr(price_max, "isoformat") else str(price_max)
+    news_max = (
+        await db.execute(
+            select(func.max(News.published_at)).where(News.stock_id == stock.id)
+        )
+    ).scalar()
+    if news_max is not None:
+        card["news_latest_at"] = (
+            news_max.isoformat() if hasattr(news_max, "isoformat") else str(news_max)
+        )
+    return card
 
 
 @router.post("/{ticker}/analyze", status_code=202)
@@ -253,7 +278,11 @@ async def data_refresh(
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
     _last_data_refresh[key] = now
 
-    _NEWS_TRIGGER_THRESHOLD = 2  # 새 뉴스 2건+ → AI 의견 자동 재생성
+    # 사용자 피드백 (2026-05-14): "AI 의견은 뉴스공시가 새로고침되면 당연히
+    # 변경되어야 한다" — Codex 시니어 리뷰 동의. ≥1건 으로 낮춤. 0건이면
+    # sync 만 끝 (외부 API 변화 없는 시점에 LLM $0.25 낭비 방지). 전체
+    # 새로고침 (`/full_refresh`) 은 threshold 무시 무조건 trigger.
+    _NEWS_TRIGGER_THRESHOLD = 1
 
     async def _sync_news_and_maybe_analyze() -> None:
         from app.models import News as _News
@@ -327,6 +356,82 @@ async def data_refresh(
         "ticker": key,
         "auto_analyze_threshold_news": _NEWS_TRIGGER_THRESHOLD,
     }
+
+
+_last_full_refresh: dict[str, float] = {}
+
+
+@router.post("/{ticker}/full_refresh", status_code=202)
+async def full_refresh(
+    ticker: str,
+    bg: BackgroundTasks,
+    stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """전체 새로고침 — 가격 + 뉴스 + 공시 동기화 후 무조건 AI 재생성.
+
+    3 버튼 (가격 / 뉴스공시 / AI 의견) 따로 누르는 부담을 줄이려는 사용자
+    요청 (2026-05-14). 이건 비싼 액션 — LLM $0.25 + 외부 API 3-4 콜.
+    5분 cooldown 으로 `/refresh` 와 동일 비용 protection.
+
+    배경:
+      1. sync_prices / sync_news / sync_disclosures 병렬 (asyncio.gather)
+      2. analyze() — 비용 발생 단계, threshold 없이 무조건.
+
+    smart-trigger (`/data_refresh` 의 ≥1건 조건) 가드는 적용 안 함 — "전체
+    새로고침" 클릭 자체가 사용자의 명시적 LLM 비용 동의로 해석.
+    """
+    if not can_proceed():
+        raise HTTPException(503, "daily analysis budget exceeded")
+
+    key = ticker.upper()
+    now = time.monotonic()
+    last = _last_full_refresh.get(key, 0.0)
+    if now - last < settings.analysis_cooldown_seconds:
+        remaining = int(settings.analysis_cooldown_seconds - (now - last))
+        raise HTTPException(429, f"cooldown: try again in {remaining}s")
+
+    ok, reason = await _ensure_analyzable(ticker, stock, db)
+    if not ok:
+        raise HTTPException(422, f"not analyzable: {reason}")
+    _last_full_refresh[key] = now
+
+    async def _sync_all_then_analyze() -> None:
+        import asyncio as _asyncio
+
+        async with async_session() as own_db:
+            fresh = (
+                await own_db.execute(
+                    select(Stock).where(Stock.ticker == ticker)
+                )
+            ).scalar_one_or_none()
+            if not fresh:
+                return
+
+            async def _safe(fn) -> None:
+                try:
+                    await fn(own_db, fresh)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "full_refresh %s collector %s failed: %s",
+                        ticker, fn.__name__, e,
+                    )
+
+            # 가족 dev — own_db 는 단일 세션이라 진짜 병렬 X (직렬 await).
+            # sync_prices 1-2s + sync_news 2-3s + sync_disclosures 1-2s = ~5s.
+            # 별 세션 split 으로 진짜 병렬도 가능하지만 commit 충돌 위험 ↑.
+            # 5분 cooldown 안에서 5s 추가 sync 는 허용 가능한 trade-off.
+            for fn in (sync_prices, sync_news, sync_disclosures):
+                await _safe(fn)
+
+        try:
+            await analyze(ticker)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("full_refresh analyze failed %s: %s", ticker, e)
+
+    bg.add_task(_sync_all_then_analyze)
+    bg.add_task(_extract_relations_safe, ticker)
+    return {"status": "full_refresh_queued", "ticker": key}
 
 
 @router.post("/{ticker}/refresh", status_code=202)

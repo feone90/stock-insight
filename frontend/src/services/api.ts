@@ -144,13 +144,23 @@ export async function priceRefreshStock(
 }
 
 /**
- * 뉴스·공시 갱신 + 새 뉴스 ≥ 2건이면 AI narrative 자동 재생성. 2분 cooldown.
+ * 뉴스·공시 갱신 + 새 뉴스 ≥ 1건이면 AI narrative 자동 재생성. 2분 cooldown.
  * 가격은 별도 `/price_refresh`. 재무는 분기 단위라 야간 cron 처리.
  */
 export async function newsRefreshStock(
   ticker: string,
 ): Promise<{ status: string; ticker: string }> {
   return postJson(`/api/stocks/${ticker}/data_refresh`);
+}
+
+/**
+ * 전체 새로고침 — 가격 + 뉴스 + 공시 동기화 후 무조건 AI 재생성.
+ * LLM 비용 $0.25, ~5-10초 소요. 5분 cooldown (`/refresh` 와 동일 정책).
+ */
+export async function fullRefreshStock(
+  ticker: string,
+): Promise<{ status: string; ticker: string }> {
+  return postJson(`/api/stocks/${ticker}/full_refresh`);
 }
 
 export async function analyzeStock(
