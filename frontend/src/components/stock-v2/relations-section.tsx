@@ -56,6 +56,20 @@ const SOURCE_LABEL: Record<string, string> = {
   llm_web_search: "웹 탐색",
 };
 
+// 2026-05-14 Codex 권고 C: source 증거 강도 기반 ranking. TYPE_PRIORITY
+// 같은 타입 안에서 더 강한 증거(SEC/DART filing > news rationale > 큐레이션
+// > 웹탐색 > mechanical) 가 위에 오게. 고신뢰 sector peer 가 저신뢰
+// contract 위에 오는 역전 방지. project_ontology_codex_review §우선순위 C.
+const SOURCE_CLASS_PRIORITY: Record<string, number> = {
+  sec_8k: 0,            // SEC 8-K Item 1.01 — 가장 강한 계약 증거
+  dart_contract: 0,     // KR 주요사항보고서 (현재 미구현, 미래 동등)
+  news: 1,              // news rationale (본문 인용 + URL)
+  candidate_promote: 2, // correlation-verified, candidate → live
+  curated_relation: 2,  // LLM 종합 큐레이션
+  llm_web_search: 3,    // Tavily 웹 탐색
+  sector_match: 4,      // mechanical sector pair (backend 에서 카드 제외됨)
+};
+
 export function RelationsSection({
   relations,
   ticker,
@@ -255,18 +269,29 @@ function SignalBadge({ direction }: { direction?: SignalDirection }) {
   return <span className="text-red-600 dark:text-red-400" title="긍정 신호">↑</span>;
 }
 
+function sourceClass(source: string | undefined): number {
+  if (!source) return 9;
+  return SOURCE_CLASS_PRIORITY[source] ?? 9;
+}
+
 function compareRelations(a: Relation, b: Relation, selfIsKR: boolean | null): number {
+  // 1차: 관계 유형 priority (contract → competitor → complementary → supply → regulatory).
   const pa = TYPE_PRIORITY[a.relation_type] ?? 9;
   const pb = TYPE_PRIORITY[b.relation_type] ?? 9;
   if (pa !== pb) return pa - pb;
-  // Cross-market peer first: KR card surfaces US peers (and vice versa) before
-  // same-market — otherwise ticker ASC pushes the other side off the cap window.
+  // 2차: 증거 강도 (filing > news rationale > curation > web search). 같은
+  // 유형이면 강한 증거가 위. high-conf mechanical 이 low-conf contract 위에
+  // 가는 역전 방지.
+  const sca = sourceClass(a.source);
+  const scb = sourceClass(b.source);
+  if (sca !== scb) return sca - scb;
+  // 3차: 다른 시장 우선 — KR 카드에 US peer (vice versa) 노출 보장.
   if (selfIsKR !== null) {
     const aCross = isKRTicker(a.target_ticker) !== selfIsKR;
     const bCross = isKRTicker(b.target_ticker) !== selfIsKR;
     if (aCross !== bCross) return aCross ? -1 : 1;
   }
-  // Final tie-break: confidence × strength desc.
+  // 4차: confidence × strength desc.
   const sa = (a.confidence ?? 0.5) * a.strength;
   const sb = (b.confidence ?? 0.5) * b.strength;
   return sb - sa;
