@@ -1,6 +1,11 @@
 "use client";
 
-import type { Relation, RelationType, RelationsSummary, SignalDirection } from "@/types/card";
+import type {
+  Relation,
+  RelationType,
+  RelationsSummary,
+  SignalDirection,
+} from "@/types/card";
 import { SectionShell } from "./section-shell";
 
 // 가족 친화 자연어 라벨 — 약어 / 영어 노출 X (feedback_card_user_facing_copy).
@@ -18,18 +23,58 @@ const RELATION_LABEL: Record<RelationType, string> = {
   regulatory_link: "규제 연동",
 };
 
-// 2026-05-14 Codex 권고: 카드는 시니어 매매 의사결정용 — actionable type
-// 만 노출. peer / group / theme / macro 는 graph 전용 (sector context 정도).
-// project_ontology_codex_review_2026_05_14 메모 §우선순위 A/B/E.
-const CARD_ACTIONABLE_TYPES: ReadonlySet<RelationType> = new Set([
-  "contract_supplier",
-  "contract_customer",
-  "competitor",
-  "complementary",
-  "supply_upstream",
-  "supply_downstream",
-  "regulatory_link",
+const SOURCE_LABEL: Record<string, string> = {
+  sector_match: "섹터매칭",
+  sec_8k: "SEC 8-K",
+  sec_10k_risk: "SEC 10-K Risk",
+  dart_contract: "DART 공시",
+  news: "뉴스",
+  curated_relation: "AI 큐레이션",
+  candidate_promote: "후보 승격",
+  llm_web_search: "웹 탐색",
+};
+
+// 2026-05-14: 양적 축소(cap 24→6) 가 아닌 3-tier 시각 차별 — 정보 손실 0,
+// 의미 가시성 ↑. core / business / context 3층으로 분류 후 각 그룹마다 다른
+// visual weight (글씨 굵기 / 배경 / 압축도). project_ontology_codex_review §사용자 정정.
+type Tier = "core" | "business" | "context";
+
+const CONTEXT_TYPES: ReadonlySet<RelationType> = new Set([
+  "peer",
+  "group",
+  "theme",
+  "macro",
 ]);
+
+function classifyTier(r: Relation): Tier {
+  // context: 동종업계 / 그룹 / 테마 / 매크로 또는 mechanical source(sector_match).
+  // 정보로는 의미 있지만 매매 의사결정 baseline 아님 → 시각 압축.
+  if (CONTEXT_TYPES.has(r.relation_type) || r.source === "sector_match") {
+    return "context";
+  }
+  // core: filing 증거 또는 고신뢰 news rationale. 카드 첫 줄에 시니어가 봐야 할 신호.
+  const conf = r.confidence ?? 0.5;
+  if (
+    r.source === "sec_8k" ||
+    r.source === "sec_10k_risk" ||
+    r.source === "dart_contract" ||
+    conf >= 0.8
+  ) {
+    return "core";
+  }
+  return "business";
+}
+
+const SOURCE_CLASS_PRIORITY: Record<string, number> = {
+  sec_8k: 0,
+  dart_contract: 0,
+  sec_10k_risk: 0,
+  news: 1,
+  candidate_promote: 2,
+  curated_relation: 2,
+  llm_web_search: 3,
+  sector_match: 4,
+};
 
 // Highest information density first — discovery-driven types beat plain peer.
 const TYPE_PRIORITY: Record<RelationType, number> = {
@@ -46,30 +91,6 @@ const TYPE_PRIORITY: Record<RelationType, number> = {
   peer: 8,
 };
 
-const SOURCE_LABEL: Record<string, string> = {
-  sector_match: "섹터매칭",
-  sec_8k: "SEC 8-K",
-  dart_contract: "DART 공시",
-  news: "뉴스",
-  curated_relation: "AI 큐레이션",
-  candidate_promote: "후보 승격",
-  llm_web_search: "웹 탐색",
-};
-
-// 2026-05-14 Codex 권고 C: source 증거 강도 기반 ranking. TYPE_PRIORITY
-// 같은 타입 안에서 더 강한 증거(SEC/DART filing > news rationale > 큐레이션
-// > 웹탐색 > mechanical) 가 위에 오게. 고신뢰 sector peer 가 저신뢰
-// contract 위에 오는 역전 방지. project_ontology_codex_review §우선순위 C.
-const SOURCE_CLASS_PRIORITY: Record<string, number> = {
-  sec_8k: 0,            // SEC 8-K Item 1.01 — 가장 강한 계약 증거
-  dart_contract: 0,     // KR 주요사항보고서 (현재 미구현, 미래 동등)
-  news: 1,              // news rationale (본문 인용 + URL)
-  candidate_promote: 2, // correlation-verified, candidate → live
-  curated_relation: 2,  // LLM 종합 큐레이션
-  llm_web_search: 3,    // Tavily 웹 탐색
-  sector_match: 4,      // mechanical sector pair (backend 에서 카드 제외됨)
-};
-
 export function RelationsSection({
   relations,
   ticker,
@@ -77,16 +98,13 @@ export function RelationsSection({
   relations: RelationsSummary;
   ticker?: string;
 }) {
-  const count = relations.relations?.length ?? 0;
   const summary = summariseRelations(relations.relations ?? []);
   return (
     <SectionShell
       emoji="🔗"
       title="관계"
       compact={
-        <span>
-          {relations.one_line || (count > 0 ? summary : "관계 데이터 없음")}
-        </span>
+        <span>{relations.one_line || summary || "관계 데이터 없음"}</span>
       }
       expanded={<RelationsExpanded relations={relations} selfTicker={ticker} />}
     />
@@ -94,16 +112,27 @@ export function RelationsSection({
 }
 
 function summariseRelations(rels: Relation[]): string {
-  // compact 라인은 actionable 관계만 카운트 — peer/group/theme/macro 는 graph 전용.
-  const actionable = rels.filter((r) => CARD_ACTIONABLE_TYPES.has(r.relation_type));
-  if (actionable.length === 0) return "핵심 관계 없음";
-  const counts: Partial<Record<RelationType, number>> = {};
-  for (const r of actionable) counts[r.relation_type] = (counts[r.relation_type] ?? 0) + 1;
-  const parts: string[] = [];
-  for (const t of Object.keys(counts) as RelationType[]) {
-    parts.push(`${RELATION_LABEL[t] ?? t} ${counts[t]}`);
+  if (rels.length === 0) return "관계 데이터 없음";
+  let core = 0;
+  let business = 0;
+  let context = 0;
+  let inverse = 0;
+  for (const r of rels) {
+    if (isInverseCompetitor(r)) {
+      inverse += 1;
+      continue;
+    }
+    const tier = classifyTier(r);
+    if (tier === "core") core += 1;
+    else if (tier === "business") business += 1;
+    else context += 1;
   }
-  return `${actionable.length}개 · ${parts.join(", ")}`;
+  const parts: string[] = [];
+  if (inverse > 0) parts.push(`zero-sum ${inverse}`);
+  if (core > 0) parts.push(`핵심 ${core}`);
+  if (business > 0) parts.push(`사업 ${business}`);
+  if (context > 0) parts.push(`컨텍스트 ${context}`);
+  return parts.join(" · ");
 }
 
 function isInverseCompetitor(r: Relation): boolean {
@@ -118,100 +147,326 @@ function RelationsExpanded({
   selfTicker?: string;
 }) {
   const selfIsKR = selfTicker ? isKRTicker(selfTicker) : null;
-  // Codex 권고 A+B: 카드는 actionable type 만 + cap 24 → 6 (인지 한계).
-  // mechanical sector peer 양적 압도로 진짜 신호 묻히던 패턴 fix.
-  // 전체 관계망은 "Ontology 그래프 →" 링크에서 확인.
-  const filtered = (relations.relations ?? []).filter((r) =>
-    CARD_ACTIONABLE_TYPES.has(r.relation_type),
-  );
-  // Codex 권고 D: inverse competitor(=zero-sum)는 시니어가 가장 먼저 봐야 할
-  // 신호. 표 안 ⇄ 배지가 아니라 dedicated callout 으로 표 위에 띄움.
-  // 표에서는 제외 — 같은 정보 두 번 노출 방지 (cap 자리 절약).
-  const inverseCompetitors = filtered
+  const all = relations.relations ?? [];
+
+  // zero-sum competitor 는 표 위 dedicated callout 으로 빠짐 (Codex D).
+  const inverseCompetitors = all
     .filter(isInverseCompetitor)
     .sort((a, b) => {
       const ca = (a.confidence ?? 0.5) * a.strength;
       const cb = (b.confidence ?? 0.5) * b.strength;
       return cb - ca;
     });
-  const restSorted = [...filtered]
-    .filter((r) => !isInverseCompetitor(r))
-    .sort((a, b) => compareRelations(a, b, selfIsKR));
-  if (inverseCompetitors.length === 0 && restSorted.length === 0) {
+
+  // 나머지를 3-tier 분류.
+  const rest = all.filter((r) => !isInverseCompetitor(r));
+  const cmp = (a: Relation, b: Relation) => compareRelations(a, b, selfIsKR);
+  const core = rest.filter((r) => classifyTier(r) === "core").sort(cmp);
+  const business = rest.filter((r) => classifyTier(r) === "business").sort(cmp);
+  const context = rest.filter((r) => classifyTier(r) === "context").sort(cmp);
+
+  if (all.length === 0) {
     return (
       <div className="space-y-2">
         <p className="text-sm text-[var(--surface-text-muted)]">
-          핵심 관계 없음 — 계약·경쟁·공급망·규제 같은 의사결정 가능한 신호
-          아직 추출되지 않음
+          관계 데이터 없음
         </p>
         {selfTicker ? (
-          <a
-            href={`/stock/${selfTicker}/graph`}
-            className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            그래프에서 전체 관계망 보기 →
-          </a>
+          <GraphLink ticker={selfTicker} />
         ) : null}
       </div>
     );
   }
-  const CAP = 6;
+
   return (
     <div className="space-y-3 text-sm">
       {inverseCompetitors.length > 0 ? (
         <InverseCallout inverses={inverseCompetitors} />
       ) : null}
-      {restSorted.length > 0 ? (
-        <table className="w-full text-xs">
-          <thead className="text-[var(--surface-text-muted)]">
-            <tr>
-              <th className="text-left font-medium pb-1.5">종목 / 테마</th>
-              <th className="text-left font-medium pb-1.5">유형</th>
-              <th className="text-left font-medium pb-1.5">방향</th>
-              <th className="text-right font-medium pb-1.5">강도</th>
-              <th className="text-right font-medium pb-1.5">신뢰</th>
-              <th className="text-right font-medium pb-1.5">변동</th>
-              <th className="text-left font-medium pb-1.5 pl-2">출처</th>
-            </tr>
-          </thead>
-          <tbody>
-            {restSorted.slice(0, CAP).map((r, i) => (
-              <RelationRow key={`${r.target_ticker}-${r.relation_type}-${r.source ?? i}`} rel={r} />
-            ))}
-          </tbody>
-        </table>
+
+      {core.length === 0 && business.length === 0 && context.length > 0 ? (
+        <p className="text-xs text-[var(--surface-text-muted)] leading-snug">
+          사업 본질 관계(계약·경쟁·공급망) 추출 부족 — 회계감리·거래정지·신규
+          상장 등 공시·뉴스 정보 부족 종목에서 흔함. 동종업계만 표시.
+        </p>
       ) : null}
-      {restSorted.length > CAP ? (
-        <p className="text-xs text-[var(--surface-text-subtle)]">
-          + 핵심 관계 {restSorted.length - CAP}개 더 + 동종업계/그룹/테마 등 부가
-          관계 — 그래프에서 전체 보기
-        </p>
-      ) : (
-        <p className="text-xs text-[var(--surface-text-subtle)]">
-          동종업계·그룹·테마 같은 부가 관계는 그래프에서만 표시
-        </p>
-      )}
-      {selfTicker ? (
-        <a
-          href={`/stock/${selfTicker}/graph`}
-          className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+
+      {core.length > 0 ? (
+        <TierBlock
+          tier="core"
+          title="🔑 핵심 신호"
+          subtitle="filing 증거 또는 신뢰도 80%+ — 의사결정 직결"
+          rels={core}
+        />
+      ) : null}
+      {business.length > 0 ? (
+        <TierBlock
+          tier="business"
+          title="📝 사업 관계"
+          subtitle="기사·공시에 명시된 supplier·customer·competitor"
+          rels={business}
+        />
+      ) : null}
+      {context.length > 0 ? (
+        <ContextChips rels={context} />
+      ) : null}
+
+      {selfTicker ? <GraphLink ticker={selfTicker} /> : null}
+    </div>
+  );
+}
+
+function GraphLink({ ticker }: { ticker: string }) {
+  return (
+    <a
+      href={`/stock/${ticker}/graph`}
+      className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+    >
+      Ontology 그래프 — 전체 관계망 →
+    </a>
+  );
+}
+
+function isKRTicker(ticker: string): boolean {
+  return /^\d{6}$/.test(ticker);
+}
+
+function sourceClass(source: string | undefined): number {
+  if (!source) return 9;
+  return SOURCE_CLASS_PRIORITY[source] ?? 9;
+}
+
+function compareRelations(a: Relation, b: Relation, selfIsKR: boolean | null): number {
+  const pa = TYPE_PRIORITY[a.relation_type] ?? 9;
+  const pb = TYPE_PRIORITY[b.relation_type] ?? 9;
+  if (pa !== pb) return pa - pb;
+  const sca = sourceClass(a.source);
+  const scb = sourceClass(b.source);
+  if (sca !== scb) return sca - scb;
+  if (selfIsKR !== null) {
+    const aCross = isKRTicker(a.target_ticker) !== selfIsKR;
+    const bCross = isKRTicker(b.target_ticker) !== selfIsKR;
+    if (aCross !== bCross) return aCross ? -1 : 1;
+  }
+  const sa = (a.confidence ?? 0.5) * a.strength;
+  const sb = (b.confidence ?? 0.5) * b.strength;
+  return sb - sa;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tier blocks (Core / Business)
+// ─────────────────────────────────────────────────────────────
+
+function TierBlock({
+  tier,
+  title,
+  subtitle,
+  rels,
+}: {
+  tier: "core" | "business";
+  title: string;
+  subtitle: string;
+  rels: Relation[];
+}) {
+  // Cap per tier — core 는 8 (강조), business 는 8 (보통). 추가는 그래프.
+  const CAP = 8;
+  const isCore = tier === "core";
+  const block =
+    isCore
+      ? "rounded-md border border-amber-500/40 dark:border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+      : "rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] px-3 py-2.5";
+  return (
+    <div className={block}>
+      <div className="mb-2">
+        <h4
+          className={
+            isCore
+              ? "text-sm font-semibold text-amber-700 dark:text-amber-300"
+              : "text-sm font-semibold text-[var(--surface-text)]"
+          }
         >
-          Ontology 그래프 →
-        </a>
+          {title}
+        </h4>
+        <p className="text-[11px] text-[var(--surface-text-subtle)] leading-snug">
+          {subtitle}
+        </p>
+      </div>
+      <ul className={isCore ? "space-y-2" : "space-y-1.5"}>
+        {rels.slice(0, CAP).map((r, i) => (
+          <TierRow
+            key={`${r.target_ticker}-${r.relation_type}-${r.source ?? i}`}
+            rel={r}
+            isCore={isCore}
+          />
+        ))}
+      </ul>
+      {rels.length > CAP ? (
+        <p className="mt-1.5 text-[11px] text-[var(--surface-text-subtle)]">
+          + {rels.length - CAP}개 더 — 그래프에서 전체 보기
+        </p>
       ) : null}
     </div>
   );
 }
 
-/**
- * Zero-sum (inverse competitor) dedicated callout.
- *
- * 2026-05-14 Codex 시니어 트레이더 권고 D: "한쪽이 이기면 다른 쪽이 진다"
- * 식 신호는 매매 판단에서 가장 먼저 보는 정보. 표 안 ⇄ 배지로는 묻힘 —
- * 표 위에 큰 박스로 띄워 시니어가 첫 줄에서 잡도록.
- *
- * 카피 가이드(memory: feedback_card_user_facing_copy): 약어 X, 비유 자연어.
- */
+function TierRow({ rel, isCore }: { rel: Relation; isCore: boolean }) {
+  const confidence = rel.confidence ?? 0.5;
+  const conf = Math.round(confidence * 100);
+  const strength = Math.round(rel.strength * 100);
+  const sourceLabel = rel.source ? SOURCE_LABEL[rel.source] ?? rel.source : null;
+  const change = rel.today_change_pct;
+  const changeColor =
+    change == null
+      ? "text-[var(--surface-text-muted)]"
+      : change > 0
+        ? "text-red-600 dark:text-red-400"
+        : change < 0
+          ? "text-blue-600 dark:text-blue-400"
+          : "text-[var(--surface-text-muted)]";
+
+  const targetWeight = isCore ? "font-semibold" : "font-medium";
+  const rowText = isCore ? "text-sm" : "text-xs";
+  const rationale = rel.rationale?.trim() || null;
+
+  return (
+    <li className={rowText}>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className={targetWeight}>{rel.target_name}</span>
+        {rel.target_ticker && rel.target_ticker !== rel.target_name ? (
+          <span className="text-[11px] text-[var(--surface-text-muted)]">
+            ({rel.target_ticker})
+          </span>
+        ) : null}
+        <span className="text-[11px] text-[var(--surface-text-muted)]">
+          · {RELATION_LABEL[rel.relation_type] ?? rel.relation_type}
+        </span>
+        <SignalBadge direction={rel.signal_direction} />
+        {change != null ? (
+          <span className={`text-[11px] tabular-nums ${changeColor}`}>
+            {change > 0 ? "+" : ""}
+            {change.toFixed(1)}%
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-[var(--surface-text-subtle)]">
+        <ConfidenceBar pct={conf} highlight={isCore} />
+        <span className="tabular-nums">신뢰 {conf}%</span>
+        <span className="tabular-nums">· 강도 {strength}%</span>
+        {sourceLabel ? <span>· {sourceLabel}</span> : null}
+        {rel.source_url ? (
+          <a
+            href={rel.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            원문 ↗
+          </a>
+        ) : null}
+      </div>
+      {rationale ? (
+        <p
+          className={`mt-0.5 italic leading-snug ${
+            isCore
+              ? "text-xs text-[var(--surface-text-muted)]"
+              : "text-[11px] text-[var(--surface-text-subtle)]"
+          }`}
+        >
+          “{rationale}”
+        </p>
+      ) : null}
+    </li>
+  );
+}
+
+function ConfidenceBar({ pct, highlight }: { pct: number; highlight: boolean }) {
+  const color = highlight
+    ? "bg-amber-500/70 dark:bg-amber-400/70"
+    : "bg-[var(--surface-text-muted)]";
+  return (
+    <span
+      className="inline-block h-1 w-12 rounded bg-[var(--surface-border)] overflow-hidden align-middle"
+      aria-hidden
+    >
+      <span
+        className={`block h-full ${color}`}
+        style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+      />
+    </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Context tier — 한 줄 chip pill 압축
+// ─────────────────────────────────────────────────────────────
+
+function ContextChips({ rels }: { rels: Relation[] }) {
+  // Cap 20 정도 — 더 많으면 그래프로 안내. 가로 wrap.
+  const CAP = 20;
+  const shown = rels.slice(0, CAP);
+  return (
+    <div className="rounded-md border border-[var(--surface-border)]/70 px-3 py-2 bg-transparent">
+      <div className="mb-1">
+        <h4 className="text-xs font-medium text-[var(--surface-text-muted)]">
+          🔗 컨텍스트 — 동종업계 · 그룹 · 테마
+        </h4>
+        <p className="text-[11px] text-[var(--surface-text-subtle)] leading-snug">
+          같은 섹터·테마 lookup. 매매 baseline 아님, 분위기 파악용.
+        </p>
+      </div>
+      <ul className="flex flex-wrap gap-1.5">
+        {shown.map((r, i) => (
+          <li key={`${r.target_ticker}-${r.relation_type}-${i}`}>
+            <a
+              href={`/stock/${r.target_ticker}`}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--surface-border)] bg-[var(--surface-section-hover)] px-2 py-0.5 text-[11px] text-[var(--surface-text-muted)] hover:text-[var(--surface-text)] hover:border-[var(--surface-text-muted)]"
+              title={`${RELATION_LABEL[r.relation_type] ?? r.relation_type} · 신뢰 ${Math.round((r.confidence ?? 0.5) * 100)}%`}
+            >
+              <span>{r.target_name}</span>
+              {r.target_ticker && r.target_ticker !== r.target_name ? (
+                <span className="text-[10px] text-[var(--surface-text-subtle)]">
+                  {r.target_ticker}
+                </span>
+              ) : null}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {rels.length > CAP ? (
+        <p className="mt-1.5 text-[11px] text-[var(--surface-text-subtle)]">
+          + {rels.length - CAP}개 더 — 그래프에서 전체 보기
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SignalBadge({ direction }: { direction?: SignalDirection }) {
+  if (direction === "inverse") {
+    return (
+      <span className="text-blue-600 dark:text-blue-400" title="역(zero-sum) 신호">
+        ⇄
+      </span>
+    );
+  }
+  if (direction === "negative") {
+    return (
+      <span className="text-amber-600 dark:text-amber-400" title="부정 신호">
+        ↓
+      </span>
+    );
+  }
+  return (
+    <span className="text-red-600 dark:text-red-400" title="긍정 신호">
+      ↑
+    </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Zero-sum (inverse competitor) dedicated callout (Codex D)
+// ─────────────────────────────────────────────────────────────
+
 function InverseCallout({ inverses }: { inverses: Relation[] }) {
   const TOP = 3;
   return (
@@ -239,7 +494,7 @@ function InverseCallout({ inverses }: { inverses: Relation[] }) {
                 ) : null}
                 <span className="text-xs text-[var(--surface-text-subtle)]">
                   · 신뢰 {conf}%
-                  {sourceLabel ? ` · 출처 ${sourceLabel}` : ""}
+                  {sourceLabel ? ` · ${sourceLabel}` : ""}
                 </span>
               </div>
               {r.rationale ? (
@@ -272,117 +527,4 @@ function InverseCallout({ inverses }: { inverses: Relation[] }) {
       ) : null}
     </div>
   );
-}
-
-function isKRTicker(ticker: string): boolean {
-  return /^\d{6}$/.test(ticker);
-}
-
-function RelationRow({ rel }: { rel: Relation }) {
-  const change = rel.today_change_pct;
-  const changeColor =
-    change == null
-      ? "text-[var(--surface-text-muted)]"
-      : change > 0
-        ? "text-red-600 dark:text-red-400"
-        : change < 0
-          ? "text-blue-600 dark:text-blue-400"
-          : "text-[var(--surface-text-muted)]";
-
-  const confidence = rel.confidence ?? 0.5;
-  const conf = Math.round(confidence * 100);
-  const sourceLabel = rel.source ? SOURCE_LABEL[rel.source] ?? rel.source : null;
-
-  const rationale = rel.rationale?.trim() || null;
-
-  return (
-    <>
-      <tr
-        className="border-t border-[var(--surface-border)]"
-        title={rationale ?? undefined}
-      >
-        <td className="py-1.5">
-          {rel.target_name}
-          {rel.target_ticker && rel.target_ticker !== rel.target_name ? (
-            <span className="ml-1 text-[var(--surface-text-muted)]">({rel.target_ticker})</span>
-          ) : null}
-        </td>
-        <td className="text-[var(--surface-text-muted)]">
-          {RELATION_LABEL[rel.relation_type] ?? rel.relation_type}
-        </td>
-        <td>
-          <SignalBadge direction={rel.signal_direction} />
-        </td>
-        <td className="text-right tabular-nums">{(rel.strength * 100).toFixed(0)}%</td>
-        <td className="text-right tabular-nums text-[var(--surface-text-muted)]">{conf}%</td>
-        <td className={`text-right tabular-nums ${changeColor}`}>
-          {change != null ? `${change > 0 ? "+" : ""}${change.toFixed(1)}%` : "—"}
-        </td>
-        <td className="pl-2 text-xs">
-          {rel.source_url ? (
-            <a
-              href={rel.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 dark:text-blue-400 hover:underline"
-              title={sourceLabel ?? rel.source ?? "source"}
-            >
-              {sourceLabel ?? "원문"} ↗
-            </a>
-          ) : (
-            <span className="text-[var(--surface-text-subtle)]">{sourceLabel ?? "—"}</span>
-          )}
-        </td>
-      </tr>
-      {rationale ? (
-        <tr className="border-t border-[var(--surface-border)]/40">
-          <td
-            colSpan={7}
-            className="pb-2 pl-2 text-[11px] italic leading-snug text-[var(--surface-text-subtle)]"
-          >
-            <span className="not-italic mr-1 text-[var(--surface-text-muted)]">근거:</span>
-            {rationale}
-          </td>
-        </tr>
-      ) : null}
-    </>
-  );
-}
-
-function SignalBadge({ direction }: { direction?: SignalDirection }) {
-  if (direction === "inverse") {
-    return <span className="text-blue-600 dark:text-blue-400" title="역(zero-sum) 신호">⇄</span>;
-  }
-  if (direction === "negative") {
-    return <span className="text-amber-600 dark:text-amber-400" title="부정 신호">↓</span>;
-  }
-  return <span className="text-red-600 dark:text-red-400" title="긍정 신호">↑</span>;
-}
-
-function sourceClass(source: string | undefined): number {
-  if (!source) return 9;
-  return SOURCE_CLASS_PRIORITY[source] ?? 9;
-}
-
-function compareRelations(a: Relation, b: Relation, selfIsKR: boolean | null): number {
-  // 1차: 관계 유형 priority (contract → competitor → complementary → supply → regulatory).
-  const pa = TYPE_PRIORITY[a.relation_type] ?? 9;
-  const pb = TYPE_PRIORITY[b.relation_type] ?? 9;
-  if (pa !== pb) return pa - pb;
-  // 2차: 증거 강도 (filing > news rationale > curation > web search). 같은
-  // 유형이면 강한 증거가 위. high-conf mechanical 이 low-conf contract 위에
-  // 가는 역전 방지.
-  const sca = sourceClass(a.source);
-  const scb = sourceClass(b.source);
-  if (sca !== scb) return sca - scb;
-  // 3차: 다른 시장 우선 — KR 카드에 US peer (vice versa) 노출 보장.
-  if (selfIsKR !== null) {
-    const aCross = isKRTicker(a.target_ticker) !== selfIsKR;
-    const bCross = isKRTicker(b.target_ticker) !== selfIsKR;
-    if (aCross !== bCross) return aCross ? -1 : 1;
-  }
-  // 4차: confidence × strength desc.
-  const sa = (a.confidence ?? 0.5) * a.strength;
-  const sb = (b.confidence ?? 0.5) * b.strength;
-  return sb - sa;
 }
