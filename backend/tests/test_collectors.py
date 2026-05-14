@@ -448,7 +448,11 @@ async def test_sync_news(db):
     }
 
     with patch("app.collectors.news.settings") as mock_settings, \
-         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response), \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
+         patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
+               return_value={"news_synced": 0}):
         mock_settings.naver_client_id = "test_id"
         mock_settings.naver_client_secret = "test_secret"
         result = await sync_news(db, stock)
@@ -464,6 +468,8 @@ async def test_sync_news_no_api_key(db):
     stock = result.scalar_one()
 
     with patch("app.collectors.news.settings") as mock_settings, \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
          patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
                return_value={"news_synced": 0, "error": "Google News empty response"}):
         mock_settings.naver_client_id = ""
@@ -482,6 +488,8 @@ async def test_sync_news_exception(db):
 
     with patch("app.collectors.news.settings") as mock_settings, \
          patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, side_effect=Exception("timeout")), \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
          patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
                return_value={"news_synced": 0, "error": "Google News empty response"}):
         mock_settings.naver_client_id = "test_id"
@@ -509,7 +517,11 @@ async def test_sync_news_bad_date(db):
     }
 
     with patch("app.collectors.news.settings") as mock_settings, \
-         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response), \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
+         patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
+               return_value={"news_synced": 0}):
         mock_settings.naver_client_id = "test_id"
         mock_settings.naver_client_secret = "test_secret"
         result = await sync_news(db, stock)
@@ -525,6 +537,8 @@ async def test_sync_news_empty_items(db):
 
     with patch("app.collectors.news.settings") as mock_settings, \
          patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value={"items": []}), \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
          patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
                return_value={"news_synced": 0}):
         mock_settings.naver_client_id = "test_id"
@@ -744,14 +758,22 @@ async def test_sync_news_duplicate(db):
     }
 
     with patch("app.collectors.news.settings") as mock_settings, \
-         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response), \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
+         patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
+               return_value={"news_synced": 0}):
         mock_settings.naver_client_id = "test_id"
         mock_settings.naver_client_secret = "test_secret"
         await sync_news(db, stock)
 
     # 동일 뉴스 다시 삽입
     with patch("app.collectors.news.settings") as mock_settings, \
-         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response):
+         patch("app.collectors.news.fetch_naver_news", new_callable=AsyncMock, return_value=mock_response), \
+         patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock,
+               return_value={"news_synced": 0}), \
+         patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock,
+               return_value={"news_synced": 0}):
         mock_settings.naver_client_id = "test_id"
         mock_settings.naver_client_secret = "test_secret"
         result2 = await sync_news(db, stock)

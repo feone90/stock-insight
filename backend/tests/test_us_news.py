@@ -118,16 +118,18 @@ class TestSyncNewsRouting:
 
     @pytest.mark.asyncio
     @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, return_value={"scraped": 0})
+    @patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock, return_value={"news_synced": 5})
     @patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock, return_value={"news_synced": 0})
     @patch("app.collectors.news._sync_yfinance_news", new_callable=AsyncMock)
     @patch("app.collectors.news._sync_naver_news", new_callable=AsyncMock, return_value={"news_synced": 10})
-    async def test_kr_stock_uses_naver(self, mock_naver, mock_yf, mock_gnews, mock_scrape):
+    async def test_kr_stock_uses_naver(self, mock_naver, mock_yf, mock_gnews, mock_naver_finance, mock_scrape):
         db = AsyncMock()
         result = await sync_news(db, _make_stock("005930", "KRX"))
         mock_naver.assert_called_once()
         mock_gnews.assert_called_once()
+        mock_naver_finance.assert_called_once()
         mock_yf.assert_not_called()
-        assert result["news_synced"] == 10
+        assert result["news_synced"] == 15  # 10 naver_open + 5 naver_finance + 0 gnews
 
 
 class TestSyncNewsWithScraping:
@@ -146,15 +148,16 @@ class TestSyncNewsWithScraping:
 
     @pytest.mark.asyncio
     @patch("app.collectors.news.scrape_news_content", new_callable=AsyncMock, return_value={"scraped": 5})
+    @patch("app.collectors.news._sync_naver_finance_news", new_callable=AsyncMock, return_value={"news_synced": 3})
     @patch("app.collectors.news._sync_google_news_kr", new_callable=AsyncMock, return_value={"news_synced": 0})
     @patch("app.collectors.news._sync_naver_news", new_callable=AsyncMock, return_value={"news_synced": 20})
-    async def test_kr_sync_calls_scraper(self, mock_naver, mock_gnews, mock_scrape):
+    async def test_kr_sync_calls_scraper(self, mock_naver, mock_gnews, mock_naver_finance, mock_scrape):
         db = AsyncMock()
         stock = _make_stock("005930", "KRX")
         result = await sync_news(db, stock)
 
         mock_scrape.assert_called_once_with(db, stock.id)
-        assert result["news_synced"] == 20
+        assert result["news_synced"] == 23  # 20 naver_open + 0 gnews + 3 naver_finance
         assert result["scraped"] == 5
 
     @pytest.mark.asyncio

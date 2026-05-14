@@ -58,6 +58,7 @@ KR_TRUSTED: frozenset[str] = frozenset({
     # 네이버/구글 자체 게이트 (실제 매체 link로 redirect)
     "news.naver.com",       # 네이버 뉴스 ID URL — 매체 article 페이지
     "n.news.naver.com",
+    "finance.naver.com",    # 네이버 증권 종목별 큐레이션 (entity matching 정확)
     "news.google.com",      # 구글 뉴스 RSS link
 })
 
