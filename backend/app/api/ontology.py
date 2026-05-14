@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session
 from app.markets import KR_MARKETS, US_MARKETS
 from app.models import Stock, StockRelation
+from app.services.ontology.evidence import has_target_evidence, is_llm_source
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ontology", tags=["ontology"])
@@ -61,6 +62,7 @@ async def get_subgraph(
 
         # BFS up to depth — frontier expands outward, capped at `cap` total nodes.
         frontier: list[Stock] = [center]
+        hallucination_ids: list[int] = []
         for _hop in range(depth):
             next_frontier: list[Stock] = []
             for stock in frontier:
@@ -76,6 +78,23 @@ async def get_subgraph(
                 target_by_ticker = {s.ticker: s for s in target_stocks}
                 for r in rels:
                     target_stock = target_by_ticker.get(r.to_target)
+                    # Defense in depth (2026-05-14 SK하이닉스→동화약품 사례).
+                    # LLM source 인데 rationale 에 target 증거 없으면 환상으로
+                    # 간주 — 그래프에서 hide + soft-delete (다음 fetch 부터 query
+                    # is_active=True 필터로 자연스럽게 제외).
+                    if is_llm_source(r.source):
+                        md = r.extra_metadata or {}
+                        rationale = md.get("rationale") if isinstance(md, dict) else None
+                        target_name = target_stock.name if target_stock else None
+                        if not has_target_evidence(rationale, target_name, r.to_target):
+                            hallucination_ids.append(r.id)
+                            logger.warning(
+                                "graph hide+soft-delete hallucination: "
+                                "%s→%s src=%s rationale=%r",
+                                stock.ticker, r.to_target, r.source,
+                                (rationale or "")[:80],
+                            )
+                            continue
                     edges.append(_link_dict(stock, r, target_stock))
                     if target_stock is None:
                         continue
@@ -91,7 +110,30 @@ async def get_subgraph(
                 break
 
         nodes = [_node_dict(s, is_center=s.id == center.id) for s in seen_tickers.values()]
+
+        # Fire-and-forget soft-delete — response 지연 X.
+        if hallucination_ids:
+            import asyncio as _asyncio
+
+            _asyncio.create_task(_soft_delete_graph_relations(hallucination_ids))
     return {"center": center.ticker, "nodes": nodes, "links": edges}
+
+
+async def _soft_delete_graph_relations(ids: list[int]) -> None:
+    """Read-time 환상 감지된 row 들을 별도 세션에서 is_active=False 로 mark."""
+    from sqlalchemy import update
+
+    try:
+        async with async_session() as db:
+            await db.execute(
+                update(StockRelation)
+                .where(StockRelation.id.in_(ids))
+                .values(is_active=False)
+            )
+            await db.commit()
+        logger.info("graph soft-deleted %d hallucination relations: %s", len(ids), ids)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("graph soft-delete relations failed for %s: %s", ids, e)
 
 
 def _market_region(market: str | None) -> str:

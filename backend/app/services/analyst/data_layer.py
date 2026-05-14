@@ -46,6 +46,7 @@ from app.services.analyst.tools import (
     llm_classify_news,
     llm_discover_relations,
 )
+from app.services.ontology.evidence import has_target_evidence, is_llm_source
 
 logger = logging.getLogger(__name__)
 
@@ -809,7 +810,10 @@ async def _fetch_relations_data(ticker: str) -> dict:
             return {"relations": [], "is_stale": False}
         rows = (
             await db.execute(
-                select(StockRelation).where(StockRelation.from_stock_id == stock.id)
+                select(StockRelation).where(
+                    StockRelation.from_stock_id == stock.id,
+                    StockRelation.is_active.is_(True),
+                )
             )
         ).scalars().all()
 
@@ -825,9 +829,29 @@ async def _fetch_relations_data(ticker: str) -> dict:
 
         relations: list[dict] = []
         latest_refresh: datetime | None = None
+        hallucination_ids: list[int] = []
         for r in rows:
             tgt = targets.get(r.to_target)
             metadata = r.extra_metadata or {}
+            rationale = (
+                metadata.get("rationale") if isinstance(metadata, dict) else None
+            )
+            # Defense in depth at read path (2026-05-14 SK하이닉스→동화약품 사례).
+            # validator 가드는 prevention 만 — 옛 row 가 DB 에 남아있어도 사용자
+            # 화면에 절대 안 보이게 read 시점에서 다시 검사. + 검출되면 soft
+            # delete (is_active=False) 로 DB 자기 청소 — 다음 fetch 부터 query
+            # 자체에서 제외.
+            if is_llm_source(r.source):
+                target_name = tgt.name if tgt else None
+                if not has_target_evidence(rationale, target_name, r.to_target):
+                    hallucination_ids.append(r.id)
+                    logger.warning(
+                        "data_layer hide+soft-delete hallucination: "
+                        "%s→%s src=%s rationale=%r",
+                        ticker, r.to_target, r.source,
+                        (rationale or "")[:80],
+                    )
+                    continue
             relations.append(
                 {
                     "target_ticker": r.to_target,
@@ -840,7 +864,7 @@ async def _fetch_relations_data(ticker: str) -> dict:
                     "confidence": r.confidence if r.confidence is not None else 0.5,
                     "source": r.source,
                     "source_url": metadata.get("source_url") if isinstance(metadata, dict) else None,
-                    "rationale": metadata.get("rationale") if isinstance(metadata, dict) else None,
+                    "rationale": rationale,
                     "customer_concentration_pct": (
                         metadata.get("customer_concentration_pct") if isinstance(metadata, dict) else None
                     ),
@@ -852,6 +876,12 @@ async def _fetch_relations_data(ticker: str) -> dict:
                 latest_refresh is None or r.refreshed_at > latest_refresh
             ):
                 latest_refresh = r.refreshed_at
+
+        # Soft-delete detected hallucinations — fire-and-forget. is_active=False
+        # 로 mark 하면 다음 fetch 부터 query (의 is_active=True 필터) 에서 제외.
+        # 별도 background task — read 응답 지연 X.
+        if hallucination_ids:
+            asyncio.create_task(_soft_delete_relations(hallucination_ids))
 
         is_stale = (
             latest_refresh is not None
@@ -952,6 +982,30 @@ async def _bg_refresh_relations(ticker: str) -> None:
         await llm_discover_relations(ticker)
     except Exception as e:  # noqa: BLE001
         logger.warning("bg relations refresh for %s failed: %s", ticker, e)
+
+
+async def _soft_delete_relations(ids: list[int]) -> None:
+    """Read-time hallucination 감지된 row id 를 is_active=False 로 mark.
+
+    DELETE 대신 soft-delete — query 의 `is_active=True` 필터로 자연스럽게 제외
+    되고, false positive 시 admin 이 복구 가능. 다음 fetch 부터 사용자 화면
+    에 안 보이고, purge_noise 호출하면 영구 삭제.
+    """
+    from sqlalchemy import update
+
+    from app.models.relation import StockRelation
+
+    try:
+        async with async_session() as db:
+            await db.execute(
+                update(StockRelation)
+                .where(StockRelation.id.in_(ids))
+                .values(is_active=False)
+            )
+            await db.commit()
+        logger.info("soft-deleted %d hallucination relations: %s", len(ids), ids)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("soft-delete relations failed for %s: %s", ids, e)
 
 
 def _format_tech_summary(res: dict) -> str:

@@ -33,6 +33,25 @@ async def _run_prewarm() -> None:
         logger.warning("prewarm task failed: %s", e)
 
 
+async def _run_startup_purge() -> None:
+    """Deploy 마다 1회 환상 row 청소 (2026-05-14 SK하이닉스→동화약품 사례).
+
+    옛 validator 가드 이전에 박힌 row 가 prod 에 남아있어 카드/그래프에
+    계속 노출됨. 사용자가 admin endpoint 수동 호출하지 않게 startup 시
+    자동 cleanup. 비용 0 — single SELECT + bulk DELETE, 보통 < 1s.
+    """
+    from app.database import async_session
+    from app.services.ontology.purge import purge_llm_hallucinations
+
+    try:
+        async with async_session() as db:
+            n = await purge_llm_hallucinations(db)
+        if n > 0:
+            logger.info("startup purge: removed %d hallucination relations", n)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("startup purge failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_scheduler()
@@ -41,6 +60,10 @@ async def lifespan(app: FastAPI):
     # load for popular tickers hits the warm cache (sub-second) instead of
     # cold (~5s KR / ~21s US).
     asyncio.create_task(_run_prewarm())
+
+    # 2026-05-14: 환상 관계 일괄 청소 (사용자 피드백 — "옛 row를 db에서
+    # 날리던가 정리를 하면되잖나"). deploy 마다 자동 실행.
+    asyncio.create_task(_run_startup_purge())
 
     yield
     if scheduler.running:
