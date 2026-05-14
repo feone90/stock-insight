@@ -28,6 +28,7 @@
     },
     "corsOrigins": {
       "value": [
+        "https://stock-insight-six.vercel.app",
         "http://localhost:3000"
       ]
     }
