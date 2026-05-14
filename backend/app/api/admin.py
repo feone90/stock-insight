@@ -386,10 +386,26 @@ async def purge_ontology_noise(
         StockRelation.source == "news",
         or_(*[rationale_text.ilike(p) for p in etf_patterns]),
     )
-    to_delete_filter = or_(sector_match_low_conf, news_shallow_type, rationale_etf)
+
+    # 2026-05-14 — LLM hallucination 가드. LLM source 인데 rationale 인용
+    # 없거나 너무 짧으면 환상 가능성 ↑ (사용자가 SK하이닉스 카드에서 동화약품
+    # 잡힌 case: 본문에 동화약품 0회 등장인데 LLM 이 추출). validator 새
+    # 룰 이전 추출 잔재 정리.
+    from sqlalchemy import func as sql_func, select
+    _LLM_SRC = ["news", "sec_8k", "sec_10k_risk", "dart_contract"]
+    hallucination = and_(
+        StockRelation.source.in_(_LLM_SRC),
+        or_(
+            rationale_text.is_(None),
+            sql_func.length(rationale_text) < 30,
+        ),
+    )
+
+    to_delete_filter = or_(
+        sector_match_low_conf, news_shallow_type, rationale_etf, hallucination,
+    )
 
     # Count first 로 사용자에게 명시적 숫자 노출.
-    from sqlalchemy import func as sql_func, select
 
     sector_count = (
         await db.execute(
@@ -406,6 +422,11 @@ async def purge_ontology_noise(
             select(sql_func.count()).select_from(StockRelation).where(rationale_etf)
         )
     ).scalar() or 0
+    hallucination_count = (
+        await db.execute(
+            select(sql_func.count()).select_from(StockRelation).where(hallucination)
+        )
+    ).scalar() or 0
 
     result = await db.execute(delete(StockRelation).where(to_delete_filter))
     await db.commit()
@@ -415,6 +436,7 @@ async def purge_ontology_noise(
         "deleted_sector_match_low_conf": sector_count,
         "deleted_news_shallow_type": news_count,
         "deleted_rationale_etf_pattern": etf_count,
+        "deleted_llm_hallucination_no_rationale": hallucination_count,
     }
 
 

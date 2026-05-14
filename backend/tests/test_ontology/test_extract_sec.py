@@ -52,7 +52,12 @@ async def test_one_filing_extracts_and_persists_relation(db) -> None:
         {"from_ticker": "EX0001", "to_ticker": "EX0002",
          "relation_type": "contract_supplier",
          "signal_direction": "positive", "strength": 0.7, "confidence": 0.85,
-         "metadata": {"value_usd": 1_000_000_000}},
+         "metadata": {
+             "value_usd": 1_000_000_000,
+             # validator 가 LLM source 에 rationale 30+ chars 요구 (hallucination
+             # 가드, 2026-05-14). fixture 도 본문 인용 흉내 padding.
+             "rationale": "Filing fixture: EX0001 to supply parts to EX0002 (length-padded test).",
+         }},
     ])])
 
     summary = await extract_sec_contracts(
@@ -119,6 +124,9 @@ async def test_body_fetch_failure_continues_to_next_filing(db) -> None:
             "from_ticker": "NVDA", "to_ticker": "AMD",
             "relation_type": "contract_supplier",
             "strength": 0.6, "confidence": 0.8,
+            "metadata": {
+                "rationale": "Fixture: NVDA supplies GPU compute parts to AMD (length-padded test).",
+            },
         }]),
     ])
 
@@ -145,6 +153,9 @@ async def test_extracted_ticker_outside_universe_buffered(db) -> None:
         "from_ticker": "EX9001", "to_ticker": "PRIVATECO",
         "relation_type": "contract_customer",
         "strength": 0.5, "confidence": 0.7,
+        "metadata": {
+            "rationale": "Fixture: EX9001 buys from PRIVATECO under contract terms (length-padded test).",
+        },
     }])])
 
     summary = await extract_sec_contracts(

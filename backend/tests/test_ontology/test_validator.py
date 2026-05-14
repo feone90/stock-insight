@@ -17,6 +17,9 @@ def _rel(from_t: str, to_t: str, **overrides) -> ExtractedRelation:
         "signal_direction": "positive",
         "strength": 0.7,
         "confidence": 0.8,
+        # validator 가 LLM source 에 rationale 30+ chars 요구 (hallucination
+        # 가드, 2026-05-14). production 본문 인용 흉내.
+        "rationale": "본문 인용 fixture: A → B 공급 계약 명시 (테스트용 길이 확보).",
     }
     base.update(overrides)
     return ExtractedRelation.model_validate(base)

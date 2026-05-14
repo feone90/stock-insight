@@ -31,6 +31,19 @@ _TIER_USER_TOUCHED = 2
 _REVIEW_FLOOR = 0.5  # below this → drop. 시황 기사에서 LLM 이 만든 약신호 차단.
 _REVIEW_THRESHOLD = 0.75  # below this → 정성적 추정. metadata.needs_review=True 로 flag.
 
+# 2026-05-14 LLM hallucination 가드. 사용자가 SK하이닉스 카드에서 동화약품
+# (의약품 종목) complementary 0.86 으로 잡힌 것 발견. 본문에 "동화약품" 0회
+# 등장 — 100% LLM 환상. extract_news 의 substring gate 가 있지만 옛 추출
+# 잔재 + paraphrase 자체 검증 부족.
+#
+# 새 룰: LLM 기반 source 는 rationale (텍스트 인용) 반드시 필요. 없거나
+# 너무 짧으면 (의미 있는 인용은 30+ char) drop. sector_match 같은 mechanical
+# rule source 는 rationale 없는 게 정상.
+_LLM_SOURCES_REQUIRING_RATIONALE = frozenset({
+    "news", "sec_8k", "sec_10k_risk", "dart_contract", "llm_web_search",
+})
+_MIN_RATIONALE_CHARS = 30
+
 # Reciprocal type for the reverse direction. supply / contract are asymmetric
 # (supplier ↔ customer); peer / competitor / complementary are symmetric.
 _RECIPROCAL_TYPE: dict[str, str] = {
@@ -96,11 +109,32 @@ async def _route(
     upsert_payload: list[dict] = []
     candidate_payload: list[dict] = []
     dropped_low_conf = 0
+    dropped_no_rationale = 0
+
+    requires_rationale = source in _LLM_SOURCES_REQUIRING_RATIONALE
 
     for rel in deduped:
         if rel.confidence < _REVIEW_FLOOR:
             dropped_low_conf += 1
             continue
+
+        # LLM hallucination 가드 — rationale 필수 source 인데 rationale 없거나
+        # 너무 짧으면 drop. 본문 인용 없는 LLM 추출은 환상 가능성 ↑.
+        if requires_rationale:
+            rat = (rel.rationale or "").strip()
+            meta_rat = ""
+            if isinstance(rel.extra_metadata, dict):
+                meta_rat = (rel.extra_metadata.get("rationale") or "").strip()
+            longest = max(len(rat), len(meta_rat))
+            if longest < _MIN_RATIONALE_CHARS:
+                dropped_no_rationale += 1
+                logger.info(
+                    "validator drop hallucination candidate: src=%s %s→%s "
+                    "type=%s conf=%.2f rationale_len=%d",
+                    source, rel.from_ticker, rel.to_ticker, rel.relation_type,
+                    rel.confidence, longest,
+                )
+                continue
 
         from_id = universe_ids.get(rel.from_ticker)
         to_in_universe = rel.to_ticker in universe_ids
@@ -146,6 +180,7 @@ async def _route(
         "deduped": len(deduped),
         "self_loop_dropped": dropped_self,
         "low_conf_dropped": dropped_low_conf,
+        "no_rationale_dropped": dropped_no_rationale,
         "upserted": upserted,
         "buffered": buffered,
     }
