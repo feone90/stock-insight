@@ -202,9 +202,19 @@ async def data_refresh(
         raise HTTPException(429, f"cooldown: try again in {remaining}s")
     _last_data_refresh[key] = now
 
-    async def _sync_underlying() -> None:
+    # 사용자 vision(2026-05-14): "news가 영향력있는게 올라왔는지 재수집 하고
+    # 없으면 없는거고 있으면 전체적인 의견자체가 바뀔수있는거고". 새 뉴스가
+    # 마지막 분석 시점 이후 N건 이상이면 narrative LLM 자동 trigger. 미만이면
+    # LLM 호출 0 — 가족 dev 비용 효율 + 사용자가 한 번 click 으로 정직한
+    # decision-fresh card 받음.
+    _NEWS_TRIGGER_THRESHOLD = 2  # 새 뉴스 2건+ → AI 의견 자동 재생성
+
+    async def _sync_underlying_and_maybe_analyze() -> None:
+        from app.models import Stock as _Stock
+        from app.models import News
+        from sqlalchemy import func as _f
+
         async with async_session() as own_db:
-            from app.models import Stock as _Stock
             fresh = (
                 await own_db.execute(
                     select(_Stock).where(_Stock.ticker == ticker)
@@ -212,6 +222,22 @@ async def data_refresh(
             ).scalar_one_or_none()
             if not fresh:
                 return
+
+            # 1) 마지막 카드 생성 시점 (narrative 시점) — 이걸 baseline 으로
+            #    "이후 새로 들어온 뉴스" 만 영향력 평가 대상.
+            last_card = (
+                await own_db.execute(
+                    select(Analysis.generated_at)
+                    .where(
+                        Analysis.stock_id == fresh.id,
+                        Analysis.schema_version == "v2",
+                    )
+                    .order_by(Analysis.date.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            # 2) underlying sync — 가격/뉴스/재무/공시 (LLM 0)
             for fn in (sync_prices, sync_news, sync_financials, sync_disclosures):
                 try:
                     await fn(own_db, fresh)
@@ -221,8 +247,46 @@ async def data_refresh(
                         ticker, fn.__name__, e,
                     )
 
-    bg.add_task(_sync_underlying)
-    return {"status": "data_refresh_queued", "ticker": key}
+            # 3) significance 평가 — 마지막 분석 이후 새 뉴스 N건+ 이면 AI
+            #    narrative 자동 trigger. 없으면 sync 만 끝.
+            if last_card is None:
+                # 한 번도 분석 안 된 종목 — analyze 가 카드 생성. trigger.
+                new_news_count = 999
+            else:
+                new_news_count = (
+                    await own_db.execute(
+                        select(_f.count())
+                        .select_from(News)
+                        .where(
+                            News.stock_id == fresh.id,
+                            News.published_at > last_card,
+                        )
+                    )
+                ).scalar() or 0
+
+        if new_news_count >= _NEWS_TRIGGER_THRESHOLD:
+            logger.info(
+                "data_refresh %s: %d new articles since last card → "
+                "auto-trigger analyze() for AI narrative refresh",
+                ticker, new_news_count,
+            )
+            try:
+                await analyze(ticker)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("data_refresh auto-analyze failed %s: %s", ticker, e)
+        else:
+            logger.info(
+                "data_refresh %s: only %d new articles (< %d threshold) — "
+                "skipping LLM narrative (cost saved)",
+                ticker, new_news_count, _NEWS_TRIGGER_THRESHOLD,
+            )
+
+    bg.add_task(_sync_underlying_and_maybe_analyze)
+    return {
+        "status": "data_refresh_queued",
+        "ticker": key,
+        "auto_analyze_threshold_news": _NEWS_TRIGGER_THRESHOLD,
+    }
 
 
 @router.post("/{ticker}/refresh", status_code=202)
