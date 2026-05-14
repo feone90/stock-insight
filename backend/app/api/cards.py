@@ -214,17 +214,23 @@ async def get_card(
     card["asof"] = datetime.now(timezone.utc).isoformat()
 
     # 2) Per-layer 마지막 갱신 시각.
-    price_max = (
-        await db.execute(
-            select(func.max(PriceHistory.date)).where(
-                PriceHistory.stock_id == stock.id
+    # price_asof: stock.last_price_sync_at (sync_prices 호출 *시각*) 우선,
+    # fallback MAX(PriceHistory.date). 시각이라야 같은 날 새로고침 시
+    # frontend polling 이 advance 감지해 "방금 전" 표시.
+    if stock.last_price_sync_at is not None:
+        card["price_asof"] = stock.last_price_sync_at.isoformat()
+    else:
+        price_max = (
+            await db.execute(
+                select(func.max(PriceHistory.date)).where(
+                    PriceHistory.stock_id == stock.id
+                )
             )
-        )
-    ).scalar()
-    if price_max is not None:
-        card["price_asof"] = (
-            price_max.isoformat() if hasattr(price_max, "isoformat") else str(price_max)
-        )
+        ).scalar()
+        if price_max is not None:
+            card["price_asof"] = (
+                price_max.isoformat() if hasattr(price_max, "isoformat") else str(price_max)
+            )
     news_max = (
         await db.execute(
             select(func.max(News.published_at)).where(News.stock_id == stock.id)

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 from sqlalchemy.dialects.postgresql import insert
@@ -114,6 +114,10 @@ async def sync_prices(db: AsyncSession, stock: Stock, days: int = 365) -> dict:
         stock.change = float(latest["Close"] - prev["Close"])
         if prev["Close"] != 0:
             stock.change_percent = round(float((latest["Close"] - prev["Close"]) / prev["Close"] * 100), 2)
+        # 2026-05-15: 카드 헤더의 "가격: N초/분 전" frontend polling 이
+        # advance 감지하려면 매 sync 마다 *시각* 갱신. PriceHistory.date 만
+        # 으로는 같은 날 안 advance.
+        stock.last_price_sync_at = datetime.utcnow()
         db.add(stock)
 
     await db.commit()

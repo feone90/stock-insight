@@ -43,6 +43,10 @@ class Stock(Base):
     change_percent: Mapped[float] = mapped_column(Float, default=0)
     dart_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # 2026-05-15 — 가격 새로고침 시 frontend polling 이 advance 감지해
+    # "가격: N초/분 전" 즉시 갱신. PriceHistory.date 만으로는 같은 날 시
+    # 안 advance 해서 사용자 안 보임. sync_prices 가 매번 utcnow() 박음.
+    last_price_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # P1.7 universe tier columns
     tier: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)

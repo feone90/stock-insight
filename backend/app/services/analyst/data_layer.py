@@ -718,13 +718,10 @@ def _build_political_signals(res: Any) -> list[PoliticalSignalCard]:
 async def _fetch_data_timestamps(ticker: str) -> dict:
     """Per-layer "마지막 갱신" 시각을 한 번에 계산해 카드에 넘긴다.
 
-    sync_prices / sync_news 가 새 row 를 박을 때마다 자동 갱신 — 별도 sync
-    log 테이블 필요 없음.
-
-    - price_asof : MAX(PriceHistory.date) — 가장 최근 봉 (sync_prices 가
-      오늘 봉을 박으면 즉시 today). date 컬럼이라 자정 UTC 로 변환.
-    - news_latest_at : MAX(News.published_at) — 우리가 가지고 있는 가장
-      최신 뉴스 발행 시각.
+    - price_asof : Stock.last_price_sync_at (sync_prices 호출 시각) 우선,
+      fallback MAX(PriceHistory.date). 2026-05-15 fix — 같은 날 sync 여러
+      번 해도 시각이 advance 해야 frontend polling 이 감지.
+    - news_latest_at : MAX(News.published_at).
     """
     async with async_session() as db:
         stock = (
@@ -732,13 +729,16 @@ async def _fetch_data_timestamps(ticker: str) -> dict:
         ).scalar_one_or_none()
         if not stock:
             return {"price_asof": None, "news_latest_at": None}
-        price_row = (
-            await db.execute(
-                select(_f.max(PriceHistory.date)).where(
-                    PriceHistory.stock_id == stock.id
+        price_sync_at = stock.last_price_sync_at
+        price_row = None
+        if price_sync_at is None:
+            price_row = (
+                await db.execute(
+                    select(_f.max(PriceHistory.date)).where(
+                        PriceHistory.stock_id == stock.id
+                    )
                 )
-            )
-        ).scalar()
+            ).scalar()
         news_row = (
             await db.execute(
                 select(_f.max(News.published_at)).where(News.stock_id == stock.id)
@@ -746,11 +746,12 @@ async def _fetch_data_timestamps(ticker: str) -> dict:
         ).scalar()
 
     price_asof: datetime | None = None
-    if price_row is not None:
+    if price_sync_at is not None:
+        price_asof = price_sync_at
+    elif price_row is not None:
         if isinstance(price_row, datetime):
             price_asof = price_row
         else:
-            # SQLAlchemy Date column → datetime.date — promote to UTC midnight.
             price_asof = datetime.combine(price_row, datetime.min.time(), tzinfo=timezone.utc)
 
     news_latest_at: datetime | None = None
