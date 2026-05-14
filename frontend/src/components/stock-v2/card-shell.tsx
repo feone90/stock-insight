@@ -18,6 +18,23 @@ import { RelationsSection } from "./relations-section";
 import { TechMomentumSection } from "./tech-momentum-section";
 import { ThesisSection } from "./thesis-section";
 
+// backend `ANALYSIS_COOLDOWN_SECONDS` 와 동기. 분석 1건 ~$0.25 라 무지성
+// 클릭을 막아야 비용 안전. 백엔드가 429로도 막지만 frontend 단에서 disable
+// 시키면 사용자가 클릭 자체를 안 함.
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
+function formatKoRelative(d: Date | null, now: number): string {
+  if (!d) return "";
+  const sec = Math.floor((now - d.getTime()) / 1000);
+  if (sec < 60) return "방금 전";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  return `${day}일 전`;
+}
+
 /**
  * StockCardPage — v2 stock card.
  *
@@ -37,6 +54,20 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   // 즐겨찾기 — user picker 변경 시 reload (사용자별 분리)
   const [isFav, setIsFav] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
+
+  // cooldown 텍스트가 시간 흐르면서 갱신되도록 30s 주기 tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const generatedAt = card?.generated_at ? new Date(card.generated_at) : null;
+  const sinceMs = generatedAt ? now - generatedAt.getTime() : Infinity;
+  const cooldownActive = sinceMs < REFRESH_COOLDOWN_MS;
+  const cooldownLeftMin = cooldownActive
+    ? Math.max(1, Math.ceil((REFRESH_COOLDOWN_MS - sinceMs) / 60000))
+    : 0;
 
   useEffect(() => {
     const load = () => {
@@ -82,19 +113,37 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               />
             </button>
             {card ? (
-              <button
-                type="button"
-                onClick={refresh}
-                disabled={refreshing}
-                aria-label="분석 다시 실행"
-                title="분석 다시 실행 (~$0.25, 1분)"
-                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
-                <span className="hidden sm:inline">
-                  {refreshing ? "분석 중..." : "분석 다시"}
-                </span>
-              </button>
+              <>
+                {generatedAt && (
+                  <span
+                    className="hidden md:inline text-xs text-[var(--surface-text-subtle)]"
+                    title={generatedAt.toLocaleString("ko-KR")}
+                  >
+                    {cooldownActive
+                      ? `${cooldownLeftMin}분 뒤 다시 가능`
+                      : `마지막 분석 ${formatKoRelative(generatedAt, now)}`}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={refresh}
+                  disabled={refreshing || cooldownActive}
+                  aria-label="분석 다시 실행"
+                  title={
+                    refreshing
+                      ? "분석 중..."
+                      : cooldownActive
+                      ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
+                      : "분석 다시 실행 (~$0.25, 1분)"
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} />
+                  <span className="hidden sm:inline">
+                    {refreshing ? "분석 중..." : "분석 다시"}
+                  </span>
+                </button>
+              </>
             ) : null}
             <button
               type="button"
