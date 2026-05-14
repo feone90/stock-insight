@@ -28,6 +28,7 @@ from app.services.ontology.extract_sec import (
     extract_sec_contracts,
     extract_sec_contracts_for_universe,
 )
+from app.services.ontology.regulatory_coshock import extract_regulatory_coshock
 from app.services.ontology.extractor import extract_relations
 from app.services.ontology.schemas import (
     ExtractedRelation,
@@ -53,6 +54,7 @@ __all__ = [
     "extract_10k_risk_for_universe",
     "extract_dart_contracts",
     "extract_dart_contracts_for_universe",
+    "extract_regulatory_coshock",
     "extract_news_relations_for_ticker",
     "extract_news_relations_for_universe",
     "extract_relations",
