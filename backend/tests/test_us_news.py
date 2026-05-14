@@ -17,16 +17,19 @@ def _make_stock(ticker="TSLA", market="NASDAQ"):
     return s
 
 
+# Fixture URLs는 publisher_whitelist (2026-05-14 Codex 권고) 통과해야 insert
+# 된다. example.com 처럼 untrusted host 는 자동 drop. 트레이더 카드에 신뢰
+# 매체만 노출하는 정책이라 test도 같은 약속을 따른다.
 SAMPLE_YFINANCE_NEWS = [
     {
         "title": "Tesla Q1 earnings beat expectations",
-        "link": "https://example.com/tesla-q1",
+        "link": "https://www.reuters.com/business/tesla-q1",
         "publisher": "Reuters",
         "providerPublishTime": int(time.time()) - 3600,
     },
     {
         "title": "Tesla launches new Model Y",
-        "url": "https://example.com/tesla-model-y",
+        "url": "https://www.bloomberg.com/news/articles/tesla-model-y",
         "publisher": "Bloomberg",
         "providerPublishTime": int(time.time()) - 7200,
     },
@@ -71,7 +74,7 @@ class TestSyncYfinanceNews:
 
     @pytest.mark.asyncio
     @patch("app.collectors.news._fetch_yfinance_news", return_value=[
-        {"title": "No timestamp", "link": "https://example.com/no-ts", "publisher": "Test"},
+        {"title": "No timestamp", "link": "https://www.reuters.com/no-ts", "publisher": "Test"},
     ])
     async def test_missing_timestamp(self, mock_fetch):
         db = AsyncMock()
@@ -81,6 +84,23 @@ class TestSyncYfinanceNews:
 
         result = await _sync_yfinance_news(db, _make_stock())
         assert result["news_synced"] == 1
+
+    @pytest.mark.asyncio
+    @patch("app.collectors.news._fetch_yfinance_news", return_value=[
+        {"title": "Spam aggregator article", "link": "https://example.com/spam", "publisher": "Spam"},
+        {"title": "Untrusted blog post", "link": "https://random-blog.tistory.com/abc", "publisher": "blog"},
+    ])
+    async def test_untrusted_publishers_dropped(self, mock_fetch):
+        """publisher_whitelist 통과 못한 host는 DB insert 전 drop."""
+        db = AsyncMock()
+        result_mock = MagicMock()
+        result_mock.rowcount = 1  # if insert happened, this would yield 2
+        db.execute = AsyncMock(return_value=result_mock)
+
+        result = await _sync_yfinance_news(db, _make_stock())
+        assert result["news_synced"] == 0
+        # insert 자체가 호출되지 않아야 함 — filter 가 먼저 차단
+        assert db.execute.await_count == 0
 
 
 class TestSyncNewsRouting:

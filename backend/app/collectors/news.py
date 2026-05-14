@@ -9,8 +9,9 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.collectors.publisher_whitelist import is_trusted_kr, is_trusted_us
 from app.collectors.scraper import scrape_news_content
+from app.config import settings
 from app.markets import is_us
 from app.models import Stock
 from app.models.news import News
@@ -52,7 +53,14 @@ async def _sync_naver_news(db: AsyncSession, stock: Stock) -> dict:
 
     items = data.get("items", [])
     count = 0
+    skipped = 0
     for item in items:
+        url = item.get("link", "")
+        # Codex 권고 (2026-05-14): Naver 결과는 publisher whitelist 통과한 것만
+        # DB insert. 블로그·SEO 스팸·aggregator·티스토리·네이버블로그 자동 drop.
+        if not is_trusted_kr(url):
+            skipped += 1
+            continue
         try:
             pub_date = parsedate_to_datetime(item["pubDate"])
             if pub_date.tzinfo is not None:
@@ -66,7 +74,7 @@ async def _sync_naver_news(db: AsyncSession, stock: Stock) -> dict:
             stock_id=stock.id,
             title=strip_html(item.get("title", "")),
             source="네이버뉴스",
-            url=item.get("link", ""),
+            url=url,
             published_at=pub_date,
             content=content,
         ).on_conflict_do_nothing(constraint="uq_news_stock_url")
@@ -75,6 +83,8 @@ async def _sync_naver_news(db: AsyncSession, stock: Stock) -> dict:
             count += 1
 
     await db.commit()
+    if skipped:
+        logger.info("naver news whitelist filter: kept=%d skipped=%d", count, skipped)
     return {"news_synced": count}
 
 
@@ -96,6 +106,7 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
         return {"news_synced": 0, "error": f"US 뉴스 조회 실패: {e}"}
 
     count = 0
+    skipped = 0
     for article in articles:
         # 새 형식: {"id", "content": {...}} / 구 형식: {"title", "link", ...}
         content = article.get("content", article)
@@ -131,6 +142,9 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
 
         if not title or not url:
             continue
+        if not is_trusted_us(url):
+            skipped += 1
+            continue
 
         stmt = insert(News).values(
             stock_id=stock.id,
@@ -144,6 +158,8 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
             count += 1
 
     await db.commit()
+    if skipped:
+        logger.info("yfinance news whitelist filter: kept=%d skipped=%d", count, skipped)
     return {"news_synced": count}
 
 
@@ -196,6 +212,7 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
 
     articles = data.get("articles", [])
     count = 0
+    skipped = 0
     for article in articles:
         title = article.get("title", "")
         url = article.get("url", "")
@@ -208,6 +225,9 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
             pub_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if not title or not url or title == "[Removed]":
+            continue
+        if not is_trusted_us(url):
+            skipped += 1
             continue
 
         content = article.get("description") or article.get("content") or None
@@ -225,6 +245,8 @@ async def _sync_newsapi(db: AsyncSession, stock: Stock) -> dict:
             count += 1
 
     await db.commit()
+    if skipped:
+        logger.info("newsapi whitelist filter: kept=%d skipped=%d", count, skipped)
     return {"news_synced": count}
 
 
@@ -313,7 +335,13 @@ async def _sync_google_news_kr(db: AsyncSession, stock: Stock) -> dict:
         return {"news_synced": 0, "error": "Google News empty response"}
 
     count = 0
+    skipped = 0
     for item in _parse_google_news_items(xml_text):
+        # Google News RSS는 매체 직접 link → publisher whitelist 적용.
+        # 단 news.google.com 자체 redirect URL은 whitelist에 포함시켜 통과.
+        if not is_trusted_kr(item["url"]):
+            skipped += 1
+            continue
         stmt = insert(News).values(
             stock_id=stock.id,
             title=item["title"][:500],
@@ -326,6 +354,8 @@ async def _sync_google_news_kr(db: AsyncSession, stock: Stock) -> dict:
         if result.rowcount > 0:
             count += 1
     await db.commit()
+    if skipped:
+        logger.info("google news kr whitelist filter: kept=%d skipped=%d", count, skipped)
     return {"news_synced": count}
 
 
