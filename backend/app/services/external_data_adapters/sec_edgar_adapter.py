@@ -217,6 +217,47 @@ class SecEdgarAdapter(ExternalAdapter):
             )
         return out
 
+    async def fetch_10k_filings(
+        self,
+        ticker: str,
+        *,
+        since,
+    ) -> list[dict]:
+        """List 10-K (annual report) filings filed >= `since`.
+
+        2026-05-14 Codex 권고 G — Item 1A. Risk Factors 가 명시한 customer/
+        supplier/competitor가 매매 결정 baseline. 8-K 14일 윈도우 / news 14일
+        윈도우 가 못 잡는 안정적 source.
+
+        Returns: [{accession, filing_date, primary_document, cik}].
+        보통 ticker 당 1년 1건. 최근 2년 윈도우로 1-2건 수렴.
+        """
+        cik = await self._ticker_to_cik(ticker)
+        sub = await self._fetch_submissions(cik)
+        recent = sub.get("filings", {}).get("recent", {})
+
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        accs = recent.get("accessionNumber", [])
+        docs = recent.get("primaryDocument", [])
+        since_str = since.isoformat() if hasattr(since, "isoformat") else str(since)
+
+        out: list[dict] = []
+        for i, f in enumerate(forms):
+            if f != "10-K":
+                continue
+            if dates[i] < since_str:
+                continue
+            out.append(
+                {
+                    "cik": cik,
+                    "accession": accs[i],
+                    "filing_date": dates[i],
+                    "primary_document": docs[i] if i < len(docs) else None,
+                }
+            )
+        return out
+
     async def fetch_form4_filings(
         self,
         ticker: str,

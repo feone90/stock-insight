@@ -131,6 +131,56 @@ confidence 기준 (엄격히 적용):
 - 사업 관계가 *기사 어디에도* 명시되지 않거나, 위 "절대 추출 X" 케이스만 보이면 `{{"relations": []}}`"""
 
 
+# v4 — US SEC 10-K Item 1A. Risk Factors 다른 회사 언급 추출.
+# Codex 시니어 트레이더 권고 G (2026-05-14): 10-K Risk Factors 가 customer/
+# supplier/competitor를 직접 명시한 가장 안정적 source. 8-K 14일 윈도우 /
+# news 14일 윈도우 가 못 잡는 ASML 같은 capex tie-in 도 여기엔 빠짐없이 등장.
+TEN_K_RISK_PROMPT = """역할: 너는 시니어 셀사이드 애널리스트다. 미국 SEC 10-K 의 Item 1A. Risk Factors 텍스트를 읽고, 본 회사({focal_ticker}/{focal_name})와 *사업 본질로 얽힌 다른 상장 회사* 만 추출하라. 일반론적 risk(예: "we face competition", "we are subject to regulation") 는 추출 대상 아니다 — 회사 이름 또는 ticker 가 명시된 경우만.
+
+10-K Item 1A. Risk Factors:
+{body}
+
+추출 대상 — 다음 카테고리만:
+- contract_customer  : "Our largest customers include X, Y" / "Revenue from X represented N% of total revenue" 같은 명시
+- contract_supplier  : "We rely on X for [EUV equipment / HBM / GPU / etc.]" / "X is a sole supplier" 같은 명시
+- competitor         : "We compete with X" / "X is our primary competitor in [market]" 같은 직접 경쟁
+- regulatory_link    : "Like X, we are subject to [export controls / FDA / antitrust]" 같은 동일 규제 노출
+
+confidence 기준 (엄격):
+- 0.85+ : ticker 또는 회사 풀네임 직접 명시 + 매출 비중/지위 등 구체 인용
+- 0.6~0.85 : 회사명 명시 + 정성적 인용
+- <0.6 : 절대 추출 X
+
+*절대 추출 X*:
+- 추상적 risk ("we face competition from various companies"). 회사 이름 미명시 = drop
+- 비상장 / 자회사 / sovereign / consortium
+- "such as X" 식 *예시* 만 들고 본 회사와 사업 관계 없는 언급
+- 자기 회사명 등장 (focal 자신과의 관계는 의미 X)
+
+응답 JSON 객체 1개 (자연어 설명 X, code fence X):
+{{
+  "relations": [
+    {{
+      "from_ticker": "{focal_ticker}",
+      "to_ticker": "상대 회사 ticker (US 1-5자) 또는 KR 6자리",
+      "relation_type": "contract_customer | contract_supplier | competitor | regulatory_link",
+      "signal_direction": "positive | negative | inverse",
+      "strength": 0.0~1.0,
+      "confidence": 0.0~1.0,
+      "metadata": {{
+        "rationale": "Risk Factors 텍스트에서 *그대로 인용한* 한 줄 근거. paraphrase 금지"
+      }}
+    }}
+  ]
+}}
+
+규칙:
+- from_ticker 는 반드시 `{focal_ticker}` (본 10-K 의 발행자). to_ticker 만 다양함.
+- ticker 추출 우선: 본문에 "(NASDAQ: XYZ)" 같이 ticker 명시되면 그대로. 회사명만 명시되고 ticker 미명시면 가장 잘 알려진 ticker 사용 (예: "ASML Holding" → "ASML", "Taiwan Semiconductor" → "TSM"). 모호하면 추출 X.
+- rationale 은 paraphrase 금지 — 텍스트 표현 그대로 인용. 인용할 표현이 없으면 그 관계 자체 추출 X.
+- 회사 이름이 본문 *어디에도 명시되지 않으면* `"relations": []`"""
+
+
 # Generic schema reminder appended at the end of every prompt for retry-on-fail.
 SCHEMA_REMINDER = """\
 \n\nIMPORTANT: respond with a JSON array. Each element must have exactly these keys: \
