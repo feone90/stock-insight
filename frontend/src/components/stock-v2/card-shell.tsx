@@ -182,10 +182,12 @@ export function StockCardPage({ ticker }: { ticker: string }) {
                 <FundamentalsSection fundamentals={card.fundamentals} />
                 {card.flow ? <FlowSection flow={card.flow} /> : null}
                 {card.insider ? <InsiderSection insider={card.insider} /> : null}
-                {(card.earnings || card.analyst_rating) ? (
+                {(card.earnings || card.analyst_rating || card.price_target) ? (
                   <EarningsAnalystSection
                     earnings={card.earnings}
                     rating={card.analyst_rating}
+                    priceTarget={card.price_target}
+                    currentPrice={card.price}
                   />
                 ) : null}
                 <TechMomentumSection technical={card.technical} />

@@ -68,6 +68,40 @@ async def fetch_earnings_calendar(ticker: str, days_ahead: int = 90) -> dict | N
     }
 
 
+async def fetch_price_target(ticker: str) -> dict | None:
+    """분석가 1년 목표주가 consensus (high/low/mean/median + analyst count).
+
+    Codex review 후속 — 사용자 명시(2026-05-14): "각 기관들이 정한 목표주가도
+    표시되면 좋을것같고". analyst recommendation 옆에 같이 노출.
+
+    Returns: {"target_high", "target_low", "target_mean", "target_median",
+              "n_analysts", "last_updated"} (YYYY-MM-DD) 또는 None.
+    """
+    if not settings.finnhub_api_key:
+        return None
+
+    params = {"symbol": ticker.upper(), "token": settings.finnhub_api_key}
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.get(f"{_BASE}/stock/price-target", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("finnhub price target fetch failed for %s: %s", ticker, e)
+        return None
+
+    if not isinstance(data, dict) or not data.get("targetMean"):
+        return None
+    return {
+        "target_high": float(data.get("targetHigh") or 0) or None,
+        "target_low": float(data.get("targetLow") or 0) or None,
+        "target_mean": float(data.get("targetMean") or 0) or None,
+        "target_median": float(data.get("targetMedian") or 0) or None,
+        "n_analysts": int(data.get("numberOfAnalysts") or 0) or None,
+        "last_updated": data.get("lastUpdated"),
+    }
+
+
 async def fetch_analyst_recommendation(ticker: str) -> dict | None:
     """가장 최근 월의 analyst 의견 분포.
 

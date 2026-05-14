@@ -1,6 +1,6 @@
 "use client";
 
-import type { AnalystRating, Earnings } from "@/types/card";
+import type { AnalystRating, Earnings, PriceTarget } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
 /**
@@ -18,17 +18,28 @@ import { SectionShell } from "./section-shell";
 export function EarningsAnalystSection({
   earnings,
   rating,
+  priceTarget,
+  currentPrice,
 }: {
   earnings: Earnings | null | undefined;
   rating: AnalystRating | null | undefined;
+  priceTarget?: PriceTarget | null;
+  currentPrice?: number;
 }) {
-  const compact = buildCompact(earnings, rating);
+  const compact = buildCompact(earnings, rating, priceTarget, currentPrice);
   return (
     <SectionShell
       emoji="🗓️"
       title="실적·분석가 의견"
       compact={<span>{compact}</span>}
-      expanded={<ExpandedBody earnings={earnings} rating={rating} />}
+      expanded={
+        <ExpandedBody
+          earnings={earnings}
+          rating={rating}
+          priceTarget={priceTarget}
+          currentPrice={currentPrice}
+        />
+      }
       helpText={
         <div className="space-y-1.5">
           <p>
@@ -52,6 +63,8 @@ export function EarningsAnalystSection({
 function buildCompact(
   earnings: Earnings | null | undefined,
   rating: AnalystRating | null | undefined,
+  priceTarget?: PriceTarget | null,
+  currentPrice?: number,
 ): string {
   const parts: string[] = [];
   if (earnings?.date) {
@@ -60,6 +73,14 @@ function buildCompact(
     } else {
       parts.push(`실적 발표 ${Math.abs(earnings.days_until)}일 전`);
     }
+  }
+  if (priceTarget?.target_mean) {
+    const diff = upsidePct(priceTarget.target_mean, currentPrice);
+    parts.push(
+      diff != null
+        ? `목표가 $${priceTarget.target_mean.toFixed(0)} (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)`
+        : `목표가 $${priceTarget.target_mean.toFixed(0)}`,
+    );
   }
   if (rating) {
     const total = analystTotal(rating);
@@ -73,21 +94,87 @@ function buildCompact(
 function ExpandedBody({
   earnings,
   rating,
+  priceTarget,
+  currentPrice,
 }: {
   earnings: Earnings | null | undefined;
   rating: AnalystRating | null | undefined;
+  priceTarget?: PriceTarget | null;
+  currentPrice?: number;
 }) {
   return (
     <div className="space-y-3 text-xs">
       {earnings ? <EarningsBlock earnings={earnings} /> : null}
+      {priceTarget?.target_mean ? (
+        <PriceTargetBlock target={priceTarget} currentPrice={currentPrice} />
+      ) : null}
       {rating ? <RatingBlock rating={rating} /> : null}
-      {!earnings && !rating ? (
+      {!earnings && !rating && !priceTarget?.target_mean ? (
         <p className="text-sm text-[var(--surface-text-muted)]">
           실적·분석가 데이터 없음 (Finnhub 키 미설정이거나 종목 미지원)
         </p>
       ) : null}
     </div>
   );
+}
+
+function PriceTargetBlock({
+  target,
+  currentPrice,
+}: {
+  target: PriceTarget;
+  currentPrice?: number;
+}) {
+  const mean = target.target_mean!;
+  const upside = upsidePct(mean, currentPrice);
+  const upsideColor =
+    upside == null
+      ? "text-[var(--surface-text-muted)]"
+      : upside > 0
+        ? "text-red-600 dark:text-red-400"
+        : upside < 0
+          ? "text-blue-600 dark:text-blue-400"
+          : "text-[var(--surface-text-muted)]";
+  const spreadPct =
+    target.target_high && target.target_low && target.target_high > 0
+      ? ((target.target_high - target.target_low) / target.target_high) * 100
+      : null;
+  return (
+    <div className="space-y-1">
+      <p className="font-medium">🎯 1년 목표주가 (전문가 평균)</p>
+      <p className="text-[var(--surface-text-muted)]">
+        평균 <span className="font-semibold tabular-nums">${mean.toFixed(2)}</span>
+        {upside != null ? (
+          <>
+            {" "}— 현재가 대비{" "}
+            <span className={`tabular-nums font-medium ${upsideColor}`}>
+              {upside >= 0 ? "+" : ""}
+              {upside.toFixed(1)}%
+            </span>
+          </>
+        ) : null}
+      </p>
+      {target.target_high && target.target_low ? (
+        <p className="text-[11px] text-[var(--surface-text-subtle)]">
+          → 최고 ${target.target_high.toFixed(0)} / 최저 ${target.target_low.toFixed(0)} ·
+          전문가 {target.n_analysts ?? "?"}명
+          {spreadPct != null && spreadPct >= 25
+            ? ` · 의견 갈림 (${spreadPct.toFixed(0)}% spread)`
+            : ""}
+        </p>
+      ) : null}
+      {target.last_updated ? (
+        <p className="text-[11px] italic text-[var(--surface-text-subtle)]">
+          출처: Finnhub ({target.last_updated} 기준)
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function upsidePct(target: number, current: number | undefined): number | null {
+  if (current == null || current <= 0) return null;
+  return ((target - current) / current) * 100;
 }
 
 function EarningsBlock({ earnings }: { earnings: Earnings }) {

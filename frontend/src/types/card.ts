@@ -164,6 +164,16 @@ export interface AnalystRating {
   strong_sell: number;
 }
 
+// US-only — Finnhub 1년 목표주가 consensus (high/low/mean/median).
+export interface PriceTarget {
+  target_high: number | null;
+  target_low: number | null;
+  target_mean: number | null;
+  target_median: number | null;
+  n_analysts: number | null;
+  last_updated: string | null;  // YYYY-MM-DD
+}
+
 // US-only — SEC Form 4 (임원 매매 신고) 최근 N일 요약.
 // KR 종목은 null. 매수/매도 transaction code 분류는 follow-up (Form 4 XML 파싱).
 export interface InsiderFiling {
@@ -268,6 +278,7 @@ export interface StockCard {
   insider?: Insider | null;            // US-only SEC Form 4 임원 매매 신고.
   earnings?: Earnings | null;          // US-only Finnhub 다음 실적 발표 D-N.
   analyst_rating?: AnalystRating | null; // US-only Finnhub 분석가 의견 consensus.
+  price_target?: PriceTarget | null;     // US-only Finnhub 분석가 1년 목표주가.
   decision: Decision;
 
   citations: Citation[];

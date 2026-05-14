@@ -35,6 +35,7 @@ from app.schemas.card import (
     MacroContext,
     NewsItem,
     PoliticalSignalCard,
+    PriceTarget,
     Relation,
     TechMomentum,
 )
@@ -95,7 +96,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
 
     (
         indicators_co, macro_co, fund_co, news_co, rel_co, pol_co,
-        flow_co, ins_co, earn_co, anal_co,
+        flow_co, ins_co, earn_co, anal_co, pt_co,
     ) = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
@@ -107,6 +108,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         _fetch_insider(ticker),
         _fetch_earnings(ticker),
         _fetch_analyst_rating(ticker),
+        _fetch_price_target(ticker),
         return_exceptions=True,
     )
 
@@ -122,6 +124,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
     insider = _build_insider(ins_co, pool)
     earnings = _build_earnings(earn_co, pool)
     analyst_rating = _build_analyst_rating(anal_co, pool)
+    price_target = _build_price_target(pt_co, pool)
 
     if isinstance(rel_co, dict) and rel_co.get("is_stale"):
         # Fire-and-forget background refresh — do NOT await
@@ -135,6 +138,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         insider=insider,
         earnings=earnings,
         analyst_rating=analyst_rating,
+        price_target=price_target,
         news=news,
         political_signals=political_signals,
         relations_data=relations_data,
@@ -211,6 +215,27 @@ def _build_earnings(res: Any, pool: _CitationPool) -> Earnings | None:
         eps_estimate=res.get("eps_estimate"),
         revenue_estimate=res.get("revenue_estimate"),
         hour=res.get("hour"),
+    )
+
+
+def _build_price_target(res: Any, pool: _CitationPool) -> PriceTarget | None:
+    if res is None or isinstance(res, Exception) or not isinstance(res, dict):
+        if isinstance(res, Exception):
+            logger.warning("data_layer price target failed: %s", res)
+        return None
+    if not res.get("target_mean"):
+        return None
+    pool.add(
+        "market_data",
+        f"Finnhub · 분석가 목표주가 ({res.get('last_updated') or 'latest'})",
+    )
+    return PriceTarget(
+        target_high=res.get("target_high"),
+        target_low=res.get("target_low"),
+        target_mean=res.get("target_mean"),
+        target_median=res.get("target_median"),
+        n_analysts=res.get("n_analysts"),
+        last_updated=res.get("last_updated"),
     )
 
 
@@ -461,6 +486,19 @@ async def _fetch_analyst_rating(ticker: str) -> dict | None:
         if not stock or not is_us(stock.market):
             return None
     return await fetch_analyst_recommendation(ticker)
+
+
+async def _fetch_price_target(ticker: str) -> dict | None:
+    from app.collectors.finnhub import fetch_price_target
+    from app.markets import is_us
+
+    async with async_session() as db:
+        stock = (
+            await db.execute(select(Stock).where(Stock.ticker == ticker))
+        ).scalar_one_or_none()
+        if not stock or not is_us(stock.market):
+            return None
+    return await fetch_price_target(ticker)
 
 
 _FORM4_WINDOW_DAYS = 30

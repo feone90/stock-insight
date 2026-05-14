@@ -234,6 +234,20 @@ class AnalystRating(BaseModel):
         return self.buy + self.hold + self.sell + self.strong_buy + self.strong_sell
 
 
+class PriceTarget(BaseModel):
+    """US 종목 — 분석가 1년 목표주가 consensus.
+
+    카피 가이드: "전문가 N명 1년 후 평균 X달러 — 현재가 대비 +Y%". 가족
+    친화 frontend 변환. high/low 는 range 표시 ("180~220달러 사이 의견 갈림").
+    """
+    target_high: float | None = None
+    target_low: float | None = None
+    target_mean: float | None = None
+    target_median: float | None = None
+    n_analysts: int | None = None
+    last_updated: str | None = None    # YYYY-MM-DD
+
+
 class InsiderFiling(BaseModel):
     filing_date: str
     accession: str
@@ -344,6 +358,7 @@ class StockCard(BaseModel):
     insider: Insider | None = None        # US-only: SEC Form 4 최근 30일 요약.
     earnings: Earnings | None = None      # US-only: Finnhub 다음 실적 발표 D-N.
     analyst_rating: AnalystRating | None = None  # US-only: Finnhub 매수/보유/매도.
+    price_target: PriceTarget | None = None  # US-only: Finnhub 1년 목표주가.
     decision: Decision
 
     citations: list[Citation] = []
@@ -373,6 +388,7 @@ class DataLayer(BaseModel):
     insider: Insider | None = None        # US-only (SEC Form 4 30d)
     earnings: Earnings | None = None      # US-only (Finnhub 다음 발표)
     analyst_rating: AnalystRating | None = None  # US-only (Finnhub consensus)
+    price_target: PriceTarget | None = None  # US-only (Finnhub 1년 목표주가)
     news: list[NewsItem] = []
     political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []
