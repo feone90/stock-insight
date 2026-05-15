@@ -64,6 +64,18 @@ _PROMPT = """역할: 너는 30년 경력 펀더멘털 분석가다. 사용자의
 - 매출/이익 비중, 계약 규모, 지분 % 같은 정량 근거 *없이* "협력 관계" 만 적으면 무가치 — drop 대상.
 - LLM training cutoff 이후 큰 변동 가능 (인수/매각/파트너십 종료) — 확신 안 서면 knowledge_cutoff_risk="high".
 
+비상장 핵심 파트너 식별 의무 (사용자 정직한 요청):
+- 사용자가 가장 가치 있다고 느끼는 관계는 *상장사 간* 이 아니라 *비상장 핵심 파트너* 다.
+  상장사 관계는 sector_match / news / SEC 가 이미 잡지만, 비상장은 이 모듈만의 책임.
+- Hyperscaler / mega-cap tech 분석 시 다음 비상장 entity 들 *반드시* 검토:
+  * AI 파트너십: OpenAI (MS 49% 지분 + Azure exclusive), Anthropic (AMZN 80억 투자 + AWS),
+    xAI (TSLA/X 동일 오너), DeepMind (GOOG 인수 자회사)
+  * 클라우드 / 데이터: Databricks, Snowflake (이미 상장 — IT)
+  * 우주/로봇: SpaceX (TSLA 동일 오너), Boston Dynamics (HYUNDAI 인수)
+- 진짜 알 때만 — 일반적으로 알려진 사실만. 안 확실하면 빠뜨려도 됨, 추측은 절대 금지.
+- target_ticker 는 빈 문자열, target_is_public=false 로 박을 것 — RelationCandidate 로
+  자동 routing.
+
 분석 대상: {ticker} ({name}, market={market}, sector={sector})
 
 먼저 수행할 BUSINESS DOMAIN IDENTIFICATION:
