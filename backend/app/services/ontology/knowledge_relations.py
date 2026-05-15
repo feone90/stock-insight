@@ -56,30 +56,100 @@ _RELATION_TYPE_MAP: dict[str, str] = {
     "자회사": "group",
 }
 
-_PROMPT = (
-    "당신은 30년 경력 펀더멘털 분석가다. 사용자의 매수/매도 결정에 진짜 영향을\n"
-    "줄 핵심 사업 관계만 식별한다. 추측은 자본 손실로 이어진다.\n\n"
-    "분석 대상: {ticker} ({name}, market={market}, sector={sector}).\n\n"
-    "각 관계마다 JSON object:\n"
-    "- target_name: 회사명 (한국어 또는 영문 정식명)\n"
-    "- target_ticker: 상장사면 ticker (모르면 빈 문자열)\n"
-    "- target_is_public: true | false\n"
-    '- relation_kind: "핵심파트너" | "핵심공급사" | "핵심고객" | "핵심경쟁사" |\n'
-    '                 "투자_지분" | "모회사" | "자회사"\n'
-    "- business_importance: 1 (주변) ~ 5 (매수 결정 핵심)\n"
-    "- reasoning: 2-3 문장, 구체적 (매출/이익 의존도 %, 대체 가능성, 계약 규모).\n"
-    '            "협력 관계" / "사업 연관" 같은 막연 표현 금지.\n'
-    '- knowledge_cutoff_risk: "high" (training 이후 변경 가능) | "low"\n'
-    "- confidence: 0.0~1.0\n\n"
-    "엄격 규칙:\n"
-    "1. 확실하지 않으면 빈 list. 추측 금지.\n"
-    "2. business_importance < 3 은 출력 X.\n"
-    "3. relation_kind 7종 외 금지.\n"
-    "4. reasoning < 80자면 출력 X.\n"
-    "5. 비상장 entity (OpenAI, SpaceX, ByteDance 등) 도 포함 — 단 진짜 알 때만.\n"
-    '6. knowledge_cutoff_risk="high" 이면 confidence ≤ 0.6 (자동 drop 됨).\n\n'
-    '응답 형식: {{"relations": [...]}}. JSON 1개. 자연어 / 코드펜스 X.'
-)
+_PROMPT = """역할: 너는 30년 경력 펀더멘털 분석가다. 사용자의 매수/매도 결정에 *진짜 영향을 줄* 핵심 사업 관계만 식별한다. 추측은 자본 손실로 이어진다.
+
+가장 중요한 원칙 (source document 없는 추출 — 더 엄격해야 함):
+- 본 추출은 *너의 사전 지식* 으로만 한다. 본문 인용 없음.
+- 따라서 모든 출력은 *공개 사실로 검증 가능*해야 함. 추측·소문·기대·계열 가능성 X.
+- 매출/이익 비중, 계약 규모, 지분 % 같은 정량 근거 *없이* "협력 관계" 만 적으면 무가치 — drop 대상.
+- LLM training cutoff 이후 큰 변동 가능 (인수/매각/파트너십 종료) — 확신 안 서면 knowledge_cutoff_risk="high".
+
+분석 대상: {ticker} ({name}, market={market}, sector={sector})
+
+먼저 수행할 BUSINESS DOMAIN IDENTIFICATION:
+Step 1: 이 회사의 핵심 사업 영역 2-4개 (예: MS = Cloud Azure / AI / 게이밍 / 운영체제·Office).
+Step 2: 각 사업 영역마다 매수 결정에 *영향* 줄 회사 관계 식별:
+  - 핵심 공급사 (없으면 사업 멈춤)
+  - 핵심 고객 (없으면 매출 직격)
+  - 핵심 경쟁사 (점유율 직접 경쟁)
+  - 핵심 파트너 (생태계 의존)
+  - 모/자회사 / 투자 지분 (법적·재무 연결)
+Step 3: 정량 근거 가능한 관계만 keep. 막연한 "관련 업체" / "협력 가능성" drop.
+
+각 관계 JSON object:
+- target_name: 회사명 (한국어 또는 영문 정식명)
+- target_ticker: 상장사면 ticker (모르면 빈 문자열)
+- target_is_public: true | false
+- relation_kind: "핵심파트너" | "핵심공급사" | "핵심고객" | "핵심경쟁사" | "투자_지분" | "모회사" | "자회사"
+- business_importance: 1 (주변 관계) ~ 5 (매수 결정 핵심)
+- reasoning: 2-3 문장. *반드시* 정량 근거 포함:
+  * 매출/이익 의존도 % 또는
+  * 계약 규모 (KRW / USD) 또는
+  * 지분 % 또는
+  * 시장 점유율 % 또는
+  * 단일 공급/sole source 명시
+  "협력 관계", "전략적 파트너", "사업 연관" 같은 막연 표현 금지 — drop.
+- knowledge_cutoff_risk: "high" | "low"
+- confidence: 0.0~1.0
+
+HEDGE / VAGUE 즉시 거절:
+다음 표현이 reasoning 핵심 근거면 출력 X (자기 검열):
+- "협력 관계", "전략적 파트너십", "사업 연관", "관련 업체"
+- "수혜 기대", "관련 가능성", "협력 검토", "잠재 파트너"
+- "AI 업체들", "반도체 관련주", "관련 사업" — 구체 회사명/매출 비중 없음
+
+business_importance 정량 기준:
+- 5: 매출/이익의 20%+ 의존 OR 사업 영역 단일 공급/고객 OR 50%+ 지분
+- 4: 매출/이익의 10-20% 의존 OR 주력 경쟁사 (점유율 top 3) OR 20-50% 지분
+- 3: 매출/이익의 5-10% 의존 OR 보조 경쟁사 OR 5-20% 지분
+- < 3: 출력 X
+
+confidence 기준:
+- 0.85+ : 정량 % 또는 계약 규모를 외부 공시/연차보고서/SEC 10-K 등으로 본 적 있음
+- 0.7~0.85 : 업계 well-known 사실. 정량은 모름.
+- 0.6~0.7 : 알려진 사실이지만 training cutoff 후 변동 risk 있음.
+- < 0.6 : 절대 출력 X. knowledge_cutoff_risk="high" 면 자동 cap 0.6.
+
+few-shot examples:
+
+KEEP 1 — Microsoft (MSFT):
+{{
+  "target_name": "OpenAI", "target_ticker": "", "target_is_public": false,
+  "relation_kind": "핵심파트너", "business_importance": 5,
+  "reasoning": "MS 가 OpenAI 에 130억 달러 이상 투자 (~49% 경제적 지분), Azure 가 OpenAI 의 *유일한* 클라우드 인프라. ChatGPT 사용량 증가 = Azure AI 매출 직결.",
+  "knowledge_cutoff_risk": "low", "confidence": 0.92
+}}
+{{
+  "target_name": "Apple Inc.", "target_ticker": "AAPL", "target_is_public": true,
+  "relation_kind": "핵심경쟁사", "business_importance": 4,
+  "reasoning": "운영체제(Windows vs macOS), 생산성(Office vs iWork), 디바이스(Surface vs iPad/Mac) 3 영역 직접 경쟁. 소비자 PC/태블릿 점유율 top 2.",
+  "knowledge_cutoff_risk": "low", "confidence": 0.9
+}}
+
+REJECT 1 — vague "관련 업체":
+{{
+  "target_name": "AI 반도체 업체들",  ← drop (구체 회사명 없음)
+  "reasoning": "AI 칩 관련 협력 가능성"  ← drop (hedge + 정량 X)
+}}
+
+REJECT 2 — speculative future:
+{{
+  "target_name": "비공식 협력 소문 있는 SomeCo",  ← drop (소문)
+  "reasoning": "잠재적 파트너십 가능성"  ← drop (가능성)
+}}
+
+REJECT 3 — outdated, unknown if still true:
+"X 인수 검토 중" / "Y 와 협력 협상 중" 같이 training cutoff 후 변경 가능 → knowledge_cutoff_risk=high → confidence cap 0.6 → 자동 drop.
+
+엄격 규칙 요약:
+1. 확실하지 않으면 빈 list. 추측 금지.
+2. business_importance < 3 은 출력 X.
+3. relation_kind 7종 외 금지.
+4. reasoning 에 정량 근거 (% / 금액 / 지분 / 점유율 / sole source) 1개 이상 *반드시* 포함.
+5. 비상장 entity (OpenAI, SpaceX, ByteDance 등) 도 포함 — 단 진짜 알 때만.
+6. knowledge_cutoff_risk="high" 이면 confidence ≤ 0.6 (자동 drop).
+
+응답 형식: {{"relations": [...]}}. JSON 1 개. 자연어 / 코드펜스 X."""
 
 
 async def extract_knowledge_relations(ticker: str) -> dict:
