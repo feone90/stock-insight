@@ -749,18 +749,28 @@ async def _fetch_data_timestamps(ticker: str) -> dict:
             )
         ).scalar()
 
+    # 2026-05-15 timezone bug fix — DB DateTime 컬럼이 naive (tzinfo=None) 라
+    # serialize 시 KST 환경 frontend 가 9시간 어긋남. 모든 timestamp 에 UTC
+    # 강제 부착 후 반환.
+    def _ensure_utc(dt):
+        if dt is None:
+            return None
+        if hasattr(dt, "tzinfo") and dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
     price_asof: datetime | None = None
     if price_sync_at is not None:
-        price_asof = price_sync_at
+        price_asof = _ensure_utc(price_sync_at)
     elif price_row is not None:
         if isinstance(price_row, datetime):
-            price_asof = price_row
+            price_asof = _ensure_utc(price_row)
         else:
             price_asof = datetime.combine(price_row, datetime.min.time(), tzinfo=timezone.utc)
 
     news_latest_at: datetime | None = None
     if isinstance(news_row, datetime):
-        news_latest_at = news_row
+        news_latest_at = _ensure_utc(news_row)
 
     return {"price_asof": price_asof, "news_latest_at": news_latest_at}
 

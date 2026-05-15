@@ -365,8 +365,13 @@ async def test_fetch_data_timestamps_reads_latest_rows(db_for_data_layer):
     # PriceHistory.date 는 date — fetcher 가 UTC midnight 으로 promote.
     assert res["price_asof"] is not None
     assert res["price_asof"].date() == date.today()
-    # News.published_at 는 datetime — 가장 최근(2시간 전) 값이 그대로.
-    assert res["news_latest_at"] == latest_news_at
+    # 2026-05-15 — fetcher 가 모든 timestamp 에 UTC tzinfo 부착 (frontend
+    # KST 환경 9시간 어긋남 fix). naive 와 aware 직접 비교 불가능 → tz strip
+    # 후 비교.
+    from datetime import timezone as _tz
+    assert res["news_latest_at"] is not None
+    assert res["news_latest_at"].tzinfo == _tz.utc
+    assert res["news_latest_at"].replace(tzinfo=None) == latest_news_at
 
 
 @pytest.mark.asyncio

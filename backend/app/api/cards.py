@@ -217,8 +217,20 @@ async def get_card(
     # price_asof: stock.last_price_sync_at (sync_prices 호출 *시각*) 우선,
     # fallback MAX(PriceHistory.date). 시각이라야 같은 날 새로고침 시
     # frontend polling 이 advance 감지해 "방금 전" 표시.
+    #
+    # 2026-05-15 timezone bug fix — DB DateTime 컬럼은 naive (tzinfo 없음).
+    # naive datetime.isoformat() = "2026-05-15T05:00:00" (Z/offset 없음) →
+    # frontend `new Date(...)` 가 *local time (KST)* 로 parse → 9 시간 offset
+    # 어긋남 ("9시간 전" 표시). UTC 명시 → frontend KST 환경에서 정확.
+    def _to_utc_iso(dt):
+        if dt is None:
+            return None
+        if hasattr(dt, "tzinfo") and dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+
     if stock.last_price_sync_at is not None:
-        card["price_asof"] = stock.last_price_sync_at.isoformat()
+        card["price_asof"] = _to_utc_iso(stock.last_price_sync_at)
     else:
         price_max = (
             await db.execute(
@@ -228,18 +240,14 @@ async def get_card(
             )
         ).scalar()
         if price_max is not None:
-            card["price_asof"] = (
-                price_max.isoformat() if hasattr(price_max, "isoformat") else str(price_max)
-            )
+            card["price_asof"] = _to_utc_iso(price_max)
     news_max = (
         await db.execute(
             select(func.max(News.published_at)).where(News.stock_id == stock.id)
         )
     ).scalar()
     if news_max is not None:
-        card["news_latest_at"] = (
-            news_max.isoformat() if hasattr(news_max, "isoformat") else str(news_max)
-        )
+        card["news_latest_at"] = _to_utc_iso(news_max)
 
     # 3) 관계 카드의 target today_change_pct — 각 target ticker 의 현재
     # change_percent. 한 번에 batch lookup.
