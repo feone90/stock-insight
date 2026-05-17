@@ -253,7 +253,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
             <div className="grid gap-4 p-4 md:p-5 lg:grid-cols-[7fr_5fr] lg:gap-5">
               {/* Left — chart + secondary */}
               <div className="space-y-3 min-w-0">
-                <HeroChart ticker={card.ticker} />
+                <HeroChart ticker={card.ticker} priceAsof={card.price_asof} />
                 <RelationsSection relations={card.relations} ticker={card.ticker} />
                 <NewsSection news={card.news} political={card.political_signals} />
                 <MacroSection macro={card.macro} />

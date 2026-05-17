@@ -1,5 +1,6 @@
 "use client";
 
+import { currencyMark } from "@/lib/markets";
 import type { StockCard } from "@/types/card";
 
 const STANCE_LABEL = {
@@ -29,7 +30,7 @@ export function CardHeader({ card }: { card: StockCard }) {
       : change < 0
         ? "text-blue-600 dark:text-blue-400"
         : "text-[var(--surface-text-muted)]";
-  const currencyMark = card.market === "KR" ? "₩" : card.market === "US" ? "$" : "";
+  const mark = currencyMark(card.market);
 
   const asofAbsolute = card.asof
     ? new Date(card.asof).toLocaleString("ko-KR", {
@@ -85,7 +86,7 @@ export function CardHeader({ card }: { card: StockCard }) {
         {/* Right: price + change + asof */}
         <div className="text-left md:text-right shrink-0">
           <div className="text-3xl md:text-[2rem] font-bold tabular-nums leading-tight">
-            {currencyMark}
+            {mark}
             {card.price.toLocaleString()}
           </div>
           <div className={`text-sm font-semibold tabular-nums ${changeColor}`}>

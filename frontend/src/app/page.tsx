@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getFavorites } from "@/services/api";
 import { onUserChanged } from "@/services/user";
+import { currencyMark, isKRMarket } from "@/lib/markets";
 import type { Stock } from "@/types/stock";
 
 const RECOMMENDATIONS: { ticker: string; name: string; market: string; desc: string }[] = [
@@ -58,8 +59,17 @@ export default function Home() {
                   </div>
                   <div className="text-right">
                     <div className="font-semibold text-slate-50">
-                      {stock.current_price.toLocaleString()}
-                      {stock.market === "KRX" ? "원" : "$"}
+                      {isKRMarket(stock.market) ? (
+                        <>
+                          {stock.current_price.toLocaleString()}
+                          <span className="text-xs ml-0.5">원</span>
+                        </>
+                      ) : (
+                        <>
+                          {currencyMark(stock.market)}
+                          {stock.current_price.toLocaleString()}
+                        </>
+                      )}
                     </div>
                     <div
                       className={`text-sm ${

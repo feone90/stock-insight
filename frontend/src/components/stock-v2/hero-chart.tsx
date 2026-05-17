@@ -33,9 +33,15 @@ const PERIOD_OPTIONS: Array<{ label: string; days: number }> = [
 export function HeroChart({
   ticker,
   days: initialDays = 60,
+  priceAsof,
 }: {
   ticker: string;
   days?: number;
+  /**
+   * 2026-05-18 — 카드의 price_asof 가 advance 하면 chart 도 re-fetch.
+   * 옛 코드는 mount 1회만 fetch — 가격 새로고침 후 차트는 stale.
+   */
+  priceAsof?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { mode } = useTheme();
@@ -150,7 +156,7 @@ export function HeroChart({
       if (onResize) window.removeEventListener("resize", onResize);
       chart?.remove();
     };
-  }, [ticker, days, mode]);
+  }, [ticker, days, mode, priceAsof]);
 
   return (
     <div className="relative">
