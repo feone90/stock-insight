@@ -18,6 +18,7 @@ import { InsiderSection } from "./insider-section";
 import { MacroSection } from "./macro-section";
 import { NewsSection } from "./news-section";
 import { CardFooter } from "./placeholders";
+import { RecentPriceMoveSection } from "./recent-price-move-section";
 import { RelationsSection } from "./relations-section";
 import { TechMomentumSection } from "./tech-momentum-section";
 import { ThesisSection } from "./thesis-section";
@@ -273,6 +274,11 @@ export function StockCardPage({ ticker }: { ticker: string }) {
             style={{ boxShadow: "var(--surface-shadow)" }}
           >
             <CardHeader card={card} />
+
+            {/* 2026-05-19 — 헤더 바로 아래 "왜 떨어졌나/올랐나" 답 layer. */}
+            {card.recent_price_move ? (
+              <RecentPriceMoveSection move={card.recent_price_move} />
+            ) : null}
 
             <div className="grid gap-4 p-4 md:p-5 lg:grid-cols-[7fr_5fr] lg:gap-5">
               {/* Left — chart + secondary */}

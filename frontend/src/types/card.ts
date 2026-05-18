@@ -257,6 +257,34 @@ export interface PoliticalSignalCard {
   sector_impact: string | null;
 }
 
+// 2026-05-19 — 카드 헤더 가격 아래 "왜 떨어졌나/올랐나" 답 layer.
+export interface PriceMoveCause {
+  text: string;
+  confidence: "high" | "medium" | "low";
+  evidence_kind:
+    | "news"
+    | "disclosure"
+    | "political"
+    | "flow"
+    | "valuation"
+    | "peer_move";
+  evidence_date?: string | null;
+  evidence_quote?: string | null;
+  citation_id?: number | null;
+}
+
+export interface RecentPriceMove {
+  return_5d_pct?: number | null;
+  return_14d_pct?: number | null;
+  return_30d_pct?: number | null;
+  primary_window: "5d" | "14d" | "30d";
+  biggest_move_date?: string | null;
+  biggest_move_pct?: number | null;
+  one_line: string;
+  causes: PriceMoveCause[];
+  unknown_or_unconfirmed?: string | null;
+}
+
 export interface StockCard {
   // Stock metadata
   ticker: string;
@@ -284,6 +312,8 @@ export interface StockCard {
   earnings?: Earnings | null;          // US-only Finnhub 다음 실적 발표 D-N.
   analyst_rating?: AnalystRating | null; // US-only Finnhub 분석가 의견 consensus.
   price_target?: PriceTarget | null;     // US-only Finnhub 분석가 1년 목표주가.
+  // 2026-05-19 — 헤더 가격 아래 "왜 떨어졌나" layer.
+  recent_price_move?: RecentPriceMove | null;
   decision: Decision;
 
   citations: Citation[];
