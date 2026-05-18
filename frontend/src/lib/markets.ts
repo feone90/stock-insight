@@ -34,3 +34,28 @@ export function currencyUnit(market: string | null | undefined): string {
   if (isUSMarket(market)) return "달러";
   return "";
 }
+
+/**
+ * 장 개장 중인지 대략 판단. 공휴일 무시 (정확한 캘린더 없이 시간 범위만).
+ * KR: 평일 09:00-15:30 KST
+ * US: 평일 22:30-05:00 KST (서머타임 ~1시간 차이 무시 — 대략 범위로 충분)
+ *
+ * 자동 가격 polling 이 장 외 시간엔 무의미 (가격 자체 안 변함) — yfinance/
+ * pykrx 호출 절약.
+ */
+export function isMarketOpen(market: string | null | undefined): boolean {
+  if (!market) return false;
+  const now = new Date();
+  const day = now.getUTCDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+  const kstMin =
+    ((now.getUTCHours() + 9) % 24) * 60 + now.getUTCMinutes();
+  if (isKRMarket(market)) {
+    return kstMin >= 9 * 60 && kstMin <= 15 * 60 + 30; // 09:00 ~ 15:30
+  }
+  if (isUSMarket(market)) {
+    // 22:30 ~ 05:00 KST (자정 wrap). 서머타임 영향 ±1시간 무시.
+    return kstMin >= 22 * 60 + 30 || kstMin <= 5 * 60;
+  }
+  return false;
+}

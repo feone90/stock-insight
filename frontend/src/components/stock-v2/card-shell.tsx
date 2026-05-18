@@ -4,6 +4,7 @@ import { Brain, LineChart, Moon, Newspaper, RefreshCw, RotateCw, Star, Sun } fro
 import { type ReactNode, useEffect, useState } from "react";
 import { addFavorite, getStock, removeFavorite } from "@/services/api";
 import { onUserChanged } from "@/services/user";
+import { isMarketOpen } from "@/lib/markets";
 import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import { AtAGlancePanel } from "./at-a-glance-panel";
@@ -100,13 +101,18 @@ export function StockCardPage({ ticker }: { ticker: string }) {
     return () => clearInterval(id);
   }, []);
 
-  // 2026-05-18 — 자동 가격 polling. 30초마다 + tab visible 일 때만.
-  // backend price_refresh cooldown 이 30s — 그게 자연스러운 하한선.
-  // 사용자가 다른 tab 으로 가면 stop, 돌아오면 즉시 1회 fetch (visibility
-  // change 이벤트). yfinance/pykrx rate limit 안전 마진.
+  // 2026-05-18 — 자동 가격 polling. 30초마다 + tab visible + 장 개장 중일
+  // 때만. backend price_refresh cooldown 이 30s — 자연스러운 하한선.
+  // 장 외 시간엔 가격 자체 안 변하니 yfinance/pykrx 호출 절약.
+  // KR: 평일 09:00-15:30 KST. US: 평일 22:30-05:00 KST.
+  const cardMarket = card?.market;
   useEffect(() => {
+    if (!cardMarket) return;
     const tick = () => {
-      if (document.visibilityState === "visible") {
+      if (
+        document.visibilityState === "visible" &&
+        isMarketOpen(cardMarket)
+      ) {
         refreshPrice().catch(() => {});
       }
     };
@@ -116,7 +122,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refreshPrice]);
+  }, [refreshPrice, cardMarket]);
 
   const generatedAt = card?.generated_at ? new Date(card.generated_at) : null;
   const priceAsof = card?.price_asof ? new Date(card.price_asof) : null;
