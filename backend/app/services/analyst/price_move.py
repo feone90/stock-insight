@@ -249,10 +249,39 @@ async def _llm_narrate(
 - *하락* 과 *상승* 둘 다 똑같이 중요. 어느 방향이든 가족 사용자가 매수/매도 판단을 위해 *이유* 를 알아야 한다.
 - **본문 *전체* 를 읽어라**. 뉴스 첫 문단은 보통 결과만 보도 ("주가 X% 급락"). 진짜 *원인 분석* (실적 / 가이던스 / 경쟁 / 규제) 은 본문 뒤쪽 또는 중간에 있다. 거기서 인용해라.
 - **원인의 원인까지 추적**. "1분기 실적 발표 이후 급락" 한 줄로 끝내지 마라.
-  → 본문에 "매출 가이던스 -15% 하향" 또는 "HBM 경쟁자 마이크론 양산 본격화" 같은 *fundamental* 표현 있으면 그걸 인용 (1-3 문장 가능).
 - 본문에 진짜 *원인* 표현이 *전혀 없으면* (결과만 반복) 그때만 evidence_kind="knowledge" 로 도메인 지식 채워라. 단 confidence ≤ 0.6 + knowledge_cutoff_risk 명시.
 - 상승 case 에선 호재 (수주/실적 서프라이즈/규제 완화 등), 하락 case 에선 악재 (실적 가이던스 하향/규제/경쟁 등) 식별.
 - 명시 catalyst 없으면 "단기 수급 / 밸류에이션 / 모멘텀" 같은 추정 명시.
+
+**가족 비전공자 친화 카피 (절대 룰)**:
+사용자는 *주식 전공 X*. 시니어 셀사이드 어휘 = 의미 전달 실패. **text 와 one_line 은 일상 단어로**. evidence_quote (본문 인용) 는 원문 유지 OK.
+
+| 시니어 어휘 | 비전공자 어휘 |
+|---|---|
+| PPI / 생산자물가지수 | 도매물가 |
+| CPI / 소비자물가지수 | 소비자물가 |
+| 10년물 국채금리 | (미국) 장기 금리 |
+| 할인율 부담 | 금리 부담으로 평가 하락 |
+| 성장주 / 가치주 | (그냥 안 씀) — "기술주" 식으로 |
+| 매출 가이던스 하향 | 매출 전망 낮춤 |
+| 컨센서스 미스 | 시장 기대보다 낮음 |
+| 차익실현 | 단기 이익 챙기는 매도 |
+| 모멘텀 약화 | 매수세 약해짐 |
+| 매수세 / 매도세 | 사들이는 / 파는 흐름 |
+| 백워데이션 / 콘탱고 | (그냥 안 씀) |
+| 매크로 헤드윈드 | 거시 경제 부담 |
+| 펀더멘털 | 회사 실제 사업 상황 |
+| 어닝 서프라이즈 | 실적 깜짝 발표 |
+| 외인 / 외국인 매도세 | 외국인 투자자 파는 흐름 |
+| 기관 매수세 | 기관 (큰손) 사들이는 흐름 |
+| EPS / PER | 주당 이익 / 이익 대비 주가 |
+| 헷지 | (그냥 안 씀, 풀어 써라) |
+
+옛 (시니어): "4월 PPI 예상치 상회로 10년물 국채금리 10개월 고점, 성장주 할인율 부담 ↑"
+새 (가족 친화): "4월 미국 도매물가가 예상보다 높게 나오면서 금리가 올해 최고치 — 기술주 전반에 부담"
+
+영어 약어 (PPI/CPI/EPS/ETF) 는 *반드시 한국어 풀어쓰기 + 괄호 영어*. 예: "도매물가 (PPI)".
+숫자 + 한자식 (조/억/만) 사용. "1조 2천억원" / "850만 달러".
 
 가격 변화:
 - 5거래일: {return_data.get('5d', '?')}%
@@ -281,33 +310,33 @@ async def _llm_narrate(
 
 few-shot examples (원인의 원인까지 추적):
 
-KEEP 1 (하락, raw 본문 + 도메인 지식 결합):
+KEEP 1 (하락, 가족 친화 카피):
 {{
-  "one_line": "최근 5거래일 -8.3% — 1분기 실적 미스 + HBM 경쟁자 출현",
+  "one_line": "최근 5거래일 -8.3% — 1분기 실적 시장 기대보다 낮음 + 경쟁사 등장",
   "causes": [
-    {{ "text": "1분기 매출 1조 2천억 (시장 컨센서스 -8%), 영업이익 가이던스 -15% 하향",
+    {{ "text": "1분기 영업이익이 시장 기대보다 약 8% 낮게 나오고, 2분기 매출 전망도 15% 낮춰 발표",
        "confidence": "medium", "evidence_kind": "knowledge",
        "knowledge_cutoff_risk": "high",
        "evidence_date": null, "evidence_quote": null }},
-    {{ "text": "HBM3E 수주 경쟁자 출현으로 매출 의존도 우려",
+    {{ "text": "마이크론이 HBM3E (고성능 메모리) 양산 시작 — 한미반도체 주요 매출원에 경쟁자 등장",
        "confidence": "high", "evidence_kind": "news",
        "evidence_date": "2026-05-17", "evidence_quote": "마이크론, HBM3E 양산 본격화..." }},
-    {{ "text": "외국인 5일 연속 순매도",
+    {{ "text": "외국인 투자자가 5일 연속 파는 흐름",
        "confidence": "medium", "evidence_kind": "flow",
        "evidence_date": null, "evidence_quote": null }}
   ],
   "unknown_or_unconfirmed": null
 }}
 
-KEEP 2 (상승, 도메인 지식 활용):
+KEEP 2 (상승, 가족 친화):
 {{
-  "one_line": "최근 14거래일 +12.5% — AI 수요 강세 + 신규 NVDA 계약",
+  "one_line": "최근 14거래일 +12.5% — AI 칩 수요 강세 + NVIDIA 와 신규 계약",
   "causes": [
-    {{ "text": "NVIDIA 의 Blackwell GPU 출시로 HBM3E 수요 급증 — 동사 점유율 60%+ 추정",
+    {{ "text": "NVIDIA 의 Blackwell AI 칩 출시로 HBM3E (고성능 메모리) 수요 급증 — 한미반도체 시장 점유율 60% 이상",
        "confidence": "medium", "evidence_kind": "knowledge",
        "knowledge_cutoff_risk": "low",
        "evidence_date": null, "evidence_quote": null }},
-    {{ "text": "NVDA 향 1,200억원 HBM3E 공급 계약 체결",
+    {{ "text": "NVIDIA 에 1,200억원 규모 HBM3E 공급 계약 체결",
        "confidence": "high", "evidence_kind": "disclosure",
        "evidence_date": "2026-05-12",
        "evidence_quote": "당사는 NVIDIA 와 1,200억원 규모 HBM3E 공급 계약을 체결하였습니다." }}
@@ -315,20 +344,19 @@ KEEP 2 (상승, 도메인 지식 활용):
   "unknown_or_unconfirmed": null
 }}
 
-KEEP 3 (도메인 지식만 — news raw 가 결과만 보도):
-raw 가 "주가 X% 급락 — ETF 수익률 타격" 같은 *결과* 만 적은 경우:
+KEEP 3 (매크로 — 시니어 어휘 → 가족 친화):
 {{
-  "one_line": "최근 5거래일 -20.8% — 1분기 실적 가이던스 미스 + 차익실현",
+  "one_line": "최근 5거래일 -4.2% — 미국 도매물가 상승으로 금리 부담 ↑ 기술주 전반 약세",
   "causes": [
-    {{ "text": "1분기 영업이익 시장 기대 대비 -20% 미달, 2분기 가이던스도 하향 조정",
-       "confidence": "low", "evidence_kind": "knowledge",
+    {{ "text": "4월 미국 도매물가 (PPI) 가 예상보다 높게 나오면서 미국 장기 금리가 올해 최고치 — 기술주 전반에 압박",
+       "confidence": "medium", "evidence_kind": "knowledge",
        "knowledge_cutoff_risk": "high",
        "evidence_date": null, "evidence_quote": null }},
-    {{ "text": "최근 1개월 +50% 급등 후 차익실현 매물 출회",
+    {{ "text": "1개월간 +50% 급등 이후 단기 이익 챙기는 매도 (차익실현) 출회",
        "confidence": "medium", "evidence_kind": "valuation",
        "evidence_date": null, "evidence_quote": null }}
   ],
-  "unknown_or_unconfirmed": "knowledge='low' 항목은 LLM training data 이후 변동 가능 — 정확한 수치는 종목 IR 확인 권장."
+  "unknown_or_unconfirmed": "정확한 도매물가 수치는 LLM 학습 시점 이후 변동 가능 — 최신 통계청 확인 권장."
 }}
 
 REJECT (진짜 자료 부족):
