@@ -327,6 +327,7 @@ def compose(
         earnings=data.earnings,          # US-only Finnhub 다음 실적 발표 D-N.
         analyst_rating=data.analyst_rating,  # US-only Finnhub analyst consensus.
         price_target=data.price_target,  # US-only Finnhub 1년 목표주가.
+        recent_price_move=data.recent_price_move,  # 2026-05-19 "왜 떨어졌나" layer
         decision=decision,
         citations=final_citations,
         analysis_id=str(uuid.uuid4()),

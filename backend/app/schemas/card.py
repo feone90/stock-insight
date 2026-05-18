@@ -281,6 +281,46 @@ class Insider(BaseModel):
     as_of: str | None = None
 
 
+class PriceMoveCause(BaseModel):
+    """최근 가격 움직임의 원인 후보. 시니어 분석가가 본 "왜 떨어졌나" 한 줄.
+
+    2026-05-19 추가 — 사용자가 "한미반도체가 며칠 떨어지는데 왜 안 보이냐"
+    피드백. evidence_kind 와 evidence_date 로 *어떤 자료* 가 근거인지 명확.
+
+    confidence='low' + evidence_kind='valuation' 같은 *fundamental* origin 도
+    OK (단순 밸류 부담 같은 추정).
+    """
+    text: str  # "HBM 경쟁자 출현 우려" 같은 한 줄 (가족 친화)
+    confidence: Literal["high", "medium", "low"]
+    evidence_kind: Literal[
+        "news", "disclosure", "political", "flow", "valuation", "peer_move"
+    ]
+    evidence_date: str | None = None  # YYYY-MM-DD
+    evidence_quote: str | None = None  # 본문 인용 (paraphrase 거부)
+    citation_id: int | None = None
+
+
+class RecentPriceMove(BaseModel):
+    """카드 헤더 아래 노출 — "최근 N거래일 -X% — 왜?" 답 layer.
+
+    Deterministic 정량 (수익률 / 급락일) + 그 기간 evidence 후보 + LLM
+    narrative (Beyond Meat 류 환상 재발 방지 — evidence 부족 시 unknown_or_
+    unconfirmed 명시).
+    """
+    return_5d_pct: float | None = None
+    return_14d_pct: float | None = None
+    return_30d_pct: float | None = None
+    # 대표 윈도우 — 가장 큰 폭 움직임 기준 선택. UI 의 메인 표시.
+    primary_window: Literal["5d", "14d", "30d"] = "5d"
+    biggest_move_date: str | None = None  # YYYY-MM-DD
+    biggest_move_pct: float | None = None  # 단일 일 최대 변동 폭
+    one_line: str  # "최근 5거래일 -8.3% — 급락" 식 가족 친화 한 줄
+    causes: list[PriceMoveCause] = []
+    # 확인된 직접 원인 부족할 때 명시 (예: "단기 수급/밸류에이션 조정으로
+    # 추정 — 명시 catalyst 없음"). 환상 만들지 않게 사용자에게 *정직하게* 노출.
+    unknown_or_unconfirmed: str | None = None
+
+
 class PoliticalSignalCard(BaseModel):
     """카드의 뉴스/이슈 섹션에 별도 highlight되는 정치 발언. 미래 자동매매
     trigger row의 read-only view. ticker별로 영향 metadata 포함."""
@@ -367,6 +407,8 @@ class StockCard(BaseModel):
     earnings: Earnings | None = None      # US-only: Finnhub 다음 실적 발표 D-N.
     analyst_rating: AnalystRating | None = None  # US-only: Finnhub 매수/보유/매도.
     price_target: PriceTarget | None = None  # US-only: Finnhub 1년 목표주가.
+    # 2026-05-19 — 헤더 가격 바로 아래 "최근 N거래일 -X% 왜?" 답 layer.
+    recent_price_move: "RecentPriceMove | None" = None
     decision: Decision
 
     citations: list[Citation] = []
@@ -407,6 +449,7 @@ class DataLayer(BaseModel):
     news: list[NewsItem] = []
     political_signals: list[PoliticalSignalCard] = []
     relations_data: list[Relation] = []
+    recent_price_move: "RecentPriceMove | None" = None
     data_citations: list[Citation] = []
 
     # Per-layer freshness — surfaced to the card so each refresh button can

@@ -107,7 +107,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
 
     (
         indicators_co, macro_co, fund_co, news_co, rel_co, pol_co,
-        flow_co, ins_co, earn_co, anal_co, pt_co, ts_co,
+        flow_co, ins_co, earn_co, anal_co, pt_co, ts_co, move_co,
     ) = await asyncio.gather(
         get_indicators(ticker),
         get_macro_context(),
@@ -121,6 +121,7 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         _fetch_analyst_rating(ticker),
         _fetch_price_target(ticker),
         _fetch_data_timestamps(ticker),
+        _fetch_recent_price_move_safe(ticker),
         return_exceptions=True,
     )
 
@@ -144,6 +145,10 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
 
     price_asof, news_latest_at = _unpack_timestamps(ts_co)
 
+    # RecentPriceMove instance 만 허용 — dict/None/Exception 모두 drop.
+    from app.schemas.card import RecentPriceMove as _RecentPriceMove
+    recent_move = move_co if isinstance(move_co, _RecentPriceMove) else None
+
     return DataLayer(
         technical=technical,
         macro=macro,
@@ -156,10 +161,22 @@ async def assemble_data_layer(ticker: str) -> DataLayer:
         news=news,
         political_signals=political_signals,
         relations_data=relations_data,
+        recent_price_move=recent_move,
         data_citations=pool.items,
         price_asof=price_asof,
         news_latest_at=news_latest_at,
     )
+
+
+async def _fetch_recent_price_move_safe(ticker: str):
+    """fire-and-forget safe — assemble 흐름 안 깨지게 예외 swallow."""
+    try:
+        from app.services.analyst.price_move import fetch_recent_price_move
+
+        return await fetch_recent_price_move(ticker)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("recent_price_move failed for %s: %s", ticker, e)
+        return None
 
 
 # ---------------------------------------------------------------------------

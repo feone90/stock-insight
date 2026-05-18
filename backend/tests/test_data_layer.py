@@ -128,6 +128,10 @@ def _patch_all_fetches(
         ),
     )
     monkeypatch.setattr(
+        "app.services.analyst.data_layer._fetch_recent_price_move_safe",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "app.services.analyst.data_layer.llm_classify_news",
         AsyncMock(return_value=classify if classify is not None else {"items": []}),
     )
@@ -228,6 +232,7 @@ async def test_assemble_uses_asyncio_gather(monkeypatch):
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_analyst_rating", slow)
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_price_target", slow)
     monkeypatch.setattr("app.services.analyst.data_layer._fetch_data_timestamps", slow)
+    monkeypatch.setattr("app.services.analyst.data_layer._fetch_recent_price_move_safe", slow)
     monkeypatch.setattr(
         "app.services.analyst.data_layer.llm_classify_news",
         AsyncMock(return_value={"items": []}),
