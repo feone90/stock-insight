@@ -241,6 +241,10 @@ async def _llm_narrate(
 
 핵심 원칙:
 - *하락* 과 *상승* 둘 다 똑같이 중요. 어느 방향이든 가족 사용자가 매수/매도 판단을 위해 *이유* 를 알아야 한다.
+- **원인의 원인까지 추적**. "1분기 실적 발표 이후 급락" 한 줄로 끝내지 마라.
+  → "1분기 매출 가이던스 -15% 하향 + HBM 경쟁자 출현" 같이 *왜 실적이 그랬는지* 까지.
+- raw 자료가 *결과만* 보도하면 (예: "주가 급락") 자기 도메인 지식으로 *원인 fundamental* 채워라.
+  단 evidence_kind="knowledge" + knowledge_cutoff_risk="high" + confidence ≤ 0.6 명시.
 - 상승 case 에선 호재 (수주/실적 서프라이즈/규제 완화 등), 하락 case 에선 악재 (실적 가이던스 하향/규제/경쟁 등) 식별.
 - 명시 catalyst 없으면 "단기 수급 / 밸류에이션 / 모멘텀" 같은 추정 명시.
 
@@ -269,50 +273,74 @@ async def _llm_narrate(
   "unknown_or_unconfirmed": "확인된 직접 원인 부족 시 한 줄 또는 null"
 }}
 
-few-shot examples:
+few-shot examples (원인의 원인까지 추적):
 
-KEEP 1 (하락):
+KEEP 1 (하락, raw 본문 + 도메인 지식 결합):
 {{
-  "one_line": "최근 5거래일 -8.3% — HBM 경쟁 격화 + 외국인 매도 압력",
+  "one_line": "최근 5거래일 -8.3% — 1분기 실적 미스 + HBM 경쟁자 출현",
   "causes": [
+    {{ "text": "1분기 매출 1조 2천억 (시장 컨센서스 -8%), 영업이익 가이던스 -15% 하향",
+       "confidence": "medium", "evidence_kind": "knowledge",
+       "knowledge_cutoff_risk": "high",
+       "evidence_date": null, "evidence_quote": null }},
     {{ "text": "HBM3E 수주 경쟁자 출현으로 매출 의존도 우려",
-       "confidence": "medium", "evidence_kind": "news",
+       "confidence": "high", "evidence_kind": "news",
        "evidence_date": "2026-05-17", "evidence_quote": "마이크론, HBM3E 양산 본격화..." }},
-    {{ "text": "외국인 5일 연속 순매도", "confidence": "medium",
-       "evidence_kind": "flow", "evidence_date": null, "evidence_quote": null }}
-  ],
-  "unknown_or_unconfirmed": null
-}}
-
-KEEP 2 (상승):
-{{
-  "one_line": "최근 14거래일 +12.5% — AI 수요 기대 + 신규 계약 체결",
-  "causes": [
-    {{ "text": "NVDA 향 차세대 HBM 공급 계약 체결",
-       "confidence": "high", "evidence_kind": "disclosure",
-       "evidence_date": "2026-05-12",
-       "evidence_quote": "당사는 NVIDIA 와 1,200억원 규모 HBM3E 공급 계약을 체결하였습니다." }},
-    {{ "text": "기관 7일 연속 순매수",
+    {{ "text": "외국인 5일 연속 순매도",
        "confidence": "medium", "evidence_kind": "flow",
        "evidence_date": null, "evidence_quote": null }}
   ],
   "unknown_or_unconfirmed": null
 }}
 
-REJECT (자료 부족):
+KEEP 2 (상승, 도메인 지식 활용):
+{{
+  "one_line": "최근 14거래일 +12.5% — AI 수요 강세 + 신규 NVDA 계약",
+  "causes": [
+    {{ "text": "NVIDIA 의 Blackwell GPU 출시로 HBM3E 수요 급증 — 동사 점유율 60%+ 추정",
+       "confidence": "medium", "evidence_kind": "knowledge",
+       "knowledge_cutoff_risk": "low",
+       "evidence_date": null, "evidence_quote": null }},
+    {{ "text": "NVDA 향 1,200억원 HBM3E 공급 계약 체결",
+       "confidence": "high", "evidence_kind": "disclosure",
+       "evidence_date": "2026-05-12",
+       "evidence_quote": "당사는 NVIDIA 와 1,200억원 규모 HBM3E 공급 계약을 체결하였습니다." }}
+  ],
+  "unknown_or_unconfirmed": null
+}}
+
+KEEP 3 (도메인 지식만 — news raw 가 결과만 보도):
+raw 가 "주가 X% 급락 — ETF 수익률 타격" 같은 *결과* 만 적은 경우:
+{{
+  "one_line": "최근 5거래일 -20.8% — 1분기 실적 가이던스 미스 + 차익실현",
+  "causes": [
+    {{ "text": "1분기 영업이익 시장 기대 대비 -20% 미달, 2분기 가이던스도 하향 조정",
+       "confidence": "low", "evidence_kind": "knowledge",
+       "knowledge_cutoff_risk": "high",
+       "evidence_date": null, "evidence_quote": null }},
+    {{ "text": "최근 1개월 +50% 급등 후 차익실현 매물 출회",
+       "confidence": "medium", "evidence_kind": "valuation",
+       "evidence_date": null, "evidence_quote": null }}
+  ],
+  "unknown_or_unconfirmed": "knowledge='low' 항목은 LLM training data 이후 변동 가능 — 정확한 수치는 종목 IR 확인 권장."
+}}
+
+REJECT (진짜 자료 부족):
 {{
   "one_line": "최근 5거래일 -2.1% — 명시적 원인 없음",
   "causes": [],
-  "unknown_or_unconfirmed": "이 기간 News/공시/political signal 모두 0건. 단기 수급/시장 전반 조정으로 추정."
+  "unknown_or_unconfirmed": "이 기간 News/공시/political signal 모두 0건이고 도메인 지식상 특별한 catalyst 도 없음. 단기 수급/시장 전반 조정으로 추정."
 }}
 
 엄격 규칙:
-1. raw 자료에 없는 사실 생성 X. evidence_kind 가 valuation/peer_move 면 evidence_date/quote 는 null OK.
-2. causes 1-3 개. 확실하지 않으면 unknown_or_unconfirmed 만 적고 causes 비움.
-3. confidence='high' 는 evidence_quote 본문 인용 + 명시 사실일 때만.
-4. one_line 가족 비전공자 친화 — 약어 X. 짧고 명확.
-5. *방향 일관성*: pct 가 음수면 one_line 도 -X.X% 로 시작 (하락 narrative). 양수면 +X.X% (상승 narrative). 부호 빼지 마라.
-6. JSON 1 개. 자연어 / 코드펜스 X.
+1. evidence_kind="news" / "disclosure" / "political" → evidence_quote 본문 인용 *필수* (paraphrase 금지). raw 에 없으면 그 evidence_kind 사용 X.
+2. evidence_kind="knowledge" → 본문 인용 없이 LLM 사전 지식 허용. 단 confidence ≤ 0.6 + knowledge_cutoff_risk 명시 ("high" if training 이후 변경 가능, "low" if 안정 사실).
+3. evidence_kind="valuation" / "flow" / "peer_move" → evidence_date/quote null OK.
+4. causes 1-3 개. *원인의 원인까지 추적* — "실적 발표 이후 급락" 같이 *결과 반복* 금지. "실적이 어땠는데" 답해야 한다.
+5. confidence='high' 는 본문 인용 + 명시 사실일 때만. knowledge 는 절대 high 안 됨.
+6. one_line 가족 비전공자 친화 — 약어 X. 짧고 명확. 가능하면 원인 2개 + 연결자 ("A + B").
+7. *방향 일관성*: pct 가 음수면 one_line 도 -X.X% 로 시작 (하락 narrative). 양수면 +X.X% (상승 narrative). 부호 빼지 마라.
+8. JSON 1 개. 자연어 / 코드펜스 X.
 """
 
     try:

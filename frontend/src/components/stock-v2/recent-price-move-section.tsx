@@ -23,6 +23,7 @@ const EVIDENCE_LABEL: Record<PriceMoveCause["evidence_kind"], string> = {
   flow: "수급",
   valuation: "밸류에이션",
   peer_move: "동종업계",
+  knowledge: "분석가 지식",
 };
 
 const CONFIDENCE_LABEL: Record<PriceMoveCause["confidence"], string> = {
@@ -116,6 +117,8 @@ function ReturnsBar({ move }: { move: RecentPriceMove }) {
 }
 
 function CauseRow({ cause }: { cause: PriceMoveCause }) {
+  const isKnowledge = cause.evidence_kind === "knowledge";
+  const cutoffHigh = cause.knowledge_cutoff_risk === "high";
   return (
     <li className="text-xs">
       <div className="flex flex-wrap items-baseline gap-1.5">
@@ -128,6 +131,14 @@ function CauseRow({ cause }: { cause: PriceMoveCause }) {
           · {EVIDENCE_LABEL[cause.evidence_kind]}
           {cause.evidence_date ? ` · ${cause.evidence_date.slice(0, 10)}` : ""}
         </span>
+        {isKnowledge && cutoffHigh ? (
+          <span
+            className="inline-flex items-center rounded bg-amber-500/15 border border-amber-500/30 px-1 py-0.5 text-[9px] text-amber-700 dark:text-amber-300"
+            title="LLM 학습 시점 이후 변동 가능 — IR 또는 최신 자료 확인 권장"
+          >
+            최신성 ⚠️
+          </span>
+        ) : null}
         <span className="text-[var(--surface-text)]">{cause.text}</span>
       </div>
       {cause.evidence_quote ? (

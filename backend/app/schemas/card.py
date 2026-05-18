@@ -293,10 +293,21 @@ class PriceMoveCause(BaseModel):
     text: str  # "HBM 경쟁자 출현 우려" 같은 한 줄 (가족 친화)
     confidence: Literal["high", "medium", "low"]
     evidence_kind: Literal[
-        "news", "disclosure", "political", "flow", "valuation", "peer_move"
+        "news",        # raw 본문 인용 — 가장 확실
+        "disclosure",  # 공시 (사업보고서, 8-K 등)
+        "political",   # 정치 시그널 (트럼프 truth_social 등)
+        "flow",        # 수급 (외국인/기관)
+        "valuation",   # 밸류에이션 부담 (PER/PBR 정량 근거)
+        "peer_move",   # 동종업계 동반 움직임
+        "knowledge",   # 2026-05-19 — LLM 도메인 지식. 본문에 없지만 시니어
+                       # 분석가가 *원인의 원인* 알 때 (예: 실적 발표 내용).
+                       # 반드시 knowledge_cutoff_risk + confidence ≤ 0.6.
     ]
     evidence_date: str | None = None  # YYYY-MM-DD
     evidence_quote: str | None = None  # 본문 인용 (paraphrase 거부)
+    # 2026-05-19 — evidence_kind="knowledge" 일 때 명시. LLM training cutoff
+    # 이후 변경 가능성 — frontend 가 "추정" badge 추가 강조.
+    knowledge_cutoff_risk: Literal["high", "low"] | None = None
     citation_id: int | None = None
 
 

@@ -267,9 +267,11 @@ export interface PriceMoveCause {
     | "political"
     | "flow"
     | "valuation"
-    | "peer_move";
+    | "peer_move"
+    | "knowledge";  // 2026-05-19 — LLM 도메인 지식 (training cutoff 명시)
   evidence_date?: string | null;
   evidence_quote?: string | null;
+  knowledge_cutoff_risk?: "high" | "low" | null;
   citation_id?: number | null;
 }
 
