@@ -31,8 +31,12 @@ logger = logging.getLogger(__name__)
 
 _WINDOWS = (5, 14, 30)
 _BIG_MOVE_THRESHOLD = 3.0  # 단일일 ±3%+ 면 "급변동" 라벨
-_MAX_EVENTS = 12  # LLM 입력 토큰 제한
+_MAX_EVENTS = 10  # LLM 입력 토큰 제한 (body 길어진 만큼 events 약간 줄임)
 _MAX_CAUSES = 3
+# 2026-05-19 사용자 피드백: "뉴스 내용만 잘 봐도 상승 하락 원인 적혀있잖아".
+# 옛 300 chars 는 뉴스 첫 문단 (결과 보도) 만 잡고 본문 뒤쪽 *분석* 못 봄.
+# 2000 chars 로 늘려서 진짜 원인 분석 LLM 이 볼 수 있게.
+_NEWS_BODY_LIMIT = 2000
 
 
 async def fetch_recent_price_move(ticker: str) -> RecentPriceMove | None:
@@ -162,7 +166,9 @@ async def _gather_events(db, stock: Stock, since: datetime) -> list[dict]:
             "kind": "news",
             "date": n.published_at.isoformat() if n.published_at else None,
             "summary": (n.title or "")[:200],
-            "body_snippet": ((n.content or "")[:300]) if n.content else None,
+            # 2026-05-19 — 본문 전체 길이로 ↑. 첫 문단은 결과 보도만, 진짜
+            # 분석 (실적/가이던스/경쟁) 은 본문 뒤쪽.
+            "body_snippet": ((n.content or "")[:_NEWS_BODY_LIMIT]) if n.content else None,
         })
 
     # 공시 (Disclosure)
@@ -241,10 +247,10 @@ async def _llm_narrate(
 
 핵심 원칙:
 - *하락* 과 *상승* 둘 다 똑같이 중요. 어느 방향이든 가족 사용자가 매수/매도 판단을 위해 *이유* 를 알아야 한다.
+- **본문 *전체* 를 읽어라**. 뉴스 첫 문단은 보통 결과만 보도 ("주가 X% 급락"). 진짜 *원인 분석* (실적 / 가이던스 / 경쟁 / 규제) 은 본문 뒤쪽 또는 중간에 있다. 거기서 인용해라.
 - **원인의 원인까지 추적**. "1분기 실적 발표 이후 급락" 한 줄로 끝내지 마라.
-  → "1분기 매출 가이던스 -15% 하향 + HBM 경쟁자 출현" 같이 *왜 실적이 그랬는지* 까지.
-- raw 자료가 *결과만* 보도하면 (예: "주가 급락") 자기 도메인 지식으로 *원인 fundamental* 채워라.
-  단 evidence_kind="knowledge" + knowledge_cutoff_risk="high" + confidence ≤ 0.6 명시.
+  → 본문에 "매출 가이던스 -15% 하향" 또는 "HBM 경쟁자 마이크론 양산 본격화" 같은 *fundamental* 표현 있으면 그걸 인용 (1-3 문장 가능).
+- 본문에 진짜 *원인* 표현이 *전혀 없으면* (결과만 반복) 그때만 evidence_kind="knowledge" 로 도메인 지식 채워라. 단 confidence ≤ 0.6 + knowledge_cutoff_risk 명시.
 - 상승 case 에선 호재 (수주/실적 서프라이즈/규제 완화 등), 하락 case 에선 악재 (실적 가이던스 하향/규제/경쟁 등) 식별.
 - 명시 catalyst 없으면 "단기 수급 / 밸류에이션 / 모멘텀" 같은 추정 명시.
 
@@ -333,8 +339,9 @@ REJECT (진짜 자료 부족):
 }}
 
 엄격 규칙:
-1. evidence_kind="news" / "disclosure" / "political" → evidence_quote 본문 인용 *필수* (paraphrase 금지). raw 에 없으면 그 evidence_kind 사용 X.
-2. evidence_kind="knowledge" → 본문 인용 없이 LLM 사전 지식 허용. 단 confidence ≤ 0.6 + knowledge_cutoff_risk 명시 ("high" if training 이후 변경 가능, "low" if 안정 사실).
+1. evidence_kind="news" / "disclosure" / "political" → evidence_quote 본문 인용 *필수* (paraphrase 금지). 1-3 문장 OK (긴 인용 권장).
+   raw 본문 *전체* 를 스캔하고 *원인 표현* (예: "매출 가이던스 하향", "신규 계약 체결", "경쟁자 출현") 부분을 인용해라. 첫 문단 결과 보도 X.
+2. evidence_kind="knowledge" → 본문에 *원인 표현이 전혀 없을 때만* fallback. confidence ≤ 0.6 + knowledge_cutoff_risk 명시 ("high" if training 이후 변경 가능, "low" if 안정 사실).
 3. evidence_kind="valuation" / "flow" / "peer_move" → evidence_date/quote null OK.
 4. causes 1-3 개. *원인의 원인까지 추적* — "실적 발표 이후 급락" 같이 *결과 반복* 금지. "실적이 어땠는데" 답해야 한다.
 5. confidence='high' 는 본문 인용 + 명시 사실일 때만. knowledge 는 절대 high 안 됨.
