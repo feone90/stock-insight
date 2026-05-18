@@ -100,17 +100,17 @@ export function StockCardPage({ ticker }: { ticker: string }) {
     return () => clearInterval(id);
   }, []);
 
-  // 2026-05-18 — 자동 가격 polling. 60초마다 + tab visible 일 때만.
+  // 2026-05-18 — 자동 가격 polling. 30초마다 + tab visible 일 때만.
+  // backend price_refresh cooldown 이 30s — 그게 자연스러운 하한선.
   // 사용자가 다른 tab 으로 가면 stop, 돌아오면 즉시 1회 fetch (visibility
-  // change 이벤트). yfinance/pykrx rate limit 안전 마진. backend cooldown
-  // 30s 미만이면 자동 429 — refreshPrice 가 catch 해서 silent.
+  // change 이벤트). yfinance/pykrx rate limit 안전 마진.
   useEffect(() => {
     const tick = () => {
       if (document.visibilityState === "visible") {
         refreshPrice().catch(() => {});
       }
     };
-    const id = setInterval(tick, 60_000);
+    const id = setInterval(tick, 30_000);
     document.addEventListener("visibilitychange", tick);
     return () => {
       clearInterval(id);
