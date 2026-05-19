@@ -357,9 +357,12 @@ def test_knowledge_prompt_requires_private_partners():
     from app.services.ontology.knowledge_relations import _PROMPT
     for keyword in [
         "비상장 핵심 파트너",
-        "OpenAI",
-        "Anthropic",
+        "핵심 고객",
+        "병목 공급사",
+        "전략적 투자",
+        "비상장 경쟁자",
         "knowledge_cutoff_risk",
         "정량 근거",  # vague reasoning reject
     ]:
         assert keyword in _PROMPT, f"missing: {keyword}"
+    assert "OpenAI" not in _PROMPT

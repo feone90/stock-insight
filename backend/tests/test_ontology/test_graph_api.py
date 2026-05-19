@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.api import ontology
-from app.models import Stock, StockRelation
+from app.models import RelationCandidate, Stock, StockRelation
 
 
 def _rel(**overrides):
@@ -98,3 +98,47 @@ async def test_outgoing_business_view_keeps_virtual_business_target_but_not_peer
 
     assert {r.to_target for r in business} == {"OpenAI"}
     assert {r.to_target for r in all_view} == {"OpenAI", peer.ticker}
+
+
+@pytest.mark.asyncio
+async def test_outgoing_includes_private_candidate_as_virtual_business_target(db):
+    center = Stock(ticker="T999C", name="Center", market="NASDAQ", sector="AI", tier=1)
+    db.add(center)
+    await db.flush()
+    db.add(
+        RelationCandidate(
+            from_ticker=center.ticker,
+            to_ticker="PrivateInfraLab",
+            relation_type="complementary",
+            strength=0.9,
+            source="llm_knowledge",
+            signal_direction="positive",
+            confidence=0.88,
+            extra_metadata={
+                "target_name": "Private Infrastructure Lab",
+                "target_is_public": False,
+                "business_importance": 5,
+                "rationale": (
+                    "Center relies on Private Infrastructure Lab as an exclusive "
+                    "model infrastructure partner, so usage growth directly affects "
+                    "Center's AI platform demand."
+                ),
+            },
+        )
+    )
+    await db.flush()
+
+    rels = await ontology._outgoing(
+        db, center.id, None,
+        ontology._effective_min_confidence(None, "business"),
+        10, "business",
+    )
+
+    assert {r.to_target for r in rels} == {"PrivateInfraLab"}
+    node = ontology._virtual_node_dict(rels[0])
+    link = ontology._link_dict(center, rels[0], None)
+    assert node["id"] == "PrivateInfraLab"
+    assert node["name"] == "Private Infrastructure Lab"
+    assert node["node_kind"] == "private"
+    assert link["target_in_universe"] is False
+    assert link["rationale"].startswith("Center relies on Private Infrastructure Lab")

@@ -10,6 +10,7 @@ Plan: docs/superpowers/plans/2026-04-28-ontology-aware-stock-card-implementation
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.markets import KR_MARKETS, US_MARKETS
-from app.models import Stock, StockRelation
+from app.models import RelationCandidate, Stock, StockRelation
 from app.services.ontology.evidence import (
     has_target_evidence,
     is_llm_source,
@@ -201,9 +202,14 @@ async def _outgoing(
     표시되도록. (이전: confidence × strength DESC만 → KR sector_match가
     top_n을 다 차지하고 cross-market US 노드가 0개 되는 버그)
     """
-    from_market = (
-        await session.execute(select(Stock.market).where(Stock.id == from_id))
-    ).scalar_one_or_none()
+    stock_row = (
+        await session.execute(
+            select(Stock.ticker, Stock.market).where(Stock.id == from_id)
+        )
+    ).one_or_none()
+    if stock_row is None:
+        return []
+    from_ticker, from_market = stock_row
     from_region = _market_region(from_market)
     cross_targets = US_MARKETS if from_region == "KR" else KR_MARKETS
     same_targets = KR_MARKETS if from_region == "KR" else US_MARKETS
@@ -226,6 +232,11 @@ async def _outgoing(
         r for r in (await session.execute(_base().limit(top_n * 6))).scalars().all()
         if _relation_allowed_for_view(r, view)
     ]
+    rels.extend(
+        await _private_candidate_edges(
+            session, from_ticker, source_filter, min_conf, top_n, view
+        )
+    )
     if not rels:
         return []
 
@@ -277,6 +288,60 @@ async def _outgoing(
     return picked
 
 
+async def _private_candidate_edges(
+    session: AsyncSession,
+    from_ticker: str,
+    source_filter: set[str] | None,
+    min_conf: float,
+    top_n: int,
+    view: GraphView,
+) -> list[SimpleNamespace]:
+    """Expose high-confidence private RelationCandidate rows as graph-only edges.
+
+    Knowledge extraction intentionally buffers non-public entities in
+    RelationCandidate instead of StockRelation. The business graph still needs
+    to show those influential private nodes, but only as read-time virtual
+    edges so the promotion pipeline remains reserved for real listed stocks.
+    """
+    q = (
+        select(RelationCandidate)
+        .where(
+            RelationCandidate.from_ticker == from_ticker,
+            RelationCandidate.promoted_at.is_(None),
+            RelationCandidate.confidence >= min_conf,
+        )
+        .order_by((RelationCandidate.confidence * RelationCandidate.strength).desc())
+        .limit(top_n)
+    )
+    if source_filter:
+        q = q.where(RelationCandidate.source.in_(source_filter))
+
+    candidates = (await session.execute(q)).scalars().all()
+    edges: list[SimpleNamespace] = []
+    for cand in candidates:
+        md = cand.extra_metadata or {}
+        if md.get("target_is_public") is not False:
+            continue
+        if not _relation_allowed_for_view(cand, view):
+            continue
+        edges.append(
+            SimpleNamespace(
+                id=-cand.id,
+                to_target=cand.to_ticker,
+                to_kind="stock",
+                relation_type=cand.relation_type,
+                signal_direction=cand.signal_direction,
+                strength=cand.strength if cand.strength is not None else 0.5,
+                confidence=cand.confidence if cand.confidence is not None else 0.5,
+                source=cand.source or "relation_candidate",
+                source_url=cand.source_url,
+                extra_metadata=md,
+                is_candidate=True,
+            )
+        )
+    return edges
+
+
 def _effective_min_confidence(
     min_confidence: float | None,
     view: GraphView,
@@ -308,15 +373,19 @@ def _node_dict(s: Stock, *, is_center: bool) -> dict:
 
 
 def _virtual_node_dict(rel: StockRelation) -> dict:
+    md = rel.extra_metadata or {}
     node_kind = (
-        "theme" if rel.relation_type == "theme" or rel.to_kind == "theme"
-        else "macro" if rel.relation_type == "macro" or rel.to_kind == "macro"
+        "theme"
+        if rel.relation_type == "theme" or getattr(rel, "to_kind", None) == "theme"
+        else "macro"
+        if rel.relation_type == "macro" or getattr(rel, "to_kind", None) == "macro"
         else "private"
     )
+    name = md.get("target_name") or rel.to_target
     return {
         "id": rel.to_target,
         "ticker": rel.to_target,
-        "name": rel.to_target,
+        "name": name,
         "market": "PRIVATE" if node_kind == "private" else node_kind.upper(),
         "sector": None,
         "tier": 3,
@@ -337,7 +406,7 @@ def _link_dict(src: Stock, rel: StockRelation, tgt: Stock | None) -> dict:
         "strength": rel.strength,
         "confidence": rel.confidence,
         "src_label": rel.source,
-        "src_url": md.get("source_url"),
+        "src_url": md.get("source_url") or getattr(rel, "source_url", None),
         "rationale": md.get("rationale"),
         "target_in_universe": tgt is not None,
     }
