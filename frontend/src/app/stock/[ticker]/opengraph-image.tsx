@@ -3,8 +3,9 @@ import { ImageResponse } from "next/og";
 /**
  * Dynamic OG image per stock — Next.js 16 file convention.
  *
- * 2026-05-19 — step 2: backend fetch 추가. 종목명/가격/변동률 동적 렌더.
- * Step 1 (Pretendard + Korean static text) 200 OK 확인 후 진행.
+ * 2026-05-19 — step 2 (대대적 layout) 500 error. step 2-a: 기존 step 1 layout
+ * 그대로 유지하고 fetched data 만 주입 (큰 텍스트만 종목명으로). layout 자체
+ * 문제인지 fetch 문제인지 격리.
  */
 
 export const alt = "StockInsight 종목 카드";
@@ -46,15 +47,6 @@ async function loadPretendard(): Promise<ArrayBuffer | null> {
   }
 }
 
-function isKRMarket(market: string): boolean {
-  return market === "KOSPI" || market === "KOSDAQ";
-}
-
-function formatPrice(price: number, market: string): string {
-  if (isKRMarket(market)) return `₩${price.toLocaleString()}`;
-  return `$${price.toLocaleString()}`;
-}
-
 export default async function OpengraphImage({
   params,
 }: {
@@ -67,50 +59,7 @@ export default async function OpengraphImage({
   ]);
 
   const fontFamily = pretendard ? "Pretendard" : "sans-serif";
-
-  // Fallback when backend unreachable — show ticker + brand only
-  if (!meta) {
-    return new ImageResponse(
-      (
-        <div
-          style={{
-            width: 1200,
-            height: 630,
-            background: "#0f172a",
-            color: "white",
-            display: "flex",
-            flexDirection: "column",
-            padding: 80,
-            justifyContent: "center",
-            alignItems: "center",
-            fontFamily,
-          }}
-        >
-          <div style={{ fontSize: 48, color: "#94a3b8", marginBottom: 24 }}>
-            StockInsight
-          </div>
-          <div style={{ fontSize: 120, fontWeight: 700, fontFamily: "monospace" }}>
-            {ticker.toUpperCase()}
-          </div>
-          <div style={{ fontSize: 32, color: "#64748b", marginTop: 24 }}>
-            종목 분석 카드
-          </div>
-        </div>
-      ),
-      {
-        ...size,
-        fonts: pretendard
-          ? [{ name: "Pretendard", data: pretendard, style: "normal", weight: 700 }]
-          : undefined,
-      },
-    );
-  }
-
-  const isUp = meta.change >= 0;
-  const changeColor = isUp ? "#ef4444" : "#3b82f6"; // KR convention: 빨강=상승, 파랑=하락
-  const sign = isUp ? "+" : "";
-  const priceStr = formatPrice(meta.current_price, meta.market);
-  const changeStr = `${sign}${meta.change.toLocaleString()} (${sign}${meta.change_percent.toFixed(2)}%)`;
+  const displayName = meta?.name ?? ticker.toUpperCase();
 
   return new ImageResponse(
     (
@@ -123,53 +72,33 @@ export default async function OpengraphImage({
           display: "flex",
           flexDirection: "column",
           padding: 80,
-          justifyContent: "space-between",
+          justifyContent: "center",
+          alignItems: "center",
           fontFamily,
         }}
       >
-        {/* Header: brand */}
-        <div style={{ fontSize: 36, color: "#94a3b8", fontWeight: 700 }}>
+        <div style={{ fontSize: 48, color: "#94a3b8", marginBottom: 24 }}>
           StockInsight
         </div>
-
-        {/* Body: stock name + ticker/market */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ fontSize: 96, fontWeight: 700, lineHeight: 1.1 }}>
-            {meta.name}
-          </div>
-          <div
-            style={{
-              fontSize: 32,
-              color: "#94a3b8",
-              fontFamily: "monospace",
-            }}
-          >
-            {meta.ticker} · {meta.market}
-          </div>
+        <div style={{ fontSize: 120, fontWeight: 700 }}>
+          {displayName}
         </div>
-
-        {/* Footer: price + change */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ fontSize: 88, fontWeight: 700, fontFamily: "monospace" }}>
-            {priceStr}
-          </div>
-          <div
-            style={{
-              fontSize: 40,
-              color: changeColor,
-              fontWeight: 700,
-              fontFamily: "monospace",
-            }}
-          >
-            {changeStr}
-          </div>
+        <div style={{ fontSize: 32, color: "#64748b", marginTop: 24 }}>
+          종목 분석 카드
         </div>
       </div>
     ),
     {
       ...size,
       fonts: pretendard
-        ? [{ name: "Pretendard", data: pretendard, style: "normal", weight: 700 }]
+        ? [
+            {
+              name: "Pretendard",
+              data: pretendard,
+              style: "normal",
+              weight: 700,
+            },
+          ]
         : undefined,
     },
   );
