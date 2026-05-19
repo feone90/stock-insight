@@ -190,32 +190,34 @@ export function StockCardPage({ ticker }: { ticker: string }) {
 
         {card ? (
           <>
-            <div className="mb-3">
-              <button
-                type="button"
-                onClick={refreshAll}
-                disabled={refreshing || cooldownActive}
-                aria-label="전체 새로고침"
-                title={
-                  refreshing
-                    ? "분석 중..."
-                    : cooldownActive
-                    ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
-                    : "가격·뉴스·공시 다 받고 AI 의견까지 새로 만들기 — LLM ~$0.25, 약 1분 소요. 5분 cooldown."
-                }
-                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-blue-500/50 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 transition-colors px-4 min-h-11 text-sm font-medium w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <RotateCw size={16} className={refreshing ? "animate-spin" : ""} />
-                <span>{refreshing ? "전체 새로고침 중..." : "전체 새로고침 (가격·뉴스·AI 의견)"}</span>
-              </button>
-              <p className="mt-1 text-[11px] text-[var(--surface-text-subtle)]">
-                급할 땐 이 버튼 하나로 끝 — 약 1분, $0.25. 부분만 받고 싶으면 아래 3개.
-              </p>
-            </div>
-            <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {/* 2026-05-19 — 모바일 1줄 4-button grid. 옛 4-row 구조 (전체 별도
+                + 3 sub 각 줄) 가 모바일 화면 4줄 차지. */}
+            <div className="mb-4 grid grid-cols-4 gap-1.5 sm:gap-2">
+            <RefreshAction
+              icon={<RotateCw size={16} />}
+              label="전체"
+              fullLabel="전체 새로고침"
+              busyLabel="분석 중..."
+              busy={refreshing}
+              disabled={cooldownActive}
+              onClick={refreshAll}
+              timestamp={null}
+              timestampPrefix=""
+              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤` : "약 1분 · $0.25"}
+              now={now}
+              tone="primary"
+              title={
+                refreshing
+                  ? "분석 중..."
+                  : cooldownActive
+                  ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
+                  : "가격·뉴스·공시 다 받고 AI 의견까지 새로 만들기 — LLM ~$0.25, 약 1분 소요. 5분 cooldown."
+              }
+            />
             <RefreshAction
               icon={<LineChart size={16} />}
-              label="가격 새로고침"
+              label="가격"
+              fullLabel="가격 새로고침"
               busyLabel="받는 중..."
               busy={priceRefreshing}
               onClick={handlePriceRefresh}
@@ -227,12 +229,13 @@ export function StockCardPage({ ticker }: { ticker: string }) {
             />
             <RefreshAction
               icon={<Newspaper size={16} />}
-              label="뉴스·공시 새로고침"
+              label="뉴스"
+              fullLabel="뉴스·공시"
               busyLabel="받는 중..."
               busy={newsRefreshing}
               onClick={handleNewsRefresh}
               timestamp={newsLatestAt}
-              timestampPrefix="최신 뉴스"
+              timestampPrefix="뉴스"
               now={now}
               tone="info"
               title="새 뉴스/공시 수집 — 새 뉴스 1건+이면 AI 의견도 자동 재생성. 2분 cooldown."
@@ -240,14 +243,15 @@ export function StockCardPage({ ticker }: { ticker: string }) {
             />
             <RefreshAction
               icon={<Brain size={16} />}
-              label={refreshing ? "분석 중..." : "AI 의견 다시"}
+              label={refreshing ? "분석" : "AI"}
+              fullLabel="AI 의견 다시"
               busyLabel="분석 중..."
               busy={refreshing}
               disabled={cooldownActive}
               onClick={refresh}
               timestamp={generatedAt}
-              timestampPrefix="AI 의견"
-              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤 가능` : null}
+              timestampPrefix="AI"
+              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤` : null}
               now={now}
               tone="warning"
               title={
@@ -323,7 +327,8 @@ export function StockCardPage({ ticker }: { ticker: string }) {
 
 interface RefreshActionProps {
   icon: ReactNode;
-  label: string;
+  label: string;           // 모바일 button text (짧게: "전체" / "가격" / "뉴스" / "AI")
+  fullLabel?: string;      // sm+ 에 보일 긴 text ("전체 새로고침" 등). 없으면 label 그대로.
   busyLabel: string;
   busy: boolean;
   disabled?: boolean;
@@ -333,7 +338,7 @@ interface RefreshActionProps {
   cooldownLabel?: string | null;
   overrideSubtext?: string | null;
   now: number;
-  tone: "neutral" | "info" | "warning";
+  tone: "neutral" | "info" | "warning" | "primary";
   title: string;
 }
 
@@ -343,11 +348,14 @@ const TONE_CLASSES: Record<RefreshActionProps["tone"], string> = {
   info: "border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300",
   warning:
     "border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300",
+  primary:
+    "border border-blue-500/50 bg-blue-500/10 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300",
 };
 
 function RefreshAction({
   icon,
   label,
+  fullLabel,
   busyLabel,
   busy,
   disabled,
@@ -363,32 +371,50 @@ function RefreshAction({
   const relative = formatKoRelative(timestamp, now);
   // 우선순위: overrideSubtext (action 직후 status) > cooldownLabel > timestamp.
   // overrideSubtext 는 짧게 (~7초) 표시되는 backend hint (예: "AI 의견 갱신 중").
+  // timestampPrefix 빈 문자열이면 "데이터 없음" 라벨도 생략 (전체 새로고침처럼
+  // 그 자체의 마지막 갱신 시각이 없는 케이스).
+  const showFallback = timestamp != null || !!timestampPrefix;
   const subtext = overrideSubtext
     ? overrideSubtext
     : cooldownLabel
     ? cooldownLabel
     : timestamp
     ? `${timestampPrefix}: ${relative}`
-    : `${timestampPrefix} 데이터 없음`;
+    : showFallback
+    ? `${timestampPrefix} 데이터 없음`
+    : "";
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 min-w-0">
       <button
         type="button"
         onClick={onClick}
         disabled={busy || disabled}
-        aria-label={label}
+        aria-label={fullLabel ?? label}
         title={title}
-        className={`inline-flex items-center justify-center gap-1.5 rounded-md transition-colors px-2.5 sm:px-3 min-h-11 text-sm disabled:opacity-50 disabled:cursor-not-allowed ${TONE_CLASSES[tone]}`}
+        className={`inline-flex items-center justify-center gap-1 sm:gap-1.5 rounded-md transition-colors px-2 sm:px-3 min-h-11 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed ${TONE_CLASSES[tone]}`}
       >
         {busy ? <RefreshCw size={16} className="animate-spin" /> : icon}
-        <span>{busy ? busyLabel : label}</span>
+        <span className="truncate">
+          {busy ? (
+            busyLabel
+          ) : fullLabel ? (
+            <>
+              <span className="sm:hidden">{label}</span>
+              <span className="hidden sm:inline">{fullLabel}</span>
+            </>
+          ) : (
+            label
+          )}
+        </span>
       </button>
-      <span
-        className="text-[11px] text-center text-[var(--surface-text-subtle)]"
-        title={timestamp ? timestamp.toLocaleString("ko-KR") : undefined}
-      >
-        {subtext}
-      </span>
+      {subtext ? (
+        <span
+          className="text-[10px] sm:text-[11px] text-center text-[var(--surface-text-subtle)] truncate"
+          title={timestamp ? timestamp.toLocaleString("ko-KR") : undefined}
+        >
+          {subtext}
+        </span>
+      ) : null}
     </div>
   );
 }
