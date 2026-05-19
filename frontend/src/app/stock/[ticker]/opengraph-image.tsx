@@ -11,7 +11,9 @@ import { ImageResponse } from "next/og";
  * 자체도 미리보기 캐시 (수분~수일).
  */
 
-export const runtime = "edge";
+// 2026-05-19 — runtime 명시 제거. Edge runtime 에서 이미지 생성 fail (curl
+// 결과 200 + 0 bytes). Node.js runtime (Next.js 16 default) 가 ImageResponse
+// 와 안정적. Vercel free tier 도 둘 다 지원.
 export const alt = "StockInsight 종목 카드";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
@@ -103,7 +105,8 @@ export default async function OpengraphImage({
           fontFamily: fontData ? "Pretendard" : "sans-serif",
         }}
       >
-        {/* Top — Brand + market badge */}
+        {/* Top — Brand + market badge. 2026-05-19 emoji 제거 (Edge/Node
+            ImageResponse 가 emoji 환경별 fail 가능). */}
         <div
           style={{
             display: "flex",
@@ -113,7 +116,6 @@ export default async function OpengraphImage({
             color: "#cbd5e1",
           }}
         >
-          <span style={{ fontSize: 40 }}>📊</span>
           <span style={{ fontWeight: 600 }}>StockInsight</span>
           {market ? (
             <span
@@ -182,7 +184,7 @@ export default async function OpengraphImage({
             </div>
           </div>
           <div style={{ fontSize: 24, color: "#64748b" }}>
-            관계도 · 뉴스 · 정치 시그널 · AI 의견 · 최근 가격 분석
+            관계도 / 뉴스 / 정치 시그널 / AI 의견 / 최근 가격 분석
           </div>
         </div>
       </div>
