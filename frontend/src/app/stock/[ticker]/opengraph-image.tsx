@@ -1,0 +1,173 @@
+import { ImageResponse } from "next/og";
+
+/**
+ * Dynamic OG image per stock. Next.js 16 convention — same dir as page.tsx
+ * with `opengraph-image.tsx` 가 자동 메타 `og:image` 와 `twitter:image` 로 연결.
+ *
+ * 2026-05-19 — 사용자 요청: 카톡/슬랙 URL 공유 시 종목명·가격·변동률이
+ * 미리보기 카드 이미지로 즉시 보이게.
+ *
+ * Vercel Edge runtime + 자동 캐싱 (revalidate option 따라 분 단위). 카톡/슬랙
+ * 자체도 미리보기 캐시 (수분~수일).
+ */
+
+export const runtime = "edge";
+export const alt = "StockInsight 종목 카드";
+export const size = { width: 1200, height: 630 };
+export const contentType = "image/png";
+
+interface StockMeta {
+  name: string;
+  ticker: string;
+  market: string;
+  current_price: number;
+  change: number;
+  change_percent: number;
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+async function fetchStockMeta(ticker: string): Promise<StockMeta | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/stocks/${ticker}`, {
+      next: { revalidate: 60 },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as StockMeta;
+  } catch {
+    return null;
+  }
+}
+
+function isKRMarket(market: string): boolean {
+  return market === "KOSPI" || market === "KOSDAQ";
+}
+
+export default async function OpengraphImage({
+  params,
+}: {
+  params: Promise<{ ticker: string }>;
+}) {
+  const { ticker } = await params;
+  const meta = await fetchStockMeta(ticker);
+
+  const name = meta?.name || ticker;
+  const displayTicker = meta?.ticker || ticker;
+  const market = meta?.market || "";
+  const isKR = isKRMarket(market);
+  const price = meta?.current_price ?? 0;
+  const change = meta?.change ?? 0;
+  const changePct = meta?.change_percent ?? 0;
+
+  const sign = change >= 0 ? "+" : "";
+  const priceStr = isKR
+    ? `${price.toLocaleString()}원`
+    : `$${price.toLocaleString()}`;
+
+  // 한국 관습: 상승 = 빨강, 하락 = 파랑.
+  const changeColor =
+    change > 0 ? "#dc2626" : change < 0 ? "#2563eb" : "#94a3b8";
+
+  return new ImageResponse(
+    (
+      <div
+        style={{
+          width: 1200,
+          height: 630,
+          background:
+            "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)",
+          color: "white",
+          display: "flex",
+          flexDirection: "column",
+          padding: 80,
+          justifyContent: "space-between",
+          fontFamily: "sans-serif",
+        }}
+      >
+        {/* Top — Brand + market badge */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            fontSize: 32,
+            color: "#cbd5e1",
+          }}
+        >
+          <span style={{ fontSize: 40 }}>📊</span>
+          <span style={{ fontWeight: 600 }}>StockInsight</span>
+          {market ? (
+            <span
+              style={{
+                marginLeft: 8,
+                padding: "6px 16px",
+                border: "1px solid #475569",
+                borderRadius: 10,
+                fontSize: 24,
+                color: "#94a3b8",
+              }}
+            >
+              {market}
+            </span>
+          ) : null}
+        </div>
+
+        {/* Middle — Name + ticker */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div
+            style={{
+              fontSize: name.length > 12 ? 84 : 108,
+              fontWeight: 700,
+              lineHeight: 1.05,
+              letterSpacing: "-0.02em",
+            }}
+          >
+            {name}
+          </div>
+          <div style={{ fontSize: 40, color: "#94a3b8", fontFamily: "monospace" }}>
+            {displayTicker}
+          </div>
+        </div>
+
+        {/* Bottom — Price + change + footer */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 32,
+              flexWrap: "wrap",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 96,
+                fontWeight: 700,
+                lineHeight: 1,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {priceStr}
+            </div>
+            <div
+              style={{
+                fontSize: 48,
+                fontWeight: 600,
+                color: changeColor,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {sign}
+              {change.toLocaleString()} ({sign}
+              {changePct.toFixed(2)}%)
+            </div>
+          </div>
+          <div style={{ fontSize: 24, color: "#64748b" }}>
+            관계도 · 뉴스 · 정치 시그널 · AI 의견 · 최근 가격 분석
+          </div>
+        </div>
+      </div>
+    ),
+    { ...size },
+  );
+}

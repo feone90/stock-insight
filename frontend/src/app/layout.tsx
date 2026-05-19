@@ -14,9 +14,32 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://stock-insight-six.vercel.app");
+
 export const metadata: Metadata = {
-  title: "StockInsight — 주식 분석 대시보드",
-  description: "주식 분석 대시보드",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "StockInsight — 주식 분석 대시보드",
+    template: "%s | StockInsight",
+  },
+  description:
+    "관계도 · 뉴스 · 정치 시그널 · AI 의견 · 최근 가격 분석 — 가족 친화 주식 분석 대시보드",
+  openGraph: {
+    title: "StockInsight — 주식 분석 대시보드",
+    description:
+      "관계도 · 뉴스 · 정치 시그널 · AI 의견 · 최근 가격 분석 — 가족 친화 주식 분석 대시보드",
+    type: "website",
+    locale: "ko_KR",
+    siteName: "StockInsight",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "StockInsight — 주식 분석 대시보드",
+    description:
+      "관계도 · 뉴스 · 정치 시그널 · AI 의견 · 최근 가격 분석",
+  },
 };
 
 export default function RootLayout({
