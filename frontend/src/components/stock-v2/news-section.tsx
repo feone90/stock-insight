@@ -36,6 +36,18 @@ const WINDOW_LABEL: Record<PoliticalSignalCard["expected_window"], string> = {
   "1-2weeks": "1~2주",
 };
 
+// 2026-05-19 — 시그널 상태 (backend `_fetch_political_signals` 가 분류).
+const STATUS_BADGE: Record<
+  NonNullable<PoliticalSignalCard["status"]>,
+  { label: string; cls: string }
+> = {
+  new: { label: "🆕 신규", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40" },
+  active: { label: "● 진행 중", cls: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40" },
+  fading: { label: "⏳ 약화", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40" },
+  // expired 는 backend 가 기본 fetch 에서 제외하지만 type 완전성 유지.
+  expired: { label: "✕ 영향 종료", cls: "bg-[var(--surface-section-hover)] text-[var(--surface-text-muted)] border-[var(--surface-border)]" },
+};
+
 export function NewsSection({
   news,
   political = [],
@@ -153,6 +165,18 @@ function PoliticalBlock({ signals }: { signals: PoliticalSignalCard[] }) {
                 <span className="text-xs text-[var(--surface-text-muted)]">
                   · 신뢰도 {Math.round(s.confidence * 100)}%
                 </span>
+                {s.status ? (
+                  <span
+                    className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${STATUS_BADGE[s.status].cls}`}
+                    title={
+                      s.days_old != null
+                        ? `${s.days_old}일 전 · ${STATUS_BADGE[s.status].label}`
+                        : STATUS_BADGE[s.status].label
+                    }
+                  >
+                    {STATUS_BADGE[s.status].label}
+                  </span>
+                ) : null}
               </div>
               <p className="font-medium line-clamp-2">{s.summary_ko}</p>
               <p className="mt-1 text-xs text-[var(--surface-text-muted)] line-clamp-3">

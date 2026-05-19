@@ -255,6 +255,10 @@ export interface PoliticalSignalCard {
   expected_window: "minutes" | "hours" | "1-3days" | "1-2weeks";
   reasoning: string;
   sector_impact: string | null;
+  // 2026-05-19 — backend 가 expected_window + strength + 경과 시간으로 분류.
+  // "new" 24h 이내 / "active" 만료 안 됨 / "fading" 만료 임박 / "expired" 만료 (기본 비노출)
+  status?: "new" | "active" | "fading" | "expired";
+  days_old?: number;
 }
 
 // 2026-05-19 — 카드 헤더 가격 아래 "왜 떨어졌나/올랐나" 답 layer.
