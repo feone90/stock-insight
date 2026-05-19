@@ -668,12 +668,44 @@ def _label_for_financial(fin: "Financial", kr: bool) -> str:  # type: ignore[nam
     return "시총만 (DART 사업보고서 미공개)"
 
 
-async def _fetch_political_signals(ticker: str) -> dict:
-    """이 ticker에 매핑된 political_signals (최근 14일, market_relevant만).
+# 2026-05-19 — 정치 시그널 노출 정책 (Codex review 적용).
+# 단순 14일 윈도우 → expected_window + strength + confidence 종합 score.
+# DB 에 박혀있던 영향력 정보를 활용해 시니어 분석가 시각으로 *지금 의사결정에
+# 의미 있는* 시그널만 노출.
+_PS_EXPECTED_WINDOW_DAYS = {
+    "minutes": 1,      # 0.04일이지만 최소 1일 (당일 보존)
+    "hours": 2,        # 48시간
+    "1-3days": 5,      # 5일
+    "1-2weeks": 14,    # 14일
+}
+_PS_STRENGTH_MAX_DAYS = {
+    "low": 7,
+    "medium": 14,
+    "high": 21,
+}
+_PS_MIN_CONFIDENCE = 0.5  # 그 이하는 자동 매매 제외 (model 주석에서)
+_PS_MAX_FETCH_WINDOW_DAYS = 30  # DB 조회 상한 (status="expired" 도 일부 history 용)
 
-    Returns {"items": list[dict]} or {"error": str}.
+
+async def _fetch_political_signals(ticker: str) -> dict:
+    """이 ticker에 매핑된 political_signals + status 분류.
+
+    필터 (Codex review 2026-05-19):
+      1. confidence ≥ 0.5 (그 이하 자동 제외)
+      2. expected_window 기반 만료 (예: hours=48h, 1-2weeks=14d)
+      3. strength 기반 수명 상한 (low=7d, medium=14d, high=21d)
+      4. 둘 중 더 짧은 만료 적용
+
+    status 분류:
+      - new      : 24시간 이내
+      - active   : 만료 안 됨 + 24h+
+      - fading   : 만료 임박 (남은 수명 < 30%)
+      - expired  : 만료 — 기본 카드 비노출 (history view 용으로 fetch 만)
+
+    Returns {"items": list[dict]} 단, expired 는 호출자가 별도 처리.
     """
-    cutoff = datetime.utcnow() - timedelta(days=NEWS_WINDOW_DAYS)
+    now = datetime.utcnow()
+    fetch_cutoff = now - timedelta(days=_PS_MAX_FETCH_WINDOW_DAYS)
     async with async_session() as db:
         rows = (
             await db.execute(
@@ -686,19 +718,44 @@ async def _fetch_political_signals(ticker: str) -> dict:
                     PoliticalSignalTicker.ticker == ticker,
                     PoliticalSignal.analyzed_at.isnot(None),
                     PoliticalSignal.is_market_relevant.is_(True),
-                    PoliticalSignal.posted_at >= cutoff,
-                    # Defense in depth — purge endpoint 이미 sample_macro 삭제했지만
-                    # 어떤 경로로든 (dev DB 카피, 마이그레이션 실수, 누군가 새 seed
-                    # endpoint 추가) 재유입되면 카드의 매수 판단 신호 자리에 가짜
-                    # example.com URL 발언이 뜬다. 자본 운용 도구 기준 zero-tolerance.
+                    PoliticalSignal.posted_at >= fetch_cutoff,
                     PoliticalSignal.source != "sample_macro",
                 )
                 .order_by(PoliticalSignal.posted_at.desc())
-                .limit(10)
+                .limit(20)
             )
         ).all()
+
     items: list[dict] = []
     for signal, impact in rows:
+        # 가드 1: confidence floor
+        if (impact.confidence or 0) < _PS_MIN_CONFIDENCE:
+            continue
+
+        if signal.posted_at is None:
+            continue
+        age_days = (now - signal.posted_at).total_seconds() / 86400.0
+        days_old = int(age_days)
+
+        # 가드 2+3: expected_window + strength 중 *더 짧은* 만료.
+        window_days = _PS_EXPECTED_WINDOW_DAYS.get(impact.expected_window, 14)
+        strength_days = _PS_STRENGTH_MAX_DAYS.get(impact.strength, 14)
+        max_days = min(window_days, strength_days)
+
+        # status 분류
+        if age_days > max_days:
+            status = "expired"
+        elif age_days < 1:
+            status = "new"
+        elif age_days > max_days * 0.7:
+            status = "fading"
+        else:
+            status = "active"
+
+        # 기본 fetch 결과는 expired 제외. history view (admin) 가 별도로 필요시.
+        if status == "expired":
+            continue
+
         items.append(
             {
                 "posted_at": signal.posted_at,
@@ -715,9 +772,11 @@ async def _fetch_political_signals(ticker: str) -> dict:
                 "expected_window": impact.expected_window,
                 "reasoning": impact.reasoning,
                 "sector_impact": impact.sector_impact,
+                "status": status,
+                "days_old": days_old,
             }
         )
-    return {"items": items}
+    return {"items": items[:10]}  # 최대 10개
 
 
 def _build_political_signals(res: Any) -> list[PoliticalSignalCard]:

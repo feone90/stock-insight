@@ -352,6 +352,11 @@ class PoliticalSignalCard(BaseModel):
     expected_window: Literal["minutes", "hours", "1-3days", "1-2weeks"]
     reasoning: str
     sector_impact: str | None = None
+    # 2026-05-19 — 시간 + expected_window + strength 종합 status. frontend
+    # 가 라벨 ("신규" / "진행 중" / "약화" / "영향 종료") 으로 표시. 사용자가
+    # *지금 의사결정에 의미 있는* 시그널만 직관적 파악.
+    status: Literal["new", "active", "fading", "expired"] = "active"
+    days_old: int = 0  # posted_at 기준 경과 일수
 
 
 class Catalyst(BaseModel):

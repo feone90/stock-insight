@@ -539,6 +539,44 @@ async def purge_political_samples(
 # 제거 + purge_political_samples 로 잔여 정리.
 
 
+@router.post("/political/purge_old")
+async def purge_old_political_signals(
+    days: int = 90,
+    db: AsyncSession = Depends(get_db),
+    _admin: UserInfo = Depends(require_admin),
+):
+    """`days` 일 이전 정치 시그널 row 영구 삭제 (default 90일).
+
+    2026-05-19 — 사용자 발견 "정치 시그널 db 관리도 해야하고". 일반 row
+    영원히 누적되던 정책 → retention 90일. CASCADE 로 ticker 매핑 row 도
+    같이 삭제 (`PoliticalSignalTicker.signal_id` FK).
+
+    카드 노출은 _fetch_political_signals 에서 별도 (expected_window +
+    strength 기반 status 분류). 이 endpoint 는 *DB 위생* 만 담당.
+    """
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from app.models.political_signal import PoliticalSignal
+
+    cutoff = _dt.utcnow() - _td(days=days)
+    before_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(PoliticalSignal)
+            .where(PoliticalSignal.posted_at < cutoff)
+        )
+    ).scalar() or 0
+    if before_count == 0:
+        return {"status": "ok", "deleted": 0, "cutoff_days": days}
+
+    await db.execute(
+        delete(PoliticalSignal).where(PoliticalSignal.posted_at < cutoff)
+    )
+    await db.commit()
+    return {"status": "ok", "deleted": before_count, "cutoff_days": days}
+
+
 @router.get("/political/status")
 async def political_status(
     db: AsyncSession = Depends(get_db),
