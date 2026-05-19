@@ -14,9 +14,15 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// 2026-05-19 — metadataBase 는 *production URL* 가리켜야 함. 옛 코드는
+// `VERCEL_URL` (deployment-specific hash URL) 사용 → preview 보호되면 카톡이
+// og:image fetch 시 401 받아 이미지 안 보임. `VERCEL_PROJECT_PRODUCTION_URL`
+// 은 항상 production alias (stock-insight-six.vercel.app) — public 접근 OK.
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://stock-insight-six.vercel.app");
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "https://stock-insight-six.vercel.app");
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
