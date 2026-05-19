@@ -160,6 +160,38 @@ async def _extract_knowledge_safe(ticker: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+_CRITICAL_PRIVATE_IMPORTANCE = 4
+
+
+def _is_critical_private_relation(rel: Relation) -> bool:
+    return (
+        rel.target_is_public is False
+        and (rel.business_importance or 0) >= _CRITICAL_PRIVATE_IMPORTANCE
+    )
+
+
+def _default_relation_note(rel: Relation) -> str | None:
+    if not _is_critical_private_relation(rel):
+        return rel.notes
+    name = rel.target_name or rel.target_ticker
+    if rel.rationale:
+        return f"{name}: {rel.rationale}"
+    return (
+        f"{name}: 비상장 핵심 관계라 직접 주가는 없지만, "
+        "이 종목의 수요와 실적 기대를 흔드는 변수다."
+    )
+
+
+def _relations_one_line(one_line: str, relations: list[Relation]) -> str:
+    critical = [r for r in relations if _is_critical_private_relation(r)]
+    if not critical:
+        return one_line
+    name = critical[0].target_name or critical[0].target_ticker
+    if name.lower() in one_line.lower():
+        return one_line
+    return f"{name} 비상장 핵심 관계가 투자 판단의 큰 변수다. {one_line}"
+
+
 def compose(
     ticker: str,
     data: DataLayer,
@@ -251,7 +283,7 @@ def compose(
     relations_with_notes: list[Relation] = []
     for rel in data.relations_data:
         narrative_note = analyst.relations_narrative.notes_by_target.get(
-            rel.target_ticker, rel.notes
+            rel.target_ticker, _default_relation_note(rel)
         )
         relations_with_notes.append(
             Relation(
@@ -277,7 +309,9 @@ def compose(
         )
 
     relations = RelationsSummary(
-        one_line=analyst.relations_narrative.one_line,
+        one_line=_relations_one_line(
+            analyst.relations_narrative.one_line, relations_with_notes
+        ),
         relations=relations_with_notes,
         citations=_resolve_ids(
             analyst.relations_narrative.citations, k=k,

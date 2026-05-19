@@ -195,6 +195,39 @@ def test_compose_merges_relations_data_with_narrative():
     assert rel.notes == "HBM 동조 수혜"  # overlaid from narrative
 
 
+def test_compose_forces_critical_private_relation_into_text():
+    """중요한 비상장 관계는 LLM이 notes_by_target에서 빠뜨려도 글에 보여야 한다."""
+    data = _make_data_layer()
+    data.relations_data.append(
+        Relation(
+            target_ticker="OpenAI",
+            target_name="OpenAI",
+            relation_type="complementary",
+            strength=0.9,
+            today_change_pct=None,
+            notes=None,
+            citation_ids=[],
+            signal_direction="positive",
+            confidence=0.92,
+            source="llm_knowledge",
+            rationale=(
+                "OpenAI 사용량 증가는 Microsoft Azure AI 인프라 수요와 "
+                "엔터프라이즈 AI 매출 기대에 직접 연결된다."
+            ),
+            target_is_public=False,
+            business_importance=5,
+        )
+    )
+    analyst = _make_analyst_output()
+
+    card = compose("MSFT", data, analyst, _identity("MSFT"))
+
+    assert "OpenAI" in card.relations.one_line
+    openai = next(r for r in card.relations.relations if r.target_ticker == "OpenAI")
+    assert openai.notes is not None
+    assert "OpenAI" in openai.notes
+
+
 def test_compose_server_fields_win_over_llm():
     """Identity is injected last — analyst can't override ticker/name/price."""
     data = _make_data_layer()
