@@ -1,6 +1,17 @@
 "use client";
 
-import { Brain, LineChart, Moon, Newspaper, RefreshCw, RotateCw, Star, Sun } from "lucide-react";
+import {
+  ArrowRight,
+  Brain,
+  LineChart,
+  Moon,
+  Newspaper,
+  RefreshCw,
+  RotateCw,
+  Sparkles,
+  Star,
+  Sun,
+} from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { addFavorite, getStock, removeFavorite } from "@/services/api";
 import { onUserChanged } from "@/services/user";
@@ -190,79 +201,22 @@ export function StockCardPage({ ticker }: { ticker: string }) {
 
         {card ? (
           <>
-            {/* 2026-05-19 — 모바일 1줄 4-button grid. 옛 4-row 구조 (전체 별도
-                + 3 sub 각 줄) 가 모바일 화면 4줄 차지. */}
-            <div className="mb-4 grid grid-cols-4 gap-1.5 sm:gap-2">
-            <RefreshAction
-              icon={<RotateCw size={16} />}
-              label="전체"
-              fullLabel="전체 새로고침"
-              busyLabel="분석 중..."
-              busy={refreshing}
-              disabled={cooldownActive}
-              onClick={refreshAll}
-              timestamp={null}
-              timestampPrefix=""
-              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤` : "약 1분 · $0.25"}
+            <RefreshCommandBar
+              refreshing={refreshing}
+              priceRefreshing={priceRefreshing}
+              newsRefreshing={newsRefreshing}
+              cooldownActive={cooldownActive}
+              cooldownLeftMin={cooldownLeftMin}
+              refreshAll={refreshAll}
+              handlePriceRefresh={handlePriceRefresh}
+              handleNewsRefresh={handleNewsRefresh}
+              refresh={refresh}
+              priceAsof={priceAsof}
+              newsLatestAt={newsLatestAt}
+              generatedAt={generatedAt}
+              newsHint={newsHint}
               now={now}
-              tone="primary"
-              title={
-                refreshing
-                  ? "분석 중..."
-                  : cooldownActive
-                  ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
-                  : "가격·뉴스·공시 다 받고 AI 의견까지 새로 만들기 — LLM ~$0.25, 약 1분 소요. 5분 cooldown."
-              }
             />
-            <RefreshAction
-              icon={<LineChart size={16} />}
-              label="가격"
-              fullLabel="가격 새로고침"
-              busyLabel="받는 중..."
-              busy={priceRefreshing}
-              onClick={handlePriceRefresh}
-              timestamp={priceAsof}
-              timestampPrefix="가격"
-              now={now}
-              tone="neutral"
-              title="현재가·차트만 즉시 갱신 — 외부 API 1콜, ~2초. 30초 cooldown."
-            />
-            <RefreshAction
-              icon={<Newspaper size={16} />}
-              label="뉴스"
-              fullLabel="뉴스·공시"
-              busyLabel="받는 중..."
-              busy={newsRefreshing}
-              onClick={handleNewsRefresh}
-              timestamp={newsLatestAt}
-              timestampPrefix="뉴스"
-              now={now}
-              tone="info"
-              title="새 뉴스/공시 수집 — 새 뉴스 1건+이면 AI 의견도 자동 재생성. 2분 cooldown."
-              overrideSubtext={newsHint}
-            />
-            <RefreshAction
-              icon={<Brain size={16} />}
-              label={refreshing ? "분석" : "AI"}
-              fullLabel="AI 의견 다시"
-              busyLabel="분석 중..."
-              busy={refreshing}
-              disabled={cooldownActive}
-              onClick={refresh}
-              timestamp={generatedAt}
-              timestampPrefix="AI"
-              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤` : null}
-              now={now}
-              tone="warning"
-              title={
-                refreshing
-                  ? "AI 분석 중..."
-                  : cooldownActive
-                  ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
-                  : "전체 의견 재생성 — LLM 2-stage (~$0.25, 30~60초). 5분 cooldown."
-              }
-            />
-            </div>
           </>
         ) : null}
 
@@ -322,6 +276,139 @@ export function StockCardPage({ ticker }: { ticker: string }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function RefreshCommandBar({
+  refreshing,
+  priceRefreshing,
+  newsRefreshing,
+  cooldownActive,
+  cooldownLeftMin,
+  refreshAll,
+  handlePriceRefresh,
+  handleNewsRefresh,
+  refresh,
+  priceAsof,
+  newsLatestAt,
+  generatedAt,
+  newsHint,
+  now,
+}: {
+  refreshing: boolean;
+  priceRefreshing: boolean;
+  newsRefreshing: boolean;
+  cooldownActive: boolean;
+  cooldownLeftMin: number;
+  refreshAll: () => Promise<void>;
+  handlePriceRefresh: () => Promise<void>;
+  handleNewsRefresh: () => Promise<void>;
+  refresh: () => Promise<void>;
+  priceAsof: Date | null;
+  newsLatestAt: Date | null;
+  generatedAt: Date | null;
+  newsHint: string | null;
+  now: number;
+}) {
+  const fullTitle = refreshing
+    ? "분석 중..."
+    : cooldownActive
+      ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
+      : "가격·뉴스·공시를 먼저 받고, 마지막에 AI 의견까지 새로 만듭니다. LLM ~$0.25, 약 1분 소요.";
+
+  return (
+    <section className="mb-4 rounded-xl border border-blue-500/25 bg-blue-500/[0.04] p-2.5 sm:p-3">
+      <div className="grid gap-2 lg:grid-cols-[minmax(260px,1.1fr)_minmax(420px,1.9fr)] lg:items-stretch">
+        <div className="rounded-lg border border-blue-500/35 bg-blue-500/10 p-2">
+          <button
+            type="button"
+            onClick={refreshAll}
+            disabled={refreshing || cooldownActive}
+            title={fullTitle}
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {refreshing ? <RefreshCw size={17} className="animate-spin" /> : <RotateCw size={17} />}
+            {refreshing ? "전체 분석 중..." : "전체 새로고침"}
+          </button>
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-[11px] text-blue-700 dark:text-blue-300">
+            <PipelineStep icon={<LineChart size={12} />} label="가격" />
+            <ArrowRight size={12} />
+            <PipelineStep icon={<Newspaper size={12} />} label="뉴스·공시" />
+            <ArrowRight size={12} />
+            <PipelineStep icon={<Brain size={12} />} label="AI 의견" />
+          </div>
+          <p className="mt-1.5 text-center text-[11px] text-[var(--surface-text-subtle)]">
+            {cooldownActive ? `${cooldownLeftMin}분 뒤 다시 가능` : "세 작업을 순서대로 실행"}
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-card)]/80 p-2">
+          <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[11px] font-medium text-[var(--surface-text-muted)]">
+            <Sparkles size={13} />
+            세부 새로고침
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+            <RefreshAction
+              icon={<LineChart size={16} />}
+              label="가격"
+              fullLabel="가격만"
+              busyLabel="받는 중..."
+              busy={priceRefreshing}
+              onClick={handlePriceRefresh}
+              timestamp={priceAsof}
+              timestampPrefix="가격"
+              now={now}
+              tone="neutral"
+              title="현재가·차트만 즉시 갱신 — 외부 API 1콜, ~2초. 30초 cooldown."
+            />
+            <RefreshAction
+              icon={<Newspaper size={16} />}
+              label="뉴스"
+              fullLabel="뉴스·공시"
+              busyLabel="받는 중..."
+              busy={newsRefreshing}
+              onClick={handleNewsRefresh}
+              timestamp={newsLatestAt}
+              timestampPrefix="뉴스"
+              now={now}
+              tone="info"
+              title="새 뉴스/공시 수집 — 새 뉴스 1건+이면 AI 의견도 자동 재생성. 2분 cooldown."
+              overrideSubtext={newsHint}
+            />
+            <RefreshAction
+              icon={<Brain size={16} />}
+              label={refreshing ? "분석" : "AI"}
+              fullLabel="AI 의견"
+              busyLabel="분석 중..."
+              busy={refreshing}
+              disabled={cooldownActive}
+              onClick={refresh}
+              timestamp={generatedAt}
+              timestampPrefix="AI"
+              cooldownLabel={cooldownActive ? `${cooldownLeftMin}분 뒤` : null}
+              now={now}
+              tone="warning"
+              title={
+                refreshing
+                  ? "AI 분석 중..."
+                  : cooldownActive
+                    ? `최근 분석됨 — ${cooldownLeftMin}분 뒤 다시 가능 ($0.25 비용 보호)`
+                    : "현재 데이터로 AI 의견만 다시 생성 — LLM 2-stage (~$0.25, 30~60초). 5분 cooldown."
+              }
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PipelineStep({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5">
+      {icon}
+      {label}
+    </span>
   );
 }
 

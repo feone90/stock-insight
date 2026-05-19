@@ -160,41 +160,43 @@ export function HeroChart({
 
   return (
     <div className="relative">
-      <div className="absolute z-10 top-2 left-2 flex items-center gap-3 text-[11px] text-[var(--surface-text-muted)] bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md px-2 py-1 shadow-sm">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-3 bg-red-500 dark:bg-red-400" />
-          상승
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2 h-3 bg-blue-500 dark:bg-blue-400" />
-          하락
-        </span>
-        <span
-          className="flex items-center gap-1.5"
-          title="20일 평균 가격. 현재가(캔들)가 점선 위면 단기 추세 우상향, 아래면 약세."
-        >
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--surface-text-muted)]">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-2 h-3 bg-red-500 dark:bg-red-400" />
+            상승
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-2 h-3 bg-blue-500 dark:bg-blue-400" />
+            하락
+          </span>
           <span
-            className="inline-block w-3 h-0 border-t border-dashed"
-            style={{ borderColor: "var(--surface-text-muted)" }}
-          />
-          20일 평균
-        </span>
-      </div>
-      <div className="absolute z-10 top-2 right-2 flex items-center gap-1 bg-[var(--surface-card)] border border-[var(--surface-border)] rounded-md p-0.5 shadow-sm">
-        {PERIOD_OPTIONS.map((opt) => (
-          <button
-            key={opt.days}
-            type="button"
-            onClick={() => setDays(opt.days)}
-            className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
-              days === opt.days
-                ? "bg-blue-600 text-white"
-                : "text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
-            }`}
+            className="flex items-center gap-1.5"
+            title="20일 평균 가격. 현재가(캔들)가 점선 위면 단기 추세 우상향, 아래면 약세."
           >
-            {opt.label}
-          </button>
-        ))}
+            <span
+              className="inline-block w-3 h-0 border-t border-dashed"
+              style={{ borderColor: "var(--surface-text-muted)" }}
+            />
+            20일 평균
+          </span>
+        </div>
+        <div className="flex w-full items-center gap-1 overflow-x-auto rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] p-0.5 sm:w-auto">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.days}
+              type="button"
+              onClick={() => setDays(opt.days)}
+              className={`shrink-0 px-2 py-1 rounded text-[11px] transition-colors ${
+                days === opt.days
+                  ? "bg-blue-600 text-white"
+                  : "text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
       <div ref={containerRef} className="w-full h-[260px] md:h-[340px]" />
     </div>

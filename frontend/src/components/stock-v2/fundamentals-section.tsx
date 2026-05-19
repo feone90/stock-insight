@@ -1,5 +1,6 @@
 "use client";
 
+import { Scale } from "lucide-react";
 import type { Fundamentals } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -23,7 +24,7 @@ export function FundamentalsSection({
 
   return (
     <SectionShell
-      emoji="📐"
+      icon={<Scale size={17} />}
       title="펀더멘털"
       compact={
         <span>{parts.length > 0 ? parts.join(" · ") : "재무 데이터 부족"}</span>
@@ -33,7 +34,7 @@ export function FundamentalsSection({
         <div className="space-y-1.5">
           <p>
             회사가 <strong>얼마 버는지·자산이 얼마인지</strong> 와 주가를 비교한
-            "가격이 비싼지 싼지" 평가. 단순 주가만으로는 못 보고, 이익·자산
+            가격이 비싼지 싼지 평가. 단순 주가만으로는 못 보고, 이익·자산
             대비 봐야 의미.
           </p>
           <ul className="ml-3 space-y-0.5 list-disc">

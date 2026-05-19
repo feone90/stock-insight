@@ -1,5 +1,6 @@
 "use client";
 
+import { Minus, TrendingDown, TrendingUp } from "lucide-react";
 import type { PriceMoveCause, RecentPriceMove } from "@/types/card";
 
 /**
@@ -54,15 +55,40 @@ export function RecentPriceMoveSection({ move }: { move: RecentPriceMove }) {
       : isNeg
       ? "border-blue-500/30 bg-blue-500/5"
       : "border-red-500/30 bg-red-500/5";
+  const headlineColor =
+    primaryPct == null
+      ? "text-[var(--surface-text)]"
+      : isNeg
+        ? "text-blue-600 dark:text-blue-400"
+        : "text-red-600 dark:text-red-400";
+  const icon =
+    primaryPct == null ? (
+      <Minus size={18} />
+    ) : isNeg ? (
+      <TrendingDown size={18} />
+    ) : (
+      <TrendingUp size={18} />
+    );
 
   return (
     <section
       className={`mx-4 md:mx-5 my-3 rounded-lg border ${accent} px-4 py-3`}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-[var(--surface-text)]">
-          📉 최근 가격 움직임
-        </h3>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex size-8 items-center justify-center rounded-md border ${accent} ${headlineColor}`}>
+            {icon}
+          </span>
+          <div>
+            <h3 className="text-xs font-medium text-[var(--surface-text-muted)]">
+              최근 가격 움직임
+            </h3>
+            <div className={`text-lg font-bold tabular-nums leading-tight ${headlineColor}`}>
+              {WINDOW_LABEL[move.primary_window]}{" "}
+              {primaryPct == null ? "데이터 부족" : `${primaryPct > 0 ? "+" : ""}${primaryPct.toFixed(1)}%`}
+            </div>
+          </div>
+        </div>
         <ReturnsBar move={move} />
       </div>
       <p className="mt-1 text-sm leading-relaxed text-[var(--surface-text)]">

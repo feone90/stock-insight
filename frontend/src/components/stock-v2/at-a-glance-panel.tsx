@@ -54,7 +54,7 @@ export function AtAGlancePanel({ card }: { card: StockCard }) {
       <div className="flex items-end gap-4">
         <div>
           <div className="text-xs text-[var(--surface-text-muted)] mb-0.5">
-            Final Grade
+            종합 등급
           </div>
           <div className={`text-5xl font-extrabold leading-none ${GRADE_FG[g.final_grade]}`}>
             {g.final_grade}
@@ -69,13 +69,13 @@ export function AtAGlancePanel({ card }: { card: StockCard }) {
         <div className="flex-1 grid grid-cols-2 gap-2 pl-3 border-l border-[var(--surface-border)]">
           <div>
             <div className="text-xs text-[var(--surface-text-muted)] mb-0.5">
-              Stance
+              판단
             </div>
             <div className="text-base font-semibold">{STANCE_LABEL[g.stance]}</div>
           </div>
           <div>
             <div className="text-xs text-[var(--surface-text-muted)] mb-0.5">
-              Entry
+              진입
             </div>
             <div className="text-base font-semibold">
               {ENTRY_STAGE_LABEL[g.entry_stage]}

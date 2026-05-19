@@ -1,5 +1,6 @@
 "use client";
 
+import { Newspaper } from "lucide-react";
 import type { NewsItem, PoliticalSignalCard } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -18,9 +19,9 @@ const IMPACT_COLOR: Record<NewsItem["impact"], string> = {
 };
 
 const DIRECTION_BADGE: Record<PoliticalSignalCard["direction"], { label: string; cls: string }> = {
-  long: { label: "📈 매수 시그널", cls: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/40" },
-  short: { label: "📉 매도/회피 시그널", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/40" },
-  avoid: { label: "⏸ 관망", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40" },
+  long: { label: "매수 쪽 영향", cls: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/40" },
+  short: { label: "매도·회피 영향", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/40" },
+  avoid: { label: "관망", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40" },
 };
 
 const STRENGTH_LABEL: Record<PoliticalSignalCard["strength"], string> = {
@@ -41,9 +42,9 @@ const STATUS_BADGE: Record<
   NonNullable<PoliticalSignalCard["status"]>,
   { label: string; cls: string }
 > = {
-  new: { label: "🆕 신규", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40" },
+  new: { label: "신규", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/40" },
   active: { label: "● 진행 중", cls: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/40" },
-  fading: { label: "⏳ 약화", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40" },
+  fading: { label: "약화", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/40" },
   // expired 는 backend 가 기본 fetch 에서 제외하지만 type 완전성 유지.
   expired: { label: "✕ 영향 종료", cls: "bg-[var(--surface-section-hover)] text-[var(--surface-text-muted)] border-[var(--surface-border)]" },
 };
@@ -57,7 +58,7 @@ export function NewsSection({
 }) {
   const compact =
     political.length > 0
-      ? `🇺🇸 ${political.length}건 정치 시그널 · 뉴스 ${news.length}건`
+      ? `${political.length}건 정치 시그널 · 뉴스 ${news.length}건`
       : news.length === 0
       ? "최근 뉴스 없음"
       : news
@@ -67,7 +68,7 @@ export function NewsSection({
 
   return (
     <SectionShell
-      emoji="📰"
+      icon={<Newspaper size={17} />}
       title="뉴스 / 이슈"
       compact={<span>{compact}</span>}
       expanded={<NewsExpanded news={news} political={political} />}
@@ -80,7 +81,7 @@ export function NewsSection({
           </p>
           <ul className="ml-3 space-y-0.5 list-disc">
             <li><strong>▲ 빨강</strong> = 긍정 영향 · <strong>▼ 파랑</strong> = 부정 · ◆ = 양면 · ○ = 중립</li>
-            <li><strong>🇺🇸 정치 시그널</strong> — 트럼프 Truth Social 발언이 이 종목에 미치는 영향 (LLM 자동 매핑)</li>
+            <li><strong>정치 시그널</strong> — 트럼프 Truth Social 발언이 이 종목에 미치는 영향 (LLM 자동 매핑)</li>
             <li>제목 클릭 시 원문 매체 이동</li>
           </ul>
         </div>
@@ -142,10 +143,10 @@ function PoliticalBlock({ signals }: { signals: PoliticalSignalCard[] }) {
           정치 시그널
         </span>
         <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-          🇺🇸 트럼프 Truth Social
+          트럼프 Truth Social
         </span>
         <span className="text-xs font-normal text-[var(--surface-text-muted)]">
-          · 자동매매 trigger 기준
+          · 단기 매매 영향
         </span>
       </div>
       <ul className="space-y-3">

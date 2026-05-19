@@ -30,6 +30,13 @@ PROMPT_SIZE_SOFT_LIMIT = 19000  # bumped from 18K to fit family-friendly copy gu
 _FIELD_INSTRUCTIONS = """\
 출력 JSON에 다음 4개 분석 필드만 포함하라. 데이터 echoing 금지.
 
+문장 스타일 강제:
+- 내부 분석은 전문가 수준으로 하되, 출력 문장은 가족 비전공자용 투자 메모다.
+- 결론을 먼저 쓴다. "왜냐하면" 뒤에 핵심 근거 1~2개만 붙인다.
+- 전문용어를 그대로 쓰지 마라. 쓰면 쉬운 말로 풀어 쓴다.
+- 각 문자열은 짧게. 한 문장에 한 가지 의미. 긴 보고서 문체 금지.
+- enum 값(BULL/BASE/BEAR, BUY/WATCH/REJECT)은 schema 때문에 유지하지만, 자연어 문장에는 "좋은 경우/기본 경우/나쁜 경우", "매수 후보/관망/보류"처럼 풀어 쓴다.
+
 1) glance
    { final_grade: "S"|"A"|"B"|"C"|"D",
      grade_delta: "up"|"down"|"same"|null,
@@ -37,6 +44,8 @@ _FIELD_INSTRUCTIONS = """\
      entry_stage: "ENTER"|"WAIT"|"REJECT",
      one_line: str,
      citations: list[int] }   # interp_citations 풀에서 참조
+   - one_line: 60~90자. "지금 행동 판단 + 가장 큰 이유" 순서.
+     예: "지금은 추격매수보다 대기. 가격은 올랐지만 거래량과 새 호재가 약하다."
 
 2) thesis
    { core_thesis: str,
@@ -51,16 +60,25 @@ _FIELD_INSTRUCTIONS = """\
    Catalyst = { when, event, impact_estimate, direction: "positive"|"negative"|"mixed", citation_ids: list[int] }
    Scenario = { name: "BULL"|"BASE"|"BEAR", probability: 0..1, scenario_price: float|null,
                 scenario_change_pct: float|null, rationale: str }
+   - core_thesis: 최대 2문장. "이 종목을 좋게/나쁘게 보는 핵심 이유"만.
+   - supports/opposes[].text: 각 1문장. "사실 + 투자 판단상 의미"를 함께 쓴다.
+     나쁜 예: "컨센서스 상회 가능성." 좋은 예: "시장 기대보다 실적이 잘 나오면 비싼 주가 부담을 일부 덜 수 있다."
+   - Scenario.rationale: 쉬운 말로. "좋은 경우/기본 경우/나쁜 경우"에 해당하는 조건과 결과를 쓴다.
+   - Catalyst.event/impact_estimate: 일정 이름보다 "주가에 왜 중요한지"가 보이게 쓴다.
 
 3) relations_narrative
    { one_line: str,                          # 종목과 peer/공급망/그룹/테마/매크로 관계 한 줄 요약
      notes_by_target: { ticker_or_theme: str },  # 각 관계 target에 대한 짧은 해설 (선택)
      citations: list[int] }
+   - one_line: 관계를 나열하지 말고 "매매 판단에 왜 중요한지"를 한 줄로 쓴다.
+   - notes_by_target 값: 1문장. 공급망/경쟁/고객 관계가 주가에 미치는 방향을 쉬운 말로.
 
 4) decision
    { stance, sizing_note, support_price, risk_threshold, citations,
      interpretation: {kind, based_on, rationale}|null }
    note 필드는 출력하지 마라 — 서버가 주입한다.
+   - sizing_note: 반드시 행동으로 시작. 예: "지금은 소액만", "지금은 기다림", "손절 기준 없으면 매수 보류".
+   - support_price/risk_threshold가 있으면 sizing_note에서 그 가격이 어떤 의미인지 쉬운 말로 설명.
 
 추가:
 - interp_citations: list[Citation]

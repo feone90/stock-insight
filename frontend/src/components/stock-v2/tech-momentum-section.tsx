@@ -1,5 +1,6 @@
 "use client";
 
+import { Activity } from "lucide-react";
 import type { TechMomentum } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -17,7 +18,7 @@ const HELP_TEXT = (
   <div className="space-y-2">
     <p>
       <strong>최근 주가가 어떻게 움직였는지 + 왜 그렇게 움직였는지</strong>를 숫자로 본 것.
-      가격만 보면 "올랐다/내렸다"만 보이지만, 거래량·변동폭·평균선까지 같이 보면
+      가격만 보면 올랐다/내렸다만 보이지만, 거래량·변동폭·평균선까지 같이 보면
       <em> 추세가 강한지 약한지 / 단기적으로 과열인지 과매도인지</em>까지 판별할 수 있어요.
     </p>
     <ul className="ml-3 space-y-0.5 list-disc">
@@ -35,7 +36,7 @@ export function TechMomentumSection({ technical }: { technical: TechMomentum }) 
   const compact = buildCompact(technical);
   return (
     <SectionShell
-      emoji="📊"
+      icon={<Activity size={17} />}
       title="최근 흐름"
       compact={<span>{compact}</span>}
       expanded={<TechExpanded tech={technical} />}

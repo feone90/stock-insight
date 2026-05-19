@@ -1,5 +1,6 @@
 "use client";
 
+import { Network } from "lucide-react";
 import type {
   Relation,
   RelationType,
@@ -111,7 +112,7 @@ export function RelationsSection({
   const summary = summariseRelations(relations.relations ?? []);
   return (
     <SectionShell
-      emoji="🔗"
+      icon={<Network size={17} />}
       title="관계"
       compact={<span>{summary || "관계 데이터 없음"}</span>}
       expanded={<RelationsExpanded relations={relations} selfTicker={ticker} />}
@@ -119,16 +120,16 @@ export function RelationsSection({
         <div className="space-y-1.5">
           <p>
             이 종목과 <strong>사업·계약·경쟁·규제로 얽힌 다른 종목들</strong>.
-            "한쪽이 잘되면 다른 쪽이 어떻게 되는지" 를 미리 보는 layer.
+            한쪽이 잘되면 다른 쪽이 어떻게 되는지를 미리 보는 layer.
           </p>
           <ul className="ml-3 space-y-0.5 list-disc">
             <li><strong>🔑 핵심 신호</strong> — 계약 공시·고신뢰 뉴스 인용. 매매 의사결정 직결</li>
             <li><strong>📝 사업 관계</strong> — 기사·공시에 명시된 supplier·customer·competitor</li>
             <li><strong>🔗 컨텍스트</strong> — 같은 섹터·테마 lookup (분위기 파악용, 매매 baseline 아님)</li>
-            <li><strong>⇄ zero-sum</strong> — 한쪽이 점유율 가져가면 다른 쪽이 잃는 직접 경쟁 (별도 callout 으로 강조)</li>
+            <li><strong>직접 경쟁</strong> — 한쪽이 점유율 가져가면 다른 쪽이 잃는 관계 (별도 callout 으로 강조)</li>
           </ul>
           <p className="text-[var(--surface-text-muted)] mt-1">
-            "Ontology 그래프 →" 클릭 시 전체 관계망 시각화.
+            Ontology 그래프 클릭 시 전체 관계망 시각화.
           </p>
         </div>
       }
@@ -153,7 +154,7 @@ function summariseRelations(rels: Relation[]): string {
     else context += 1;
   }
   const parts: string[] = [];
-  if (inverse > 0) parts.push(`zero-sum ${inverse}`);
+  if (inverse > 0) parts.push(`직접 경쟁 ${inverse}`);
   if (core > 0) parts.push(`핵심 ${core}`);
   if (business > 0) parts.push(`사업 ${business}`);
   if (context > 0) parts.push(`컨텍스트 ${context}`);
@@ -225,7 +226,7 @@ function RelationsExpanded({
       {core.length > 0 ? (
         <TierBlock
           tier="core"
-          title="🔑 핵심 신호"
+          title="핵심 신호"
           subtitle="filing 증거 또는 신뢰도 80%+ — 의사결정 직결"
           rels={core}
         />
@@ -233,7 +234,7 @@ function RelationsExpanded({
       {business.length > 0 ? (
         <TierBlock
           tier="business"
-          title="📝 사업 관계"
+          title="사업 관계"
           subtitle="기사·공시에 명시된 supplier·customer·competitor"
           rels={business}
         />
@@ -513,7 +514,7 @@ function ContextChips({ rels }: { rels: Relation[] }) {
 function SignalBadge({ direction }: { direction?: SignalDirection }) {
   if (direction === "inverse") {
     return (
-      <span className="text-blue-600 dark:text-blue-400" title="역(zero-sum) 신호">
+      <span className="text-blue-600 dark:text-blue-400" title="직접 경쟁 신호">
         ⇄
       </span>
     );
@@ -542,7 +543,7 @@ function InverseCallout({ inverses }: { inverses: Relation[] }) {
     <div className="relative rounded-md border-2 border-blue-500/40 dark:border-blue-500/30 bg-blue-500/5 pl-4 pr-3 py-3 before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:bg-blue-500 before:rounded-l-md before:content-['']">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded text-[10px] font-semibold">
-          zero-sum 신호
+          직접 경쟁 신호
         </span>
         <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">
           ⇄ 한쪽이 이기면 다른 쪽이 진다
@@ -591,7 +592,7 @@ function InverseCallout({ inverses }: { inverses: Relation[] }) {
       </ul>
       {inverses.length > TOP ? (
         <p className="mt-2 text-[11px] text-[var(--surface-text-subtle)]">
-          + zero-sum 경쟁자 {inverses.length - TOP}명 더 — 그래프에서 전체 보기
+          + 직접 경쟁자 {inverses.length - TOP}명 더 — 그래프에서 전체 보기
         </p>
       ) : null}
     </div>

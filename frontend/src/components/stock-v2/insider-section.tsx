@@ -1,5 +1,6 @@
 "use client";
 
+import { Landmark } from "lucide-react";
 import type { Insider } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -20,7 +21,7 @@ export function InsiderSection({ insider }: { insider: Insider }) {
   const compact = `최근 ${insider.window_days}일 임원 매매 신고 ${insider.filing_count}건`;
   return (
     <SectionShell
-      emoji="🏛️"
+      icon={<Landmark size={17} />}
       title="임원 매매 신고"
       compact={<span>{compact}</span>}
       expanded={<InsiderExpanded insider={insider} />}
@@ -33,7 +34,7 @@ export function InsiderSection({ insider }: { insider: Insider }) {
           <ul className="ml-3 space-y-0.5 list-disc">
             <li><strong>임원 매수가 많음</strong> — 회사 내부 사람들이 미래에 자신감 있다는 신호</li>
             <li><strong>임원 매도가 많음</strong> — 위험 신호일 수도, 단순 세금/옵션 행사일 수도</li>
-            <li>매수/매도 분류는 "원문 보기" 클릭으로 SEC 원본에서 확인</li>
+            <li>매수/매도 분류는 원문 보기 클릭으로 SEC 원본에서 확인</li>
           </ul>
           <p className="text-[var(--surface-text-muted)] mt-1">
             US 종목만. KR 대량보유공시(5%) 는 별도 출처 (추후).

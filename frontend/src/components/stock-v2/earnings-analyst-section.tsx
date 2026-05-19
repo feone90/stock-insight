@@ -1,5 +1,6 @@
 "use client";
 
+import { CalendarDays } from "lucide-react";
 import type { AnalystRating, Earnings, PriceTarget } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -29,7 +30,7 @@ export function EarningsAnalystSection({
   const compact = buildCompact(earnings, rating, priceTarget, currentPrice);
   return (
     <SectionShell
-      emoji="🗓️"
+      icon={<CalendarDays size={17} />}
       title="실적·분석가 의견"
       compact={<span>{compact}</span>}
       expanded={
@@ -188,7 +189,7 @@ function EarningsBlock({ earnings }: { earnings: Earnings }) {
         )})`;
   return (
     <div className="space-y-1">
-      <p className="font-medium">📊 실적 발표</p>
+      <p className="font-medium">실적 발표</p>
       <p className="text-[var(--surface-text-muted)]">{ddayLine}</p>
       {earnings.hour ? (
         <p className="text-[11px] text-[var(--surface-text-subtle)]">

@@ -1,5 +1,6 @@
 "use client";
 
+import { WalletCards } from "lucide-react";
 import type { Flow } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -22,7 +23,7 @@ export function FlowSection({ flow }: { flow: Flow }) {
   const compact = buildCompact(flow);
   return (
     <SectionShell
-      emoji="💰"
+      icon={<WalletCards size={17} />}
       title="수급 (외국인·기관)"
       compact={<span>{compact}</span>}
       expanded={<FlowExpanded flow={flow} />}
@@ -30,8 +31,8 @@ export function FlowSection({ flow }: { flow: Flow }) {
         <div className="space-y-1.5">
           <p>
             <strong>외국인·기관 투자자가 최근 5거래일 동안 얼마 사고 팔았는지</strong>.
-            한국 retail 매매 판단의 baseline — "외국인이 사들이는 종목"인지 "팔고
-            있는 종목"인지 한눈에.
+            한국 retail 매매 판단의 baseline — 외국인이 사들이는 종목인지 팔고
+            있는 종목인지 한눈에.
           </p>
           <ul className="ml-3 space-y-0.5 list-disc">
             <li><strong>양수</strong> = 순매수 (사들이는 중) — 보통 긍정 신호</li>

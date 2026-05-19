@@ -23,6 +23,7 @@ const STANCE_STRIPE_CLASS: Record<StanceAccent, string> = {
  */
 export function SectionShell({
   emoji,
+  icon,
   title,
   defaultOpen = false,
   highlight,
@@ -32,7 +33,8 @@ export function SectionShell({
   sources,
   helpText,
 }: {
-  emoji: string;
+  emoji?: string;
+  icon?: ReactNode;
   title: string;
   defaultOpen?: boolean;
   /** Optional surface-token key for emphasized sections (glance / decision). */
@@ -77,7 +79,12 @@ export function SectionShell({
           aria-expanded={open}
         >
           <span className="flex items-center gap-2.5 min-w-0 flex-1">
-            <span aria-hidden className="text-base shrink-0">{emoji}</span>
+            <span
+              aria-hidden
+              className="inline-flex size-5 shrink-0 items-center justify-center text-[var(--surface-text-muted)]"
+            >
+              {icon ?? <span className="text-base">{emoji}</span>}
+            </span>
             <span className="font-semibold text-[var(--surface-text)] shrink-0">
               {title}
             </span>

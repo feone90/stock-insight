@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckCircle2 } from "lucide-react";
 import type { Citation, Decision } from "@/types/card";
 import { CitationList } from "./citation-ref";
 import { SectionShell } from "./section-shell";
@@ -25,7 +26,7 @@ export function DecisionSection({
 
   return (
     <SectionShell
-      emoji="✅"
+      icon={<CheckCircle2 size={17} />}
       title="의사결정"
       defaultOpen
       stanceAccent={decision.stance}
@@ -57,7 +58,7 @@ function DecisionExpanded({
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         <div className="flex justify-between">
-          <dt className="text-[var(--surface-text-muted)]">Stance</dt>
+          <dt className="text-[var(--surface-text-muted)]">판단</dt>
           <dd>{STANCE_LABEL[decision.stance]}</dd>
         </div>
         {decision.support_price != null ? (

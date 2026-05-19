@@ -1,5 +1,6 @@
 "use client";
 
+import { Globe2 } from "lucide-react";
 import type { MacroContext } from "@/types/card";
 import { SectionShell } from "./section-shell";
 
@@ -12,7 +13,7 @@ export function MacroSection({ macro }: { macro: MacroContext }) {
 
   return (
     <SectionShell
-      emoji="🌐"
+      icon={<Globe2 size={17} />}
       title="매크로"
       compact={
         <span>
