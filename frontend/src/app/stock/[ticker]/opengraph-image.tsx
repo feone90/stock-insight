@@ -39,6 +39,22 @@ async function fetchStockMeta(ticker: string): Promise<StockMeta | null> {
   }
 }
 
+// 2026-05-19 — Korean font 필수. Edge ImageResponse 기본 폰트가 한글 cover
+// 안 해 처음 ship 시 Size=0 empty image 반환 (사용자가 "외국인 아저씨/집
+// 사진" — 카톡이 fallback page screenshot 잡은 상태). Pretendard 한국
+// product 인기 폰트 jsdelivr CDN.
+async function loadKoreanFont(): Promise<ArrayBuffer | null> {
+  try {
+    const res = await fetch(
+      "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/web/static/woff/Pretendard-Bold.woff",
+    );
+    if (!res.ok) return null;
+    return await res.arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
 function isKRMarket(market: string): boolean {
   return market === "KOSPI" || market === "KOSDAQ";
 }
@@ -49,7 +65,10 @@ export default async function OpengraphImage({
   params: Promise<{ ticker: string }>;
 }) {
   const { ticker } = await params;
-  const meta = await fetchStockMeta(ticker);
+  const [meta, fontData] = await Promise.all([
+    fetchStockMeta(ticker),
+    loadKoreanFont(),
+  ]);
 
   const name = meta?.name || ticker;
   const displayTicker = meta?.ticker || ticker;
@@ -81,7 +100,7 @@ export default async function OpengraphImage({
           flexDirection: "column",
           padding: 80,
           justifyContent: "space-between",
-          fontFamily: "sans-serif",
+          fontFamily: fontData ? "Pretendard" : "sans-serif",
         }}
       >
         {/* Top — Brand + market badge */}
@@ -168,6 +187,18 @@ export default async function OpengraphImage({
         </div>
       </div>
     ),
-    { ...size },
+    {
+      ...size,
+      fonts: fontData
+        ? [
+            {
+              name: "Pretendard",
+              data: fontData,
+              weight: 700,
+              style: "normal",
+            },
+          ]
+        : undefined,
+    },
   );
 }
