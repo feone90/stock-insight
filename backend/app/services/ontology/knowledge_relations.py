@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models import RelationCandidate, Stock, StockRelation
+from app.services.ontology.public_aliases import resolve_public_alias
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,8 @@ _PROMPT = """역할: 너는 30년 경력 펀더멘털 분석가다. 사용자의
 - 진짜 알 때만 — 일반적으로 알려진 공개 사실만. 안 확실하면 빠뜨려도 됨, 추측은 절대 금지.
 - target_ticker 는 빈 문자열, target_is_public=false 로 박을 것 — RelationCandidate 로
   자동 routing.
+- 단, 상장사의 사업부/제품 브랜드(예: cloud unit, app store, social app)는 비상장
+  회사가 아니다. 이 경우 target_ticker 는 listed parent ticker, target_is_public=true.
 
 분석 대상: {ticker} ({name}, market={market}, sector={sector})
 
@@ -260,6 +263,16 @@ async def _validate_and_persist(stock: Stock, raw_rels: list[dict]) -> dict:
 
         target_ticker = (r.get("target_ticker") or "").strip().upper()
         target_is_public = bool(r.get("target_is_public"))
+        alias = resolve_public_alias(target_name, target_ticker)
+        resolved_parent_ticker = None
+        resolved_parent_name = None
+        target_entity_kind = "company"
+        if alias is not None:
+            target_ticker = alias.parent_ticker
+            target_is_public = True
+            resolved_parent_ticker = alias.parent_ticker
+            resolved_parent_name = alias.parent_name
+            target_entity_kind = alias.entity_kind
 
         kept.append({
             "db_type": db_type,
@@ -272,6 +285,9 @@ async def _validate_and_persist(stock: Stock, raw_rels: list[dict]) -> dict:
             "target_name": target_name,
             "target_ticker": target_ticker,
             "target_is_public": target_is_public,
+            "resolved_parent_ticker": resolved_parent_ticker,
+            "resolved_parent_name": resolved_parent_name,
+            "target_entity_kind": target_entity_kind,
         })
 
     if not kept:
@@ -308,6 +324,9 @@ async def _persist(stock: Stock, kept: list[dict]) -> tuple[int, int]:
                 "target_is_public": r["target_is_public"],
                 "relation_kind_kr": r["relation_kind"],
                 "influence_channel": r["influence_channel"] or None,
+                "resolved_parent_ticker": r["resolved_parent_ticker"],
+                "resolved_parent_name": r["resolved_parent_name"],
+                "target_entity_kind": r["target_entity_kind"],
             }
             # strength = 0.5 baseline + importance step (3→0.5, 5→0.7).
             strength = min(0.5 + 0.1 * (r["importance"] - 3), 1.0)

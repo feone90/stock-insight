@@ -25,6 +25,7 @@ from app.services.ontology.evidence import (
     is_llm_source,
     rationale_admits_no_relationship,
 )
+from app.services.ontology.public_aliases import resolve_public_alias
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/ontology", tags=["ontology"])
@@ -319,15 +320,27 @@ async def _private_candidate_edges(
     candidates = (await session.execute(q)).scalars().all()
     edges: list[SimpleNamespace] = []
     for cand in candidates:
-        md = cand.extra_metadata or {}
+        md = dict(cand.extra_metadata or {})
+        alias = resolve_public_alias(md.get("target_name"), cand.to_ticker)
+        to_target = cand.to_ticker
+        if alias is not None:
+            to_target = alias.parent_ticker
+            md.update({
+                "target_is_public": True,
+                "resolved_parent_ticker": alias.parent_ticker,
+                "resolved_parent_name": alias.parent_name,
+                "target_entity_kind": alias.entity_kind,
+            })
+
         if md.get("target_is_public") is not False:
-            continue
+            if alias is None:
+                continue
         if not _relation_allowed_for_view(cand, view):
             continue
         edges.append(
             SimpleNamespace(
                 id=-cand.id,
-                to_target=cand.to_ticker,
+                to_target=to_target,
                 to_kind="stock",
                 relation_type=cand.relation_type,
                 signal_direction=cand.signal_direction,

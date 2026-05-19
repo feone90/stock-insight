@@ -142,3 +142,44 @@ async def test_outgoing_includes_private_candidate_as_virtual_business_target(db
     assert node["node_kind"] == "private"
     assert link["target_in_universe"] is False
     assert link["rationale"].startswith("Center relies on Private Infrastructure Lab")
+
+
+@pytest.mark.asyncio
+async def test_outgoing_normalizes_public_business_unit_candidate_to_parent_stock(db):
+    center = Stock(ticker="T999D", name="Center", market="NASDAQ", sector="AI", tier=1)
+    alphabet = Stock(
+        ticker="GOOGL", name="Alphabet Inc.", market="NASDAQ", sector="Communication Services", tier=1
+    )
+    db.add_all([center, alphabet])
+    await db.flush()
+    db.add(
+        RelationCandidate(
+            from_ticker=center.ticker,
+            to_ticker="Google Cloud",
+            relation_type="competitor",
+            strength=0.8,
+            source="llm_knowledge",
+            signal_direction="inverse",
+            confidence=0.86,
+            extra_metadata={
+                "target_name": "Google Cloud",
+                "target_is_public": False,
+                "business_importance": 4,
+                "rationale": (
+                    "Google Cloud competes directly for enterprise AI workloads; "
+                    "its cloud platform economics belong to listed parent Alphabet."
+                ),
+            },
+        )
+    )
+    await db.flush()
+
+    rels = await ontology._outgoing(
+        db, center.id, None,
+        ontology._effective_min_confidence(None, "business"),
+        10, "business",
+    )
+
+    assert {r.to_target for r in rels} == {"GOOGL"}
+    assert rels[0].extra_metadata["target_name"] == "Google Cloud"
+    assert rels[0].extra_metadata["resolved_parent_ticker"] == "GOOGL"

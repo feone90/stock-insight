@@ -300,6 +300,77 @@ async def test_knowledge_relations_persists_openai_as_candidate(db, monkeypatch)
     assert meta.get("target_is_public") is False
 
 
+@pytest.mark.asyncio
+async def test_knowledge_relations_routes_public_business_unit_to_parent_stock(
+    db, monkeypatch
+):
+    """Google Cloud 같은 상장사 사업부는 비상장 주식 후보가 아니라 parent
+    listed stock 관계로 저장해야 한다.
+    """
+    from app.services.ontology import knowledge_relations as kr
+
+    focal = Stock(ticker="TS9932", name="Focal Mirror", market="US", sector="IT", tier=1)
+    alphabet = Stock(
+        ticker="GOOGL", name="Alphabet Inc.", market="US", sector="Communication Services", tier=1
+    )
+    db.add_all([focal, alphabet])
+    await db.commit()
+
+    class _FakeAdapter:
+        async def generate_json(self, prompt: str) -> str:
+            import json
+
+            return json.dumps({
+                "relations": [
+                    {
+                        "target_name": "Google Cloud",
+                        "target_ticker": "",
+                        "target_is_public": False,
+                        "relation_kind": "핵심경쟁사",
+                        "influence_channel": "competitive_pressure",
+                        "business_importance": 4,
+                        "reasoning": (
+                            "Google Cloud competes directly for enterprise AI and "
+                            "cloud workloads; its economics are reported through "
+                            "listed parent Alphabet, so it should map to GOOGL."
+                        ),
+                        "knowledge_cutoff_risk": "low",
+                        "confidence": 0.86,
+                    }
+                ]
+            })
+
+    monkeypatch.setattr(
+        "app.services.llm.adapter.get_adapter", lambda: _FakeAdapter()
+    )
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _shared_session():
+        yield db
+
+    monkeypatch.setattr(
+        "app.services.ontology.knowledge_relations.async_session", _shared_session
+    )
+
+    summary = await kr.extract_knowledge_relations("TS9932")
+    assert summary.get("upserted_stock_relations", 0) == 1, summary
+    assert summary.get("upserted_candidates", 0) == 0, summary
+
+    rel = (
+        await db.execute(
+            select(StockRelation).where(
+                StockRelation.from_stock_id == focal.id,
+                StockRelation.source == "llm_knowledge",
+            )
+        )
+    ).scalar_one()
+    assert rel.to_target == "GOOGL"
+    assert rel.extra_metadata["target_name"] == "Google Cloud"
+    assert rel.extra_metadata["resolved_parent_ticker"] == "GOOGL"
+
+
 # ---------------------------------------------------------------------------
 # Case 8: Prompt structural integrity — 핵심 instruction 살아있나
 # (LLM call 없이 string-level 회귀 방지)
