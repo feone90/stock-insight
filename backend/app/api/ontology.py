@@ -10,6 +10,7 @@ Plan: docs/superpowers/plans/2026-04-28-ontology-aware-stock-card-implementation
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
@@ -32,17 +33,39 @@ _DEFAULT_DEPTH = 1
 _DEFAULT_TOP_N = 15  # per-node neighbor cap — 약한 sector_match가 카드를 도배하지 않게.
 # 2026-05-15 — sector_match (0.4) 자동 제외. 데이터 quality 확보된 source 만.
 _DEFAULT_MIN_CONFIDENCE = 0.5
+_CONTEXT_MIN_CONFIDENCE = 0.35
+
+BUSINESS_RELATION_TYPES = {
+    "competitor",
+    "contract_supplier",
+    "contract_customer",
+    "complementary",
+    "supply_upstream",
+    "supply_downstream",
+    "regulatory_link",
+}
+CONTEXT_RELATION_TYPES = {"peer", "group", "theme", "macro"}
+GraphView = Literal["business", "all"]
 
 
 @router.get("/graph")
 async def get_subgraph(
     ticker: str = Query(..., description="중심 종목 ticker"),
     depth: int = Query(_DEFAULT_DEPTH, ge=1, le=2, description="hop 수 1~2"),
+    view: GraphView = Query(
+        "business",
+        description="business=사업 관계만, all=동종업계/테마/매크로 참고 관계 포함",
+    ),
     sources: str | None = Query(
         None,
         description="콤마 구분 source 필터 (sector_match,sec_8k,news,dart_contract). 미지정 = 모두",
     ),
-    min_confidence: float = Query(_DEFAULT_MIN_CONFIDENCE, ge=0, le=1, description="confidence 하한 (기본 0.5 — sector_match 0.4 자동 제외)"),
+    min_confidence: float | None = Query(
+        None,
+        ge=0,
+        le=1,
+        description="confidence 하한. 미지정 시 business=0.5, all=0.35",
+    ),
     cap: int = Query(_MAX_NODES, ge=10, le=400, description="노드 개수 총 cap"),
     top_n: int = Query(_DEFAULT_TOP_N, ge=3, le=50, description="노드별 최강 N개만"),
 ) -> dict:
@@ -52,6 +75,7 @@ async def get_subgraph(
         if sources
         else None
     )
+    effective_min_confidence = _effective_min_confidence(min_confidence, view)
     normalized = ticker.upper() if ticker.isalpha() else ticker
     async with async_session() as session:
         center = (
@@ -64,6 +88,7 @@ async def get_subgraph(
 
         seen_ids: set[int] = {center.id}
         seen_tickers: dict[str, Stock] = {center.ticker: center}
+        virtual_nodes: dict[str, dict] = {}
         edges: list[dict] = []
 
         # BFS up to depth — frontier expands outward, capped at `cap` total nodes.
@@ -72,7 +97,10 @@ async def get_subgraph(
         for _hop in range(depth):
             next_frontier: list[Stock] = []
             for stock in frontier:
-                rels = await _outgoing(session, stock.id, source_filter, min_confidence, top_n)
+                rels = await _outgoing(
+                    session, stock.id, source_filter,
+                    effective_min_confidence, top_n, view,
+                )
                 target_tickers = [r.to_target for r in rels]
                 if not target_tickers:
                     continue
@@ -91,7 +119,7 @@ async def get_subgraph(
                     if is_llm_source(r.source):
                         md = r.extra_metadata or {}
                         rationale = md.get("rationale") if isinstance(md, dict) else None
-                        target_name = target_stock.name if target_stock else None
+                        target_name = target_stock.name if target_stock else r.to_target
                         if rationale_admits_no_relationship(rationale):
                             hallucination_ids.append(r.id)
                             logger.warning(
@@ -112,6 +140,7 @@ async def get_subgraph(
                             continue
                     edges.append(_link_dict(stock, r, target_stock))
                     if target_stock is None:
+                        virtual_nodes.setdefault(r.to_target, _virtual_node_dict(r))
                         continue
                     if target_stock.id in seen_ids:
                         continue
@@ -125,6 +154,7 @@ async def get_subgraph(
                 break
 
         nodes = [_node_dict(s, is_center=s.id == center.id) for s in seen_tickers.values()]
+        nodes.extend(virtual_nodes.values())
 
         # Fire-and-forget soft-delete — response 지연 X.
         if hallucination_ids:
@@ -165,6 +195,7 @@ async def _outgoing(
     source_filter: set[str] | None,
     min_conf: float,
     top_n: int,
+    view: GraphView,
 ) -> list[StockRelation]:
     """cross-market 우선 + same-market 보완으로 top_n. 그래프가 KR/US 균형있게
     표시되도록. (이전: confidence × strength DESC만 → KR sector_match가
@@ -180,7 +211,6 @@ async def _outgoing(
     def _base():
         q = (
             select(StockRelation)
-            .join(Stock, Stock.ticker == StockRelation.to_target)
             .where(
                 StockRelation.from_stock_id == from_id,
                 StockRelation.is_active.is_(True),
@@ -192,17 +222,74 @@ async def _outgoing(
             q = q.where(StockRelation.source.in_(source_filter))
         return q
 
+    rels = [
+        r for r in (await session.execute(_base().limit(top_n * 6))).scalars().all()
+        if _relation_allowed_for_view(r, view)
+    ]
+    if not rels:
+        return []
+
+    target_tickers = [r.to_target for r in rels]
+    target_stocks = (
+        await session.execute(select(Stock).where(Stock.ticker.in_(target_tickers)))
+    ).scalars().all()
+    target_by_ticker = {s.ticker: s for s in target_stocks}
+
+    def _score(rel: StockRelation) -> float:
+        return rel.confidence * rel.strength
+
+    cross: list[StockRelation] = []
+    same: list[StockRelation] = []
+    virtual: list[StockRelation] = []
+    for rel in rels:
+        target = target_by_ticker.get(rel.to_target)
+        if target is None:
+            virtual.append(rel)
+            continue
+        if target.market in cross_targets:
+            cross.append(rel)
+        elif target.market in same_targets:
+            same.append(rel)
+        else:
+            virtual.append(rel)
+
+    cross.sort(key=_score, reverse=True)
+    same.sort(key=_score, reverse=True)
+    virtual.sort(key=_score, reverse=True)
+
     # cross-market relations 먼저 (절반 + 1 reserved)
     cross_cap = max(1, top_n // 2)
-    cross_q = _base().where(Stock.market.in_(cross_targets)).limit(cross_cap)
-    cross = list((await session.execute(cross_q)).scalars().all())
+    picked = cross[:cross_cap]
 
-    remaining = top_n - len(cross)
+    remaining = top_n - len(picked)
     if remaining <= 0:
-        return cross
-    same_q = _base().where(Stock.market.in_(same_targets)).limit(remaining)
-    same = list((await session.execute(same_q)).scalars().all())
-    return cross + same
+        return picked
+    # Private/theme targets are not expandable, but they are often the missing
+    # business answer (OpenAI, SpaceX, AI theme). Reserve a small lane for them
+    # before same-market peers fill the graph.
+    virtual_cap = min(len(virtual), max(1, top_n // 4), remaining)
+    if virtual_cap > 0:
+        picked.extend(virtual[:virtual_cap])
+
+    remaining = top_n - len(picked)
+    if remaining > 0:
+        picked.extend(same[:remaining])
+    return picked
+
+
+def _effective_min_confidence(
+    min_confidence: float | None,
+    view: GraphView,
+) -> float:
+    if min_confidence is not None:
+        return min_confidence
+    return _CONTEXT_MIN_CONFIDENCE if view == "all" else _DEFAULT_MIN_CONFIDENCE
+
+
+def _relation_allowed_for_view(rel: StockRelation, view: GraphView) -> bool:
+    if view == "all":
+        return True
+    return rel.relation_type in BUSINESS_RELATION_TYPES
 
 
 def _node_dict(s: Stock, *, is_center: bool) -> dict:
@@ -215,6 +302,28 @@ def _node_dict(s: Stock, *, is_center: bool) -> dict:
         "tier": s.tier,
         "is_center": is_center,
         "today_change_pct": s.change_percent,
+        "node_kind": "stock",
+        "is_virtual": False,
+    }
+
+
+def _virtual_node_dict(rel: StockRelation) -> dict:
+    node_kind = (
+        "theme" if rel.relation_type == "theme" or rel.to_kind == "theme"
+        else "macro" if rel.relation_type == "macro" or rel.to_kind == "macro"
+        else "private"
+    )
+    return {
+        "id": rel.to_target,
+        "ticker": rel.to_target,
+        "name": rel.to_target,
+        "market": "PRIVATE" if node_kind == "private" else node_kind.upper(),
+        "sector": None,
+        "tier": 3,
+        "is_center": False,
+        "today_change_pct": None,
+        "node_kind": node_kind,
+        "is_virtual": True,
     }
 
 

@@ -12,6 +12,8 @@ export interface GraphNode {
   tier: number;
   is_center: boolean;
   today_change_pct: number | null;
+  node_kind?: "stock" | "private" | "theme" | "macro";
+  is_virtual?: boolean;
 }
 
 export interface GraphLink {

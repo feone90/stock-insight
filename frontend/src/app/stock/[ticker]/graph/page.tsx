@@ -21,16 +21,16 @@ export default function StockGraphPage() {
             >
               ← {ticker.toUpperCase()} 카드로
             </Link>
-            <h1 className="text-lg font-semibold tracking-tight">Ontology</h1>
+            <h1 className="text-lg font-semibold tracking-tight">사업 관계망</h1>
             <span className="text-xs text-[var(--surface-text-muted)]">
-              종목 관계 그래프
+              종목 간 직접·연쇄 관계
             </span>
           </div>
         </div>
         <p className="mb-3 text-sm text-[var(--surface-text-muted)]">
-          중심 종목과 직접 / 간접 관계가 있는 종목들. 노드 클릭 시 해당 종목 카드로 이동.
+          중심 종목과 사업상 연결된 고객·공급망·경쟁·상호보완 관계를 보여줍니다.
           <span className="ml-1 text-[var(--surface-text-subtle)]">
-            · 선(엣지)을 클릭하면 “왜 이 관계인지” 근거가 우측에 표시됩니다.
+            선을 클릭하면 왜 연결됐는지와 출처를 확인할 수 있습니다.
           </span>
         </p>
         <OntologyGraph ticker={ticker} />

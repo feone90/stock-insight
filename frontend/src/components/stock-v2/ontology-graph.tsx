@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { getOntologyGraph } from "@/services/api";
 import { useTheme } from "@/lib/use-theme";
 import type { GraphLink, GraphNode, GraphPayload } from "@/types/ontology";
@@ -68,14 +67,6 @@ const SOURCE_LABEL_KO: Record<string, string> = {
   llm_web_search: "웹 탐색",
 };
 
-const SOURCE_COLOR: Record<string, string> = {
-  sec_8k: "#2563eb",
-  dart_contract: "#f59e0b",
-  news: "#dc2626",
-  sector_match: "rgba(148, 163, 184, 0.35)",
-  curated_relation: "#a855f7",
-};
-
 const TIER_COLOR_LIGHT: Record<number, string> = {
   1: "#1f2937", // slate 800
   2: "#0ea5e9", // sky 500 — user-touched
@@ -86,6 +77,15 @@ const TIER_COLOR_DARK: Record<number, string> = {
   2: "#38bdfa",
   3: "#475569",
 };
+
+const VIRTUAL_NODE_COLOR: Record<NonNullable<GraphNode["node_kind"]>, string> = {
+  stock: "#64748b",
+  private: "#a855f7",
+  theme: "#db2777",
+  macro: "#ea580c",
+};
+
+type GraphView = "business" | "all";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ForceGraphRef = any;
@@ -126,9 +126,8 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
   const [error, setError] = useState<string | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [depth, setDepth] = useState(1);
+  const [view, setView] = useState<GraphView>("business");
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
-  // 카드 3-tier UI 와 일관 — sector peer 숨기면 진짜 신호만 한눈에.
-  const [showContext, setShowContext] = useState(true);
   const { mode } = useTheme();
 
   // 노드 간 거리 / charge 강하게 — 라벨 안 겹치게.
@@ -145,9 +144,19 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    setError(null);
-    setData(null);
-    getOntologyGraph(ticker, { depth, cap: 200 })
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setError(null);
+        setData(null);
+        setSelectedLink(null);
+      }
+    });
+    getOntologyGraph(ticker, {
+      depth,
+      view,
+      cap: view === "all" ? 260 : 180,
+      topN: view === "all" ? 30 : 18,
+    })
       .then((d) => {
         if (!cancelled) setData(d);
       })
@@ -157,7 +166,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
     return () => {
       cancelled = true;
     };
-  }, [ticker, depth]);
+  }, [ticker, depth, view]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -177,27 +186,14 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
     };
   }, []);
 
-  // Data shape that react-force-graph mutates in place — useMemo so the
-  // simulation isn't reset on every parent re-render. Context filter 도
-  // 이 시점에 적용 — toggle 시 새 simulation 으로 re-layout.
+  // Data shape that react-force-graph mutates in place — copy so the original
+  // API payload stays stable while the canvas library mutates node positions.
   const graphData = useMemo(() => {
     if (!data) return null;
-    const links = data.links
-      .map((l) => ({ ...l }))
-      .filter((l) => showContext || classifyEdgeTier(l) !== "context");
-    // context hide 시 고립 노드도 제거. center 는 항상 keep.
-    const linkedTickers = new Set<string>();
-    for (const l of links) {
-      const s = typeof l.source === "string" ? l.source : (l.source as unknown as { ticker?: string })?.ticker;
-      const t = typeof l.target === "string" ? l.target : (l.target as unknown as { ticker?: string })?.ticker;
-      if (s) linkedTickers.add(s);
-      if (t) linkedTickers.add(t);
-    }
-    const nodes = data.nodes
-      .map((n) => ({ ...n }))
-      .filter((n) => showContext || n.is_center || linkedTickers.has(n.ticker));
+    const links = data.links.map((l) => ({ ...l }));
+    const nodes = data.nodes.map((n) => ({ ...n }));
     return { nodes, links };
-  }, [data, showContext]);
+  }, [data]);
 
   const tierCounts = useMemo(() => {
     if (!data) return { core: 0, business: 0, context: 0 };
@@ -242,37 +238,45 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
           <span>사업 {tierCounts.business}</span>
           {" · "}
           <span className="text-[var(--surface-text-subtle)]">
-            컨텍스트 {tierCounts.context}
+            참고 {tierCounts.context}
           </span>
         </span>
         <div className="flex gap-1">
-          {[1, 2].map((d) => (
+          {[
+            { value: 1, label: "직접 관계" },
+            { value: 2, label: "연쇄 관계" },
+          ].map((opt) => (
             <button
-              key={d}
+              key={opt.value}
               type="button"
-              onClick={() => setDepth(d)}
+              onClick={() => setDepth(opt.value)}
               className={`px-2.5 py-1 rounded text-xs border transition-colors ${
-                d === depth
+                opt.value === depth
                   ? "bg-blue-600 text-white border-blue-600"
                   : "border-[var(--surface-border)] hover:bg-[var(--surface-section-hover)]"
               }`}
             >
-              {d}-hop
+              {opt.label}
             </button>
           ))}
         </div>
         <button
           type="button"
-          onClick={() => setShowContext((v) => !v)}
+          onClick={() => setView((v) => (v === "business" ? "all" : "business"))}
           className={`px-2.5 py-1 rounded text-xs border transition-colors ${
-            showContext
+            view === "business"
               ? "border-[var(--surface-border)] text-[var(--surface-text-muted)] hover:bg-[var(--surface-section-hover)]"
               : "bg-amber-500 text-white border-amber-500"
           }`}
-          title="동종업계 / 그룹 / 테마 같은 컨텍스트 관계 숨기기 → 핵심 신호만 한눈에"
+          title="사업 관계만 볼지, 동종업계·테마·매크로 같은 참고 관계까지 함께 볼지 전환"
         >
-          {showContext ? "🎯 핵심만 보기" : "🔗 컨텍스트도 보기"}
+          {view === "business" ? "참고 관계도 보기" : "사업 관계만 보기"}
         </button>
+        {view === "all" && tierCounts.context === 0 ? (
+          <span className="text-xs text-[var(--surface-text-subtle)]">
+            표시할 참고 관계 없음
+          </span>
+        ) : null}
         <Legend />
       </div>
       <div
@@ -300,9 +304,17 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             nodeColor={(n) =>
               (n as GraphNode).is_center
                 ? "#f59e0b"
-                : tierColors[(n as GraphNode).tier] ?? tierColors[1]
+                : (n as GraphNode).is_virtual
+                  ? VIRTUAL_NODE_COLOR[(n as GraphNode).node_kind ?? "private"]
+                  : tierColors[(n as GraphNode).tier] ?? tierColors[1]
             }
-            nodeVal={(n) => ((n as GraphNode).is_center ? 6 : 1.5)}
+            nodeVal={(n) =>
+              (n as GraphNode).is_center
+                ? 6
+                : (n as GraphNode).is_virtual
+                  ? 2.6
+                  : 1.5
+            }
             nodeLabel={(n) => {
               const node = n as GraphNode;
               const change = node.today_change_pct;
@@ -310,7 +322,15 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
                 change == null
                   ? ""
                   : ` · ${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
-              return `${node.name} (${node.ticker})${changeStr} · ${node.sector ?? ""}`;
+              const kind =
+                node.node_kind === "private"
+                  ? "비상장 핵심 관계"
+                  : node.node_kind === "theme"
+                    ? "테마"
+                    : node.node_kind === "macro"
+                      ? "매크로"
+                      : node.sector ?? "";
+              return `${node.name} (${node.ticker})${changeStr} · ${kind}`;
             }}
             nodeCanvasObjectMode={() => "after"}
             nodeCanvasObject={(n, ctx, scale) => {
@@ -327,7 +347,9 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
               const radius = node.is_center ? 11 : 5;
               const label = node.is_center
                 ? node.name
-                : `${node.name} (${node.ticker})`;
+                : node.is_virtual
+                  ? node.name
+                  : `${node.name} (${node.ticker})`;
               ctx.fillText(label, node.x, node.y + radius + 3);
             }}
             linkColor={(l) => {
@@ -498,13 +520,16 @@ function Legend() {
   return (
     <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--surface-text-muted)]">
       <span className="flex items-center gap-1">
-        <LineSwatch color="#dc2626" thick /> 🔑 핵심 (filing·고신뢰)
+        <LineSwatch color="#dc2626" thick /> 핵심
       </span>
       <span className="flex items-center gap-1">
-        <LineSwatch color="#a855f7" /> 📝 사업 (뉴스 인용)
+        <LineSwatch color="#a855f7" /> 사업 관계
       </span>
       <span className="flex items-center gap-1">
-        <LineSwatch color="rgba(148,163,184,0.4)" /> 🔗 컨텍스트 (동종)
+        <LineSwatch color="rgba(148,163,184,0.4)" /> 참고 관계
+      </span>
+      <span className="flex items-center gap-1">
+        <Dot color="#a855f7" /> 비상장·테마
       </span>
       <span className="flex items-center gap-1">
         <span
