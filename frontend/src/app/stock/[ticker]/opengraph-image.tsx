@@ -1,11 +1,15 @@
 import { ImageResponse } from "next/og";
 
 /**
- * Dynamic OG image per stock — Next.js 16 file convention.
+ * Dynamic OG image per stock — Next.js 16 file convention. 카톡/Slack/X
+ * 공유 시 미리보기 카드 자동 생성. backend `/api/stocks/{ticker}` 에서 종목명
+ * 가격 변동률 fetch → 1200×630 PNG 렌더.
  *
- * 2026-05-19 — step 2-b: 3-section 풀 레이아웃 복원. step 2 (대대적) → 500
- * 였던 원인 가설: JSX 텍스트 mixing (`{a} · {b}`) 이 Satori 에서 multi-child
- * 로 인식되어 비-flex div fail. → 모든 텍스트 단일 string 으로 concat.
+ * Satori 주의:
+ *   - JSX 인라인 텍스트 mixing (`{a} · {b}`) 은 비-flex div 에서 fail.
+ *     모든 텍스트 single string 으로 concat (`${a} · ${b}`).
+ *   - `lineHeight` 와 일부 CSS prop 미지원 — 단순한 marginBottom 으로.
+ * 색상 convention: KR (상승=빨강, 하락=파랑) — 국내 사용자 기준.
  */
 
 export const alt = "StockInsight 종목 카드";
