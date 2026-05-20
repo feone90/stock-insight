@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.collectors.news import _sync_yfinance_news, sync_news
+from app.collectors.news import (
+    _build_newsapi_query,
+    _is_stock_specific_news,
+    _sync_yfinance_news,
+    sync_news,
+)
 
 
 def _make_stock(ticker="TSLA", market="NASDAQ"):
@@ -74,7 +79,7 @@ class TestSyncYfinanceNews:
 
     @pytest.mark.asyncio
     @patch("app.collectors.news._fetch_yfinance_news", return_value=[
-        {"title": "No timestamp", "link": "https://www.reuters.com/no-ts", "publisher": "Test"},
+        {"title": "Tesla no timestamp", "link": "https://www.reuters.com/no-ts", "publisher": "Test"},
     ])
     async def test_missing_timestamp(self, mock_fetch):
         db = AsyncMock()
@@ -101,6 +106,53 @@ class TestSyncYfinanceNews:
         assert result["news_synced"] == 0
         # insert 자체가 호출되지 않아야 함 — filter 가 먼저 차단
         assert db.execute.await_count == 0
+
+    @pytest.mark.asyncio
+    @patch("app.collectors.news._fetch_yfinance_news", return_value=[
+        {
+            "title": "Nvidia and Apple hold stock market power",
+            "link": "https://finance.yahoo.com/sectors/technology/article/nvidia-apple",
+            "publisher": "Yahoo Finance",
+            "summary": "The S&P 500 has become more concentrated in two stocks.",
+            "providerPublishTime": int(time.time()) - 3600,
+        },
+        {
+            "title": "Why Microsoft stock is trading up today",
+            "link": "https://finance.yahoo.com/markets/stocks/articles/msft-up",
+            "publisher": "Yahoo Finance",
+            "summary": "Microsoft shares rose after Azure demand improved.",
+            "providerPublishTime": int(time.time()) - 3600,
+        },
+    ])
+    async def test_yfinance_drops_non_stock_specific_market_items(self, mock_fetch):
+        db = AsyncMock()
+        result_mock = MagicMock()
+        result_mock.rowcount = 1
+        db.execute = AsyncMock(return_value=result_mock)
+
+        stock = _make_stock("MSFT", "NASDAQ")
+        stock.name = "Microsoft Corporation"
+        result = await _sync_yfinance_news(db, stock)
+
+        assert result["news_synced"] == 1
+        assert db.execute.await_count == 1
+
+    def test_stock_specific_news_matches_simplified_us_company_name(self):
+        stock = _make_stock("MSFT", "NASDAQ")
+        stock.name = "Microsoft Corporation"
+
+        assert _is_stock_specific_news(stock, "Why Microsoft stock is up", "")
+        assert not _is_stock_specific_news(stock, "Nvidia and Apple lead the market", "")
+
+    def test_newsapi_query_includes_simplified_company_name(self):
+        stock = _make_stock("MSFT", "NASDAQ")
+        stock.name = "Microsoft Corporation"
+
+        query = _build_newsapi_query(stock)
+
+        assert '"Microsoft"' in query
+        assert '"Microsoft Corporation"' in query
+        assert "MSFT" in query
 
 
 class TestSyncNewsRouting:

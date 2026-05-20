@@ -293,7 +293,7 @@ async def test_fetch_recent_news_filters_older_than_14_days(db_for_data_layer):
             stock_id=s.id, title="NW Corp recent", source="src",
             url="https://e.com/recent",
             published_at=datetime.utcnow() - timedelta(days=2),
-            content="NW Corp recent",
+            content="NW Corp recent " * 12,
         ),
         News(
             stock_id=s.id, title="too old", source="src",
@@ -324,7 +324,7 @@ async def test_fetch_recent_news_prioritizes_stock_specific_items(db_for_data_la
             source="src",
             url="https://e.com/samsung-labor",
             published_at=now,
-            content="삼성전자 노사 협상 기사",
+            content="삼성전자 노사 협상 기사 " * 20,
         ),
         News(
             stock_id=s.id,
@@ -332,7 +332,7 @@ async def test_fetch_recent_news_prioritizes_stock_specific_items(db_for_data_la
             source="src",
             url="https://e.com/sk-hbm",
             published_at=now - timedelta(minutes=5),
-            content="SK하이닉스 HBM 수요가 늘고 있다는 기사",
+            content="SK하이닉스 HBM 수요가 늘고 있다는 기사 " * 20,
         ),
     ])
     await db.commit()
@@ -368,8 +368,8 @@ async def test_build_news_creates_summary_when_content_is_empty(monkeypatch):
     )
 
     assert items[0].summary
-    assert "핵심:" in items[0].summary
-    assert "HBM 공급 확대 기대" in items[0].summary
+    assert "본문을 아직 확보하지 못해" in items[0].summary
+    assert "HBM 공급 확대 기대" not in items[0].summary
 
 
 @pytest.mark.asyncio
@@ -408,6 +408,47 @@ async def test_build_news_surfaces_body_quote_and_importance(monkeypatch):
     assert items[0].summary.startswith("경영평가 1위")
     assert items[0].key_quote == "SK하이닉스는 800점 만점에 최고점인 648.3점을 받아 종합 1위에 올랐다."
     assert items[0].why_it_matters.startswith("AI 메모리 수요")
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_news_drops_caption_duplicates(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="TSTCAP", name="삼성전자", market="KRX", sector="반도체", current_price=10)
+    db.add(s)
+    await db.flush()
+    now = datetime.utcnow()
+    db.add_all([
+        News(
+            stock_id=s.id,
+            title="협상장 향하는 여명구 삼성전자 사측 대표교섭위원",
+            source="뉴시스",
+            url="https://e.com/photo1",
+            published_at=now,
+            content="",
+        ),
+        News(
+            stock_id=s.id,
+            title="회의장 향하는 여명구 삼성전자 사측 대표교섭위원",
+            source="뉴시스",
+            url="https://e.com/photo2",
+            published_at=now - timedelta(minutes=1),
+            content="",
+        ),
+        News(
+            stock_id=s.id,
+            title="삼성전자 노사, 임금협상 재개",
+            source="src",
+            url="https://e.com/labor",
+            published_at=now - timedelta(minutes=2),
+            content="삼성전자 노사가 임금협상을 재개했고 반도체 생산 차질 가능성을 낮추는 방향으로 논의를 이어갔다. " * 5,
+        ),
+    ])
+    await db.commit()
+
+    res = await _fetch_recent_news("TSTCAP")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == ["삼성전자 노사, 임금협상 재개"]
 
 
 @pytest.mark.asyncio

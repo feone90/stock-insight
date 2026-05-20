@@ -12,6 +12,7 @@ land in the final card; `engine.compose` reconciles the two layers.
 from __future__ import annotations
 
 import asyncio
+from difflib import SequenceMatcher
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -73,6 +74,10 @@ _VALID_NEWS_IMPACTS = {"positive", "negative", "mixed", "neutral"}
 _BROAD_MARKET_TERMS = (
     "코스피", "코스닥", "증시", "시황", "장 초반", "장중", "외국인",
     "기관", "금리", "환율", "뉴욕증시", "나스닥", "시장",
+)
+_LOW_INFORMATION_NEWS_TERMS = (
+    "향하는", "입장하는", "퇴장하는", "발언하는", "답하는", "악수하는",
+    "기념촬영", "포즈", "회의장", "협상장",
 )
 
 
@@ -467,6 +472,8 @@ def _simplify_company_name(name: str | None) -> str:
 def _news_relevance_score(stock: Stock, row: News) -> int:
     title = row.title or ""
     content = row.content or ""
+    if len(content.strip()) < 120:
+        return -20
     title_norm = _compact_text(title)
     body_norm = _compact_text(content)
     aliases = [_compact_text(a) for a in _stock_news_aliases(stock)]
@@ -482,8 +489,27 @@ def _news_relevance_score(stock: Stock, row: News) -> int:
 
     if any(term in title for term in _BROAD_MARKET_TERMS):
         score -= 2
+    if _is_low_information_news(title, content):
+        score -= 10
     # If the article never names the stock, it is not a stock-specific card item.
     return score
+
+
+def _is_low_information_news(title: str, body: str) -> bool:
+    if len((body or "").strip()) >= 120:
+        return False
+    return any(term in title for term in _LOW_INFORMATION_NEWS_TERMS)
+
+
+def _is_near_duplicate_news(title: str, seen_titles: list[str]) -> bool:
+    normalized = _compact_text(title)
+    if not normalized:
+        return False
+    for seen in seen_titles:
+        ratio = SequenceMatcher(None, normalized, seen).ratio()
+        if ratio >= 0.84:
+            return True
+    return False
 
 
 def _news_summary(raw_summary: str, title: str) -> str:
@@ -504,7 +530,7 @@ def _fallback_news_analysis(raw_summary: str, title: str) -> dict[str, str | Non
     if not clean_title:
         return {"summary": "", "key_quote": None, "why_it_matters": None}
     return {
-        "summary": f"핵심: {clean_title}"[:NEWS_SUMMARY_MAX],
+        "summary": "본문을 아직 확보하지 못해 제목만으로는 투자 의미를 단정하지 않습니다.",
         "key_quote": None,
         "why_it_matters": None,
     }
@@ -1009,7 +1035,18 @@ async def _fetch_recent_news(ticker: str) -> dict:
             key=lambda item: (item[0], item[1].published_at or datetime.min),
             reverse=True,
         )
-        rows = [n for score, n in ranked if score > 0][:15]
+        deduped: list[News] = []
+        seen_titles: list[str] = []
+        for score, n in ranked:
+            if score <= 0:
+                continue
+            if _is_near_duplicate_news(n.title or "", seen_titles):
+                continue
+            deduped.append(n)
+            seen_titles.append(_compact_text(n.title or ""))
+            if len(deduped) >= 15:
+                break
+        rows = deduped
         items = [
             {
                 "title": n.title,

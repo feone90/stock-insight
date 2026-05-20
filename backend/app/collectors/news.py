@@ -19,6 +19,39 @@ from app.models.news import News
 logger = logging.getLogger(__name__)
 
 
+def _compact_text(value: str | None) -> str:
+    return re.sub(r"[^0-9a-zA-Z가-힣]+", "", value or "").lower()
+
+
+def _simplify_company_name(name: str | None) -> str:
+    if not name:
+        return ""
+    cleaned = re.sub(
+        r"\b(incorporated|inc|corp|corporation|company|co|ltd|limited|plc|holdings|holding|class\s+[a-z])\b\.?",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", cleaned.replace(",", " ")).strip()
+
+
+def _stock_news_aliases(stock: Stock) -> set[str]:
+    aliases = {stock.ticker, stock.name}
+    simplified = _simplify_company_name(stock.name)
+    if simplified:
+        aliases.add(simplified)
+        first_token = simplified.split(" ", 1)[0]
+        if len(first_token) >= 4:
+            aliases.add(first_token)
+    return {alias for alias in aliases if alias}
+
+
+def _is_stock_specific_news(stock: Stock, title: str, body: str = "") -> bool:
+    text = _compact_text(f"{title} {body}")
+    aliases = [_compact_text(alias) for alias in _stock_news_aliases(stock)]
+    return any(alias and len(alias) >= 2 and alias in text for alias in aliases)
+
+
 def strip_html(text: str) -> str:
     """HTML 태그 제거."""
     return re.sub(r"<[^>]+>", "", text)
@@ -145,6 +178,10 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
         if not is_trusted_us(url):
             skipped += 1
             continue
+        article_body = content.get("summary") or content.get("description") or ""
+        if not _is_stock_specific_news(stock, title, article_body):
+            skipped += 1
+            continue
 
         stmt = insert(News).values(
             stock_id=stock.id,
@@ -152,6 +189,7 @@ async def _sync_yfinance_news(db: AsyncSession, stock: Stock) -> dict:
             source=publisher,
             url=url[:1000],
             published_at=pub_date,
+            content=article_body or None,
         ).on_conflict_do_nothing(constraint="uq_news_stock_url")
         result = await db.execute(stmt)
         if result.rowcount > 0:
@@ -195,8 +233,16 @@ def _build_newsapi_query(stock: Stock) -> str:
     """
     name = (stock.name or "").strip()
     ticker = (stock.ticker or "").strip()
-    if name and ticker:
-        return f'"{name}" OR {ticker}'
+    simplified = _simplify_company_name(name)
+    parts = []
+    if simplified and simplified != name:
+        parts.append(f'"{simplified}"')
+    if name:
+        parts.append(f'"{name}"')
+    if ticker:
+        parts.append(ticker)
+    if parts:
+        return " OR ".join(parts)
     return name or ticker
 
 

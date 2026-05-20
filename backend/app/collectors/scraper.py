@@ -1,9 +1,10 @@
 """뉴스 기사 본문 스크래핑."""
 
 import asyncio
+import json
 import logging
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from sqlalchemy import func, select
@@ -24,7 +25,24 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/131.0.0.0 Safari/537.36"
     ),
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
 }
+
+DOMAIN_SELECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("n.news.naver.com", ("#dic_area", "#newsct_article")),
+    ("news.naver.com", ("#dic_area", "#newsct_article")),
+    ("finance.yahoo.com", ("[data-testid='article-body']", ".caas-body", ".article-content", "article")),
+    ("fool.com", ("[data-test-id='article-body']", ".article-body", "article")),
+    ("thestreet.com", (".m-detail--body", ".article-body", ".article-content", "article")),
+)
+GENERIC_SELECTORS = (
+    "article",
+    ".article-body",
+    ".article-content",
+    ".entry-content",
+    "[itemprop='articleBody']",
+    "main",
+)
 
 
 async def _fetch_html(url: str) -> str | None:  # pragma: no cover
@@ -41,11 +59,20 @@ async def _fetch_html(url: str) -> str | None:  # pragma: no cover
         return None
 
 
-def _extract_text(html: str) -> str | None:  # pragma: no cover
-    """trafilatura로 HTML에서 기사 본문을 추출한다."""
+def _extract_text(html: str, url: str = "") -> str | None:  # pragma: no cover
+    """Extract article body with site selectors first, then generic engines."""
+    selector_text = _extract_text_with_selectors(html, url)
+    if selector_text:
+        return selector_text[:MAX_CONTENT_LENGTH]
+
+    jsonld_text = _extract_article_body_from_jsonld(html)
+    if jsonld_text:
+        return jsonld_text[:MAX_CONTENT_LENGTH]
+
     import trafilatura
 
-    return trafilatura.extract(html, include_comments=False, include_tables=False)
+    text = trafilatura.extract(html, include_comments=False, include_tables=False)
+    return _clean_extracted_text(text) if text else None
 
 
 async def fetch_article_content(url: str) -> str | None:
@@ -53,13 +80,15 @@ async def fetch_article_content(url: str) -> str | None:
     html = await _fetch_html(url)
     if not html:
         return None
+    content_url = url
     redirect_url = _extract_script_redirect_url(html, url)
     if redirect_url:
         redirected_html = await _fetch_html(redirect_url)
         if redirected_html:
             html = redirected_html
+            content_url = redirect_url
 
-    text = await asyncio.to_thread(_extract_text, html)
+    text = await asyncio.to_thread(_extract_text, html, content_url)
     if text:
         return text[:MAX_CONTENT_LENGTH]
     return None
@@ -75,6 +104,90 @@ def _extract_script_redirect_url(html: str, base_url: str) -> str | None:
     if not match:
         return None
     return urljoin(base_url, match.group(1))
+
+
+def _extract_text_with_selectors(html: str, url: str = "") -> str | None:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    selectors = list(_selectors_for_url(url)) + list(GENERIC_SELECTORS)
+    seen: set[str] = set()
+    for selector in selectors:
+        if selector in seen:
+            continue
+        seen.add(selector)
+        node = soup.select_one(selector)
+        if not node:
+            continue
+        text = _clean_extracted_text(node.get_text("\n", strip=True))
+        if text and len(text) >= MIN_CONTENT_LENGTH:
+            return text
+    return None
+
+
+def _selectors_for_url(url: str) -> tuple[str, ...]:
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    matched: list[str] = []
+    for domain, selectors in DOMAIN_SELECTORS:
+        if host == domain or host.endswith("." + domain):
+            matched.extend(selectors)
+    return tuple(matched)
+
+
+def _extract_article_body_from_jsonld(html: str) -> str | None:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script", type="application/ld+json"):
+        raw = script.string or script.get_text()
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        body = _find_jsonld_article_body(parsed)
+        text = _clean_extracted_text(body)
+        if text and len(text) >= MIN_CONTENT_LENGTH:
+            return text
+    return None
+
+
+def _find_jsonld_article_body(value: object) -> str | None:
+    if isinstance(value, dict):
+        body = value.get("articleBody")
+        if isinstance(body, str) and body.strip():
+            return body
+        graph = value.get("@graph")
+        if graph:
+            found = _find_jsonld_article_body(graph)
+            if found:
+                return found
+        for child in value.values():
+            found = _find_jsonld_article_body(child)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_jsonld_article_body(child)
+            if found:
+                return found
+    return None
+
+
+def _clean_extracted_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    lines = []
+    for raw_line in text.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+        if line in {"ADVERTISEMENT", "Advertisement", "광고"}:
+            continue
+        lines.append(line)
+    cleaned = "\n".join(lines).strip()
+    return cleaned or None
 
 
 async def scrape_news_content(

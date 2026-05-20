@@ -6,6 +6,7 @@ import pytest
 
 from app.collectors.scraper import (
     _extract_script_redirect_url,
+    _extract_text,
     fetch_article_content,
     scrape_news_content,
 )
@@ -65,8 +66,52 @@ class TestFetchArticleContent:
         assert result == "Redirected article body"
         assert mock_fetch.await_count == 2
         mock_extract.assert_called_once_with(
-            "<html><body>Redirected</body></html>"
+            "<html><body>Redirected</body></html>",
+            "https://n.news.naver.com/mnews/article/277/0005765419",
         )
+
+    def test_extracts_naver_article_selector(self):
+        html = """
+        <html><body>
+          <div id="dic_area">
+            SK하이닉스는 800점 만점에 최고점인 648.3점을 받아 종합 1위에 올랐다.
+            CEO스코어는 고속성장, 투자, 글로벌 경쟁력 등 8개 부문을 분석했다.
+            SK하이닉스는 고속성장과 투자 부문에서 높은 평가를 받았다.
+          </div>
+        </body></html>
+        """
+        result = _extract_text(html, "https://n.news.naver.com/mnews/article/277/0005765419")
+        assert result is not None
+        assert "648.3점" in result
+
+    def test_extracts_yahoo_article_selector(self):
+        html = """
+        <html><body>
+          <div data-testid="article-body">
+            <p>Microsoft shares rose after the company reported stronger Azure demand.</p>
+            <p>Analysts said enterprise AI spending remained resilient across large customers.</p>
+            <p>The move matters because cloud revenue is a key driver for Microsoft margins.</p>
+          </div>
+        </body></html>
+        """
+        result = _extract_text(
+            html,
+            "https://finance.yahoo.com/markets/stocks/articles/msft-up.html",
+        )
+        assert result is not None
+        assert "Azure demand" in result
+
+    def test_extracts_jsonld_article_body(self):
+        html = """
+        <html><head>
+          <script type="application/ld+json">
+            {"@type":"NewsArticle","articleBody":"Microsoft expanded its AI infrastructure investments as Azure demand continued. The article says cloud capacity remains a bottleneck for enterprise customers. This body is long enough for card analysis."}
+          </script>
+        </head></html>
+        """
+        result = _extract_text(html, "https://example.com/news")
+        assert result is not None
+        assert "AI infrastructure" in result
 
 
 class TestScrapeNewsContent:
