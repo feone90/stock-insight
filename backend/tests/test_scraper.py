@@ -51,7 +51,7 @@ class TestFetchArticleContent:
         assert result == "https://n.news.naver.com/mnews/article/277/0005765419"
 
     @pytest.mark.asyncio
-    @patch("app.collectors.scraper._extract_text", return_value="Redirected article body")
+    @patch("app.collectors.scraper._extract_text", side_effect=[None, "Redirected article body"])
     @patch(
         "app.collectors.scraper._fetch_html",
         new_callable=AsyncMock,
@@ -65,10 +65,20 @@ class TestFetchArticleContent:
 
         assert result == "Redirected article body"
         assert mock_fetch.await_count == 2
-        mock_extract.assert_called_once_with(
-            "<html><body>Redirected</body></html>",
-            "https://n.news.naver.com/mnews/article/277/0005765419",
-        )
+        assert mock_extract.call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("app.collectors.scraper._extract_text", return_value="Current page article body")
+    @patch(
+        "app.collectors.scraper._fetch_html",
+        new_callable=AsyncMock,
+        return_value="<html><body><script>location.href='/mnews/article/comment/119/0003092157'</script></body></html>",
+    )
+    async def test_does_not_follow_script_redirect_when_article_body_exists(self, mock_fetch, mock_extract):
+        result = await fetch_article_content("https://n.news.naver.com/mnews/article/119/0003092157")
+
+        assert result == "Current page article body"
+        assert mock_fetch.await_count == 1
 
     def test_extracts_naver_article_selector(self):
         html = """

@@ -80,6 +80,10 @@ async def fetch_article_content(url: str) -> str | None:
     html = await _fetch_html(url)
     if not html:
         return None
+    text = await asyncio.to_thread(_extract_text, html, url)
+    if text:
+        return text[:MAX_CONTENT_LENGTH]
+
     content_url = url
     redirect_url = _extract_script_redirect_url(html, url)
     if redirect_url:

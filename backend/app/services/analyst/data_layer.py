@@ -479,15 +479,26 @@ def _news_relevance_score(stock: Stock, row: News) -> int:
     aliases = [_compact_text(a) for a in _stock_news_aliases(stock)]
 
     score = 0
+    title_matched = False
+    body_mentions = 0
     for alias in aliases:
         if not alias or len(alias) < 2:
             continue
         if alias in title_norm:
             score += 8
+            title_matched = True
         elif alias in body_norm:
-            score += 3
+            mentions = body_norm.count(alias)
+            body_mentions = max(body_mentions, mentions)
+            score += min(mentions, 3)
+
+    # A single body-only mention in a market wrap/list is not a company news item.
+    if not title_matched and body_mentions < 2:
+        return -10
 
     if any(term in title for term in _BROAD_MARKET_TERMS):
+        if not title_matched:
+            return -10
         score -= 2
     if _is_low_information_news(title, content):
         score -= 10

@@ -452,6 +452,45 @@ async def test_fetch_recent_news_drops_caption_duplicates(db_for_data_layer):
 
 
 @pytest.mark.asyncio
+async def test_fetch_recent_news_drops_market_wrap_single_mention(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="TSTKOLON", name="코오롱티슈진", market="KOSDAQ", sector="바이오", current_price=10)
+    db.add(s)
+    await db.flush()
+    now = datetime.utcnow()
+    market_wrap = (
+        "코스피 지수가 외국인 투자자들의 투매 영향으로 하락 마감했다. "
+        "코스닥 시가총액 상위 10개 종목 가운데 에코프로비엠, 에코프로, "
+        "레인보우로보틱스, 코오롱티슈진(-1.66%), 삼천당제약 등이 내렸다. "
+        "서울 외환시장에서 원화 환율은 상승했고 내일 증시는 미국 고용 지표 영향을 받을 전망이다."
+    )
+    db.add_all([
+        News(
+            stock_id=s.id,
+            title="개인 6조 순매수도 '역부족'…3% 하락 코스피, 7270선 마감 [시황]",
+            source="데일리안",
+            url="https://n.news.naver.com/mnews/article/119/0003092157",
+            published_at=now,
+            content=market_wrap,
+        ),
+        News(
+            stock_id=s.id,
+            title="코오롱티슈진, 신약 임상 진행 현황 공개",
+            source="src",
+            url="https://e.com/kolon",
+            published_at=now - timedelta(minutes=1),
+            content="코오롱티슈진은 신약 임상 진행 현황을 공개했다. 코오롱티슈진은 환자 등록과 주요 평가변수 확인 일정을 제시했다. " * 3,
+        ),
+    ])
+    await db.commit()
+
+    res = await _fetch_recent_news("TSTKOLON")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == ["코오롱티슈진, 신약 임상 진행 현황 공개"]
+
+
+@pytest.mark.asyncio
 async def test_fetch_relations_data_detects_stale(db_for_data_layer):
     db = db_for_data_layer
     s = Stock(ticker="RL1", name="x", market="KRX", sector="x", current_price=10)
