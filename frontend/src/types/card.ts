@@ -121,6 +121,8 @@ export interface NewsItem {
   published_at: string;
   impact: NewsImpact;
   summary: string;
+  key_quote?: string | null;
+  why_it_matters?: string | null;
   citation_id: number;
 }
 

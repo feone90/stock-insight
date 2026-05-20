@@ -372,7 +372,7 @@ _NAVER_FINANCE_HEADERS = {
 
 
 async def _fetch_naver_finance_news_pages(  # pragma: no cover
-    ticker: str, pages: int = 2
+    ticker: str, pages: int = 4
 ) -> str | None:
     """네이버 증권 종목별 뉴스 list page fetch.
 

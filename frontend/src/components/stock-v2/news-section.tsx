@@ -126,6 +126,17 @@ function NewsExpanded({
                   {n.summary}
                 </p>
               ) : null}
+              {n.key_quote ? (
+                <blockquote className="mt-2 border-l-2 border-[var(--surface-border)] pl-2 text-xs leading-relaxed text-[var(--surface-text-muted)]">
+                  {n.key_quote}
+                </blockquote>
+              ) : null}
+              {n.why_it_matters ? (
+                <p className="mt-2 text-xs leading-relaxed text-[var(--surface-text-muted)]">
+                  <span className="font-semibold text-[var(--surface-text)]">왜 중요: </span>
+                  {n.why_it_matters}
+                </p>
+              ) : null}
               <a
                 href={n.url}
                 target="_blank"
@@ -218,14 +229,19 @@ function PoliticalBlock({ signals }: { signals: PoliticalSignalCard[] }) {
 }
 
 function compactNewsText(news: NewsItem[]): string {
-  const leadingImpact =
-    news.find((item) => item.impact !== "neutral")?.impact ?? news[0]?.impact ?? "neutral";
-  const summary = stripSummaryPrefix(news[0]?.summary || news[0]?.title || "");
-  const shortSummary = summary.length > 34 ? `${summary.slice(0, 34)}…` : summary;
+  const counts = news.reduce(
+    (acc, item) => {
+      acc[item.impact] += 1;
+      return acc;
+    },
+    { positive: 0, negative: 0, mixed: 0, neutral: 0 } as Record<NewsItem["impact"], number>,
+  );
+  const signalParts = [
+    counts.positive > 0 ? `긍정 ${counts.positive}` : null,
+    counts.negative > 0 ? `부정 ${counts.negative}` : null,
+    counts.mixed > 0 ? `양면 ${counts.mixed}` : null,
+  ].filter(Boolean);
+  const signal = signalParts.length > 0 ? signalParts.join(" / ") : "중립 중심";
 
-  return `${news.length}건 · ${IMPACT_EMOJI[leadingImpact]} ${IMPACT_LABEL[leadingImpact]} · ${shortSummary || "핵심 요약 확인"}`;
-}
-
-function stripSummaryPrefix(value: string): string {
-  return value.replace(/^핵심:\s*/, "").trim();
+  return `관련 뉴스 ${news.length}건 · ${signal} · 펼쳐서 핵심 확인`;
 }

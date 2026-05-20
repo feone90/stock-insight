@@ -373,6 +373,44 @@ async def test_build_news_creates_summary_when_content_is_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_news_surfaces_body_quote_and_importance(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer.llm_classify_news",
+        AsyncMock(return_value={"items": [{"index": 0, "impact": "positive"}]}),
+    )
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer._analyze_news_items",
+        AsyncMock(return_value={
+            0: {
+                "summary": "경영평가 1위 배경이 AI 반도체 매출과 투자 확대였다고 짚었다.",
+                "key_quote": "SK하이닉스는 800점 만점에 최고점인 648.3점을 받아 종합 1위에 올랐다.",
+                "why_it_matters": "AI 메모리 수요가 실적 평가로 확인됐다는 점에서 프리미엄 유지 여부와 연결된다.",
+            }
+        }),
+    )
+    pool = _CitationPool()
+
+    items = await _build_news(
+        {
+            "items": [
+                {
+                    "title": "SK하이닉스, 2년 연속 경영평가 1위",
+                    "source": "src",
+                    "url": "https://e.com/sk-score",
+                    "published_at": datetime.utcnow(),
+                    "summary": "SK하이닉스는 800점 만점에 최고점인 648.3점을 받아 종합 1위에 올랐다.",
+                }
+            ]
+        },
+        pool,
+    )
+
+    assert items[0].summary.startswith("경영평가 1위")
+    assert items[0].key_quote == "SK하이닉스는 800점 만점에 최고점인 648.3점을 받아 종합 1위에 올랐다."
+    assert items[0].why_it_matters.startswith("AI 메모리 수요")
+
+
+@pytest.mark.asyncio
 async def test_fetch_relations_data_detects_stale(db_for_data_layer):
     db = db_for_data_layer
     s = Stock(ticker="RL1", name="x", market="KRX", sector="x", current_price=10)

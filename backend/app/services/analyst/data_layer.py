@@ -393,7 +393,7 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
         return []
 
     impacts = await _classify_impacts(raw_items)
-    ko_summaries = await _summarize_news_items(raw_items)
+    analyses = await _analyze_news_items(raw_items)
 
     items: list[NewsItem] = []
     for idx, it in enumerate(raw_items):
@@ -412,12 +412,15 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
             url=url,
             timestamp=published_at,
         )
-        # Korean translation when the body was English; otherwise keep raw.
         raw_summary = (it.get("summary") or it.get("content") or "")
-        summary = (
-            ko_summaries.get(idx)
-            or _news_summary(raw_summary, title)
-        )
+        fallback = _fallback_news_analysis(raw_summary, title)
+        analysis = analyses.get(idx, {})
+        summary = analysis.get("summary") or fallback["summary"]
+        key_quote = _validated_quote(
+            analysis.get("key_quote"),
+            raw_summary,
+        ) or fallback.get("key_quote")
+        why_it_matters = analysis.get("why_it_matters") or fallback.get("why_it_matters")
         items.append(
             NewsItem(
                 title=title,
@@ -426,6 +429,8 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
                 published_at=published_at,
                 impact=impact,
                 summary=summary,
+                key_quote=key_quote,
+                why_it_matters=why_it_matters,
                 citation_id=cid,
             )
         )
@@ -482,13 +487,67 @@ def _news_relevance_score(stock: Stock, row: News) -> int:
 
 
 def _news_summary(raw_summary: str, title: str) -> str:
+    return _fallback_news_analysis(raw_summary, title)["summary"]
+
+
+def _fallback_news_analysis(raw_summary: str, title: str) -> dict[str, str | None]:
     body = (raw_summary or "").strip()
+    key_quote = _select_key_quote(body)
     if body:
-        return body[:NEWS_SUMMARY_MAX]
+        sentence = _first_sentences(body, max_chars=NEWS_SUMMARY_MAX)
+        return {
+            "summary": sentence or body[:NEWS_SUMMARY_MAX],
+            "key_quote": key_quote,
+            "why_it_matters": None,
+        }
     clean_title = re.sub(r"\s+", " ", (title or "").strip())
     if not clean_title:
+        return {"summary": "", "key_quote": None, "why_it_matters": None}
+    return {
+        "summary": f"핵심: {clean_title}"[:NEWS_SUMMARY_MAX],
+        "key_quote": None,
+        "why_it_matters": None,
+    }
+
+
+def _first_sentences(text: str, max_chars: int = NEWS_SUMMARY_MAX) -> str:
+    sentences = _split_sentences(text)
+    if not sentences:
         return ""
-    return f"핵심: {clean_title}"[:NEWS_SUMMARY_MAX]
+    out = ""
+    for sentence in sentences[:2]:
+        candidate = f"{out} {sentence}".strip()
+        if len(candidate) > max_chars:
+            break
+        out = candidate
+    return out or sentences[0][:max_chars]
+
+
+def _split_sentences(text: str) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return []
+    parts = re.split(r"(?<=[.!?。！？다요죠음임함됨함다])\s+", cleaned)
+    return [p.strip() for p in parts if len(p.strip()) >= 20]
+
+
+def _select_key_quote(text: str) -> str | None:
+    for sentence in _split_sentences(text):
+        if len(sentence) > 140:
+            sentence = sentence[:137].rstrip() + "..."
+        return sentence
+    return None
+
+
+def _validated_quote(candidate: str | None, body: str) -> str | None:
+    quote = (candidate or "").strip().strip('"“”')
+    if not quote:
+        return None
+    compact_body = re.sub(r"\s+", "", body or "")
+    compact_quote = re.sub(r"\s+", "", quote)
+    if compact_quote and compact_quote in compact_body:
+        return quote[:140]
+    return None
 
 
 def _build_relations(
@@ -1156,11 +1215,11 @@ def _is_mostly_english(text: str) -> bool:
     return ascii_letters / len(letters) >= 0.5
 
 
-async def _summarize_news_items(items: list[dict]) -> dict[int, str]:
-    """Produce one-sentence Korean card summaries for substantial news bodies.
+async def _analyze_news_items(items: list[dict]) -> dict[int, dict[str, str]]:
+    """Produce card-ready Korean analysis for substantial news bodies.
 
-    Returns {index: ko_summary}. Failures degrade quietly to {} so the news
-    section still renders with the raw body/title fallback.
+    Returns {index: {summary, key_quote, why_it_matters}}. Failures degrade
+    quietly to {} so the news section still renders with local fallbacks.
     """
     target_indices: list[int] = []
     for i, it in enumerate(items):
@@ -1178,12 +1237,14 @@ async def _summarize_news_items(items: list[dict]) -> dict[int, str]:
     payload = "\n\n".join(payload_lines)
 
     prompt = (
-        "다음은 주식 카드에 표시할 최근 뉴스다. 각 항목을 한국어 한 문장으로 요약하라. "
-        "단순 번역이 아니라 '무슨 내용인지'와 '해당 종목의 실적·주가·사업에 왜 중요한지'가 "
-        "한눈에 보이게 써라. 확인되지 않은 전망은 단정하지 말고, 기사에 없는 내용은 만들지 마라.\n\n"
+        "다음은 주식 카드에 표시할 최근 뉴스다. 각 항목마다 아래 3가지를 뽑아라.\n"
+        "1) summary: 제목 반복 금지. 기사 본문이 실제로 말하는 내용을 한국어 한 문장으로 요약.\n"
+        "2) key_quote: 투자 판단에 중요한 원문 문장 1개를 BODY에서 그대로 짧게 인용. 없으면 빈 문자열.\n"
+        "3) why_it_matters: 해당 종목의 실적·주가·사업에 왜 중요한지 한국어 한 문장.\n"
+        "확인되지 않은 전망은 단정하지 말고, BODY에 없는 내용은 만들지 마라.\n\n"
         f"{payload}\n\n"
-        '응답은 JSON 객체 1개. 키는 인덱스 문자열, 값은 한국어 요약:\n'
-        '{ "summaries": { "0": "...", "3": "..." } }\n'
+        '응답은 JSON 객체 1개:\n'
+        '{ "items": { "0": { "summary": "...", "key_quote": "...", "why_it_matters": "..." } } }\n'
         "자연어 설명 / 코드펜스 X. 빠진 인덱스는 빈 응답."
     )
 
@@ -1192,17 +1253,27 @@ async def _summarize_news_items(items: list[dict]) -> dict[int, str]:
         raw = await get_adapter().generate_json(prompt)
         import json as _json
         parsed = _json.loads(raw) if isinstance(raw, str) else raw
-        sums = parsed.get("summaries", {}) if isinstance(parsed, dict) else {}
-        out: dict[int, str] = {}
-        for k, v in sums.items():
-            if isinstance(v, str) and v.strip():
-                try:
-                    out[int(k)] = v.strip()[:NEWS_SUMMARY_MAX]
-                except (TypeError, ValueError):
-                    continue
+        raw_items = parsed.get("items", {}) if isinstance(parsed, dict) else {}
+        out: dict[int, dict[str, str]] = {}
+        for k, v in raw_items.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                idx = int(k)
+            except (TypeError, ValueError):
+                continue
+            summary = str(v.get("summary") or "").strip()[:NEWS_SUMMARY_MAX]
+            key_quote = str(v.get("key_quote") or "").strip()[:140]
+            why = str(v.get("why_it_matters") or "").strip()[:220]
+            if summary or key_quote or why:
+                out[idx] = {
+                    "summary": summary,
+                    "key_quote": key_quote,
+                    "why_it_matters": why,
+                }
         return out
     except Exception as e:  # noqa: BLE001
-        logger.warning("ko news summarize failed: %s", e)
+        logger.warning("news item analysis failed: %s", e)
         return {}
 
 

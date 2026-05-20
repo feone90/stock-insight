@@ -160,6 +160,8 @@ class NewsItem(BaseModel):
     published_at: datetime
     impact: Literal["positive", "negative", "mixed", "neutral"]
     summary: str
+    key_quote: str | None = None
+    why_it_matters: str | None = None
     citation_id: int
 
 

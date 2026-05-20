@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import re
+from urllib.parse import urljoin
 
 import httpx
 from sqlalchemy import func, select
@@ -51,6 +53,11 @@ async def fetch_article_content(url: str) -> str | None:
     html = await _fetch_html(url)
     if not html:
         return None
+    redirect_url = _extract_script_redirect_url(html, url)
+    if redirect_url:
+        redirected_html = await _fetch_html(redirect_url)
+        if redirected_html:
+            html = redirected_html
 
     text = await asyncio.to_thread(_extract_text, html)
     if text:
@@ -58,10 +65,22 @@ async def fetch_article_content(url: str) -> str | None:
     return None
 
 
+def _extract_script_redirect_url(html: str, base_url: str) -> str | None:
+    """Handle finance.naver.com article pages that return a JS redirect only."""
+    match = re.search(
+        r"(?:(?:top|window)\.)?location(?:\.href)?\s*=\s*['\"]([^'\"]+)['\"]",
+        html,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return urljoin(base_url, match.group(1))
+
+
 async def scrape_news_content(
     db: AsyncSession,
     stock_id: int,
-    limit: int = 20,
+    limit: int = 40,
 ) -> dict:
     """본문이 없거나 짧은 기사의 content를 스크래핑으로 채운다.
 
