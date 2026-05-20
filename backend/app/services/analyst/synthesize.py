@@ -24,7 +24,7 @@ from app.services.analyst.persona import ANALYST_V1
 
 logger = logging.getLogger(__name__)
 
-RESEARCH_BLOB_MAX = 14000  # leave headroom under total prompt limit
+RESEARCH_BLOB_MAX = 8000  # leave headroom under total prompt limit
 PROMPT_SIZE_SOFT_LIMIT = 19000  # bumped from 18K to fit family-friendly copy guidelines
 
 _FIELD_INSTRUCTIONS = """\
@@ -44,8 +44,11 @@ _FIELD_INSTRUCTIONS = """\
      entry_stage: "ENTER"|"WAIT"|"REJECT",
      one_line: str,
      citations: list[int] }   # interp_citations 풀에서 참조
-   - one_line: 60~90자. "지금 행동 판단 + 가장 큰 이유" 순서.
-     예: "지금은 추격매수보다 대기. 가격은 올랐지만 거래량과 새 호재가 약하다."
+   - glance.one_line: 60~110자. "지금 행동 판단 + 가장 큰 미래 재료/위험" 순서.
+     현재 가격·거래량 설명만으로 끝내지 마라.
+     research에 미래 재료, 상장 예정, 대형 계약, 비상장 파트너, 고객 채택,
+     제품 출시, 규제 승인, 정부 조달 중 하나라도 있으면 가장 중요한 1개를 반드시 넣어라.
+      예: "지금은 추격매수보다 대기. 가격은 올랐지만 거래량과 새 호재가 약하다."
 
 2) thesis
    { core_thesis: str,
@@ -60,7 +63,9 @@ _FIELD_INSTRUCTIONS = """\
    Catalyst = { when, event, impact_estimate, direction: "positive"|"negative"|"mixed", citation_ids: list[int] }
    Scenario = { name: "BULL"|"BASE"|"BEAR", probability: 0..1, scenario_price: float|null,
                 scenario_change_pct: float|null, rationale: str }
-   - core_thesis: 최대 2문장. "이 종목을 좋게/나쁘게 보는 핵심 이유"만.
+   - core_thesis: 최대 2문장. "앞으로 주가를 움직일 흐름" 중심.
+     그래프 관계를 해설하는 데서 멈추지 말고, 그 관계가 다음 매출/비용/경쟁/시장 기대를
+     어떻게 바꿀지 써라. 계약, 파트너, 상장 예정, 고객 채택 뉴스가 있으면 우선 반영.
    - supports/opposes[].text: 각 1문장. "사실 + 투자 판단상 의미"를 함께 쓴다.
      나쁜 예: "컨센서스 상회 가능성." 좋은 예: "시장 기대보다 실적이 잘 나오면 비싼 주가 부담을 일부 덜 수 있다."
    - Scenario.rationale: 쉬운 말로. "좋은 경우/기본 경우/나쁜 경우"에 해당하는 조건과 결과를 쓴다.
@@ -71,13 +76,18 @@ _FIELD_INSTRUCTIONS = """\
      notes_by_target: { ticker_or_theme: str },  # 각 관계 target에 대한 짧은 해설 (선택)
      citations: list[int] }
    - one_line: 관계를 나열하지 말고 "매매 판단에 왜 중요한지"를 한 줄로 쓴다.
+     비상장 핵심 파트너나 상장 예정 파트너가 있으면 이름을 숨기지 말고 명시한다.
    - notes_by_target 값: 1문장. 공급망/경쟁/고객 관계가 주가에 미치는 방향을 쉬운 말로.
 
 4) decision
    { stance, sizing_note, support_price, risk_threshold, citations,
      interpretation: {kind, based_on, rationale}|null }
    note 필드는 출력하지 마라 — 서버가 주입한다.
-   - sizing_note: 반드시 행동으로 시작. 예: "지금은 소액만", "지금은 기다림", "손절 기준 없으면 매수 보류".
+   - decision.sizing_note: 반드시 행동으로 시작하고, 다음 확인 포인트를 붙인다.
+     "무엇이 확인되면 산다/줄인다/기다린다"가 보여야 한다.
+     미래 재료, 상장 예정, 대형 계약, 비상장 파트너, 고객 채택, 실적 발표 중
+     중요한 것이 있으면 그 이벤트를 행동 기준에 넣어라.
+     예: "지금은 기다림. AI 파트너 사용량이 Azure 매출로 확인되면 분할 진입을 검토한다."
    - support_price/risk_threshold가 있으면 sizing_note에서 그 가격이 어떤 의미인지 쉬운 말로 설명.
 
 추가:

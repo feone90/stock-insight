@@ -162,3 +162,17 @@ def test_persona_constants_exist_and_have_no_forbidden_words():
     # Researcher prompt sanity
     assert "추측 금지" in RESEARCHER_V1
     assert "fabricate" in RESEARCHER_V1
+
+
+def test_researcher_prompt_requires_forward_event_radar():
+    from app.services.analyst.persona import RESEARCHER_V1
+
+    for keyword in [
+        "미래 재료 레이더",
+        "상장 예정",
+        "대형 계약",
+        "비상장 파트너",
+        "고객 채택",
+        "web_search",
+    ]:
+        assert keyword in RESEARCHER_V1

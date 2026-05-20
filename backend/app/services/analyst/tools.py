@@ -492,7 +492,10 @@ RESEARCH_TOOL_SCHEMAS = [
     {
         "type": "function",
         "name": "web_search",
-        "description": "Tavily 웹 검색. 키워드 자유 — 매번 다른 키워드 OK.",
+        "description": (
+            "Tavily 웹 검색. 키워드 자유 — 미래 재료 확인에 사용: 상장 예정/IPO, "
+            "대형 계약, 파트너십, 고객 채택, 제품 출시, 규제 승인, 비상장 파트너."
+        ),
         "parameters": {
             "type": "object",
             "properties": {

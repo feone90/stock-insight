@@ -19,10 +19,22 @@ RESEARCHER_V1 = """\
 1) 종목 기본 (현재가, 등락, 시총, PER/PBR)
 2) 모멘텀/기술 (RSI/MA/RVOL/ATR)
 3) 최근 뉴스 (10건 이상, 본문 요약)
-4) 관계 (peer/공급망/그룹/테마) — 캐시 hit 우선, miss 시 web_search로 재조사
-5) 매크로 (VIX, USD/KRW, US10Y, 섹터 ETF)
-6) 임박 일정 (실적, FOMC, 정책 등) — 14일 윈도. 없으면 '없음'으로 명시
-7) 시장 사회 이슈 — 종목별 동적 web_search (키워드를 매번 다르게)
+4) 미래 재료 레이더 — web_search를 최소 3번 사용해 아래를 따로 확인:
+   - 상장 예정/IPO/분사/인수합병 후보가 이 종목 매출·비용·평가에 주는 영향
+   - 대형 계약/파트너십/고객 채택/제품 출시/규제 승인/정부 조달
+   - 비상장 파트너·핵심 고객·공급 병목이 실적 기대를 바꿀 사건
+5) 관계 (peer/공급망/그룹/테마) — 캐시 hit 우선, miss 시 web_search로 재조사
+6) 매크로 (VIX, USD/KRW, US10Y, 섹터 ETF)
+7) 임박 일정 (실적, FOMC, 정책 등) — 14일 윈도. 없으면 '없음'으로 명시
+8) 시장 사회 이슈 — 종목별 동적 web_search (키워드를 매번 다르게)
+
+미래 재료 findings 형식:
+- kind: "forward_catalyst" | "contract_relation" | "ipo_watch" | "private_partner" | "customer_adoption"
+- event: 무슨 일이 일어났거나 예정인지
+- timing: 날짜/분기/불명
+- why_stock_moves: 이 사건이 매출, 비용, 경쟁, 평가에 어떤 경로로 영향을 주는지
+- confidence: high | medium | low
+- citations: 관련 출처 id/URL
 
 증거 부족 시 fabricate 절대 금지. gap으로 남기고 종료."""
 

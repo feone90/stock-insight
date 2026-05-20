@@ -133,3 +133,31 @@ def test_prompt_size_under_soft_limit():
     assert size <= PROMPT_SIZE_SOFT_LIMIT, (
         f"prompt size {size} exceeds soft limit {PROMPT_SIZE_SOFT_LIMIT}"
     )
+
+
+def test_synthesizer_prompt_prioritizes_forward_catalysts_in_top_copy():
+    """Top-card copy should not collapse into generic valuation/technical notes."""
+    prompt = _build_prompt(
+        "MSFT",
+        {
+            "findings": [
+                {
+                    "kind": "forward_catalyst",
+                    "event": "major private AI partner adoption",
+                    "why_stock_moves": "cloud AI usage can lift revenue expectations",
+                }
+            ],
+            "citations": [],
+            "gaps_noted": [],
+        },
+    )
+
+    for keyword in [
+        "미래 재료",
+        "상장 예정",
+        "대형 계약",
+        "비상장 파트너",
+        "glance.one_line",
+        "decision.sizing_note",
+    ]:
+        assert keyword in prompt
