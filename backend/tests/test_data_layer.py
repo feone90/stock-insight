@@ -18,6 +18,7 @@ from app.models.relation import StockRelation
 from app.schemas.card import DataLayer
 from app.services.analyst.data_layer import (
     _CitationPool,
+    _build_news,
     _fetch_data_timestamps,
     _fetch_recent_news,
     _fetch_relations_data,
@@ -284,15 +285,15 @@ async def test_assemble_skips_bg_refresh_when_relations_fresh(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_recent_news_filters_older_than_14_days(db_for_data_layer):
     db = db_for_data_layer
-    s = Stock(ticker="NW1", name="x", market="KRX", sector="x", current_price=10)
+    s = Stock(ticker="NW1", name="NW Corp", market="KRX", sector="x", current_price=10)
     db.add(s)
     await db.flush()
     db.add_all([
         News(
-            stock_id=s.id, title="recent", source="src",
+            stock_id=s.id, title="NW Corp recent", source="src",
             url="https://e.com/recent",
             published_at=datetime.utcnow() - timedelta(days=2),
-            content="recent",
+            content="NW Corp recent",
         ),
         News(
             stock_id=s.id, title="too old", source="src",
@@ -305,8 +306,70 @@ async def test_fetch_recent_news_filters_older_than_14_days(db_for_data_layer):
 
     res = await _fetch_recent_news("NW1")
     titles = [it["title"] for it in res["items"]]
-    assert "recent" in titles
+    assert "NW Corp recent" in titles
     assert "too old" not in titles
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_news_prioritizes_stock_specific_items(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="660TEST", name="SK하이닉스", market="KRX", sector="반도체", current_price=10)
+    db.add(s)
+    await db.flush()
+    now = datetime.utcnow()
+    db.add_all([
+        News(
+            stock_id=s.id,
+            title="삼성 노사 오전 담판 재개",
+            source="src",
+            url="https://e.com/samsung-labor",
+            published_at=now,
+            content="삼성전자 노사 협상 기사",
+        ),
+        News(
+            stock_id=s.id,
+            title="SK하이닉스, HBM 공급 확대 기대",
+            source="src",
+            url="https://e.com/sk-hbm",
+            published_at=now - timedelta(minutes=5),
+            content="SK하이닉스 HBM 수요가 늘고 있다는 기사",
+        ),
+    ])
+    await db.commit()
+
+    res = await _fetch_recent_news("660TEST")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles[0] == "SK하이닉스, HBM 공급 확대 기대"
+    assert "삼성 노사 오전 담판 재개" not in titles
+
+
+@pytest.mark.asyncio
+async def test_build_news_creates_summary_when_content_is_empty(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer.llm_classify_news",
+        AsyncMock(return_value={"items": [{"index": 0, "impact": "positive"}]}),
+    )
+    pool = _CitationPool()
+
+    items = await _build_news(
+        {
+            "items": [
+                {
+                    "title": "SK하이닉스, HBM 공급 확대 기대",
+                    "source": "src",
+                    "url": "https://e.com/sk-hbm",
+                    "published_at": datetime.utcnow(),
+                    "summary": "",
+                }
+            ]
+        },
+        pool,
+    )
+
+    assert items[0].summary
+    assert "핵심:" in items[0].summary
+    assert "HBM 공급 확대 기대" in items[0].summary
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -69,6 +70,10 @@ _VALID_RELATION_TYPES = {
     "complementary", "regulatory_link",
 }
 _VALID_NEWS_IMPACTS = {"positive", "negative", "mixed", "neutral"}
+_BROAD_MARKET_TERMS = (
+    "코스피", "코스닥", "증시", "시황", "장 초반", "장중", "외국인",
+    "기관", "금리", "환율", "뉴욕증시", "나스닥", "시장",
+)
 
 
 class _CitationPool:
@@ -388,7 +393,7 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
         return []
 
     impacts = await _classify_impacts(raw_items)
-    ko_summaries = await _ko_summarize_english_news(raw_items)
+    ko_summaries = await _summarize_news_items(raw_items)
 
     items: list[NewsItem] = []
     for idx, it in enumerate(raw_items):
@@ -409,7 +414,10 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
         )
         # Korean translation when the body was English; otherwise keep raw.
         raw_summary = (it.get("summary") or it.get("content") or "")
-        summary = ko_summaries.get(idx) or raw_summary[:NEWS_SUMMARY_MAX]
+        summary = (
+            ko_summaries.get(idx)
+            or _news_summary(raw_summary, title)
+        )
         items.append(
             NewsItem(
                 title=title,
@@ -422,6 +430,65 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
             )
         )
     return items
+
+
+def _compact_text(value: str | None) -> str:
+    return re.sub(r"[^0-9a-zA-Z가-힣]+", "", value or "").lower()
+
+
+def _stock_news_aliases(stock: Stock) -> set[str]:
+    aliases = {stock.ticker, stock.name}
+    if stock.name.endswith("보통주"):
+        aliases.add(stock.name.removesuffix("보통주"))
+    simplified = _simplify_company_name(stock.name)
+    if simplified:
+        aliases.add(simplified)
+    return {a for a in aliases if a}
+
+
+def _simplify_company_name(name: str | None) -> str:
+    if not name:
+        return ""
+    cleaned = re.sub(
+        r"\b(incorporated|inc|corp|corporation|company|co|ltd|limited|plc|holdings|holding|class\s+[a-z])\b\.?",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned.replace(",", " ")).strip()
+    return cleaned
+
+
+def _news_relevance_score(stock: Stock, row: News) -> int:
+    title = row.title or ""
+    content = row.content or ""
+    title_norm = _compact_text(title)
+    body_norm = _compact_text(content)
+    aliases = [_compact_text(a) for a in _stock_news_aliases(stock)]
+
+    score = 0
+    for alias in aliases:
+        if not alias or len(alias) < 2:
+            continue
+        if alias in title_norm:
+            score += 8
+        elif alias in body_norm:
+            score += 3
+
+    if any(term in title for term in _BROAD_MARKET_TERMS):
+        score -= 2
+    # If the article never names the stock, it is not a stock-specific card item.
+    return score
+
+
+def _news_summary(raw_summary: str, title: str) -> str:
+    body = (raw_summary or "").strip()
+    if body:
+        return body[:NEWS_SUMMARY_MAX]
+    clean_title = re.sub(r"\s+", " ", (title or "").strip())
+    if not clean_title:
+        return ""
+    return f"핵심: {clean_title}"[:NEWS_SUMMARY_MAX]
 
 
 def _build_relations(
@@ -872,9 +939,18 @@ async def _fetch_recent_news(ticker: str) -> dict:
                 select(News)
                 .where(News.stock_id == stock.id, News.published_at >= cutoff)
                 .order_by(News.published_at.desc())
-                .limit(15)
+                .limit(40)
             )
         ).scalars().all()
+        ranked = sorted(
+            (
+                (_news_relevance_score(stock, n), n)
+                for n in rows
+            ),
+            key=lambda item: (item[0], item[1].published_at or datetime.min),
+            reverse=True,
+        )
+        rows = [n for score, n in ranked if score > 0][:15]
         items = [
             {
                 "title": n.title,
@@ -1080,31 +1156,31 @@ def _is_mostly_english(text: str) -> bool:
     return ascii_letters / len(letters) >= 0.5
 
 
-async def _ko_summarize_english_news(items: list[dict]) -> dict[int, str]:
-    """For each item whose body looks English, produce a 1-2 sentence Korean
-    summary in one batch LLM call. KR-language items are skipped.
+async def _summarize_news_items(items: list[dict]) -> dict[int, str]:
+    """Produce one-sentence Korean card summaries for substantial news bodies.
 
     Returns {index: ko_summary}. Failures degrade quietly to {} so the news
-    section still renders with the raw body.
+    section still renders with the raw body/title fallback.
     """
-    en_indices: list[int] = []
+    target_indices: list[int] = []
     for i, it in enumerate(items):
         body = (it.get("summary") or it.get("content") or "")
-        if _is_mostly_english(body):
-            en_indices.append(i)
-    if not en_indices:
+        if _is_mostly_english(body) or len(body.strip()) >= 80:
+            target_indices.append(i)
+    if not target_indices:
         return {}
 
     payload_lines: list[str] = []
-    for i in en_indices:
+    for i in target_indices:
         body = (items[i].get("summary") or items[i].get("content") or "")[:600]
         title = items[i].get("title", "")
         payload_lines.append(f"[{i}] TITLE: {title}\nBODY: {body}")
     payload = "\n\n".join(payload_lines)
 
     prompt = (
-        "다음은 영문 뉴스 기사들이다. 각 항목을 한국어 1~2 문장으로 핵심만 요약하라. "
-        "원문 의미를 그대로 전달하되 가족 사용자(비전공자)도 이해할 수 있게 풀어 써라.\n\n"
+        "다음은 주식 카드에 표시할 최근 뉴스다. 각 항목을 한국어 한 문장으로 요약하라. "
+        "단순 번역이 아니라 '무슨 내용인지'와 '해당 종목의 실적·주가·사업에 왜 중요한지'가 "
+        "한눈에 보이게 써라. 확인되지 않은 전망은 단정하지 말고, 기사에 없는 내용은 만들지 마라.\n\n"
         f"{payload}\n\n"
         '응답은 JSON 객체 1개. 키는 인덱스 문자열, 값은 한국어 요약:\n'
         '{ "summaries": { "0": "...", "3": "..." } }\n'

@@ -18,6 +18,13 @@ const IMPACT_COLOR: Record<NewsItem["impact"], string> = {
   neutral: "text-[var(--surface-text-muted)]",
 };
 
+const IMPACT_LABEL: Record<NewsItem["impact"], string> = {
+  positive: "긍정",
+  negative: "부정",
+  mixed: "양면",
+  neutral: "중립",
+};
+
 const DIRECTION_BADGE: Record<PoliticalSignalCard["direction"], { label: string; cls: string }> = {
   long: { label: "매수 쪽 영향", cls: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/40" },
   short: { label: "매도·회피 영향", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/40" },
@@ -61,10 +68,7 @@ export function NewsSection({
       ? `${political.length}건 정치 시그널 · 뉴스 ${news.length}건`
       : news.length === 0
       ? "최근 뉴스 없음"
-      : news
-          .slice(0, 3)
-          .map((n) => `${IMPACT_EMOJI[n.impact]} ${truncate(n.title, 16)}`)
-          .join(" · ");
+      : compactNewsText(news);
 
   return (
     <SectionShell
@@ -105,28 +109,31 @@ function NewsExpanded({
       ) : (
         <ul className="space-y-2.5 text-sm">
           {news.slice(0, 10).map((n, i) => (
-            <li key={i} className="flex gap-2">
-              <span className={`shrink-0 mt-0.5 ${IMPACT_COLOR[n.impact]}`}>
-                {IMPACT_EMOJI[n.impact]}
-              </span>
-              <div className="min-w-0 flex-1">
-                <a
-                  href={n.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium hover:underline line-clamp-1"
-                >
-                  {n.title}
-                </a>
-                <div className="text-xs text-[var(--surface-text-muted)]">
+            <li
+              key={i}
+              className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-section-hover)]/35 px-3 py-2.5"
+            >
+              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                <span className={`inline-flex items-center gap-1 rounded border border-current/25 px-1.5 py-0.5 text-[10px] font-semibold ${IMPACT_COLOR[n.impact]}`}>
+                  {IMPACT_EMOJI[n.impact]} {IMPACT_LABEL[n.impact]}
+                </span>
+                <span className="text-xs text-[var(--surface-text-muted)]">
                   {n.source} · {new Date(n.published_at).toLocaleDateString("ko-KR")}
-                </div>
-                {n.summary ? (
-                  <p className="mt-1 text-xs text-[var(--surface-text-muted)] line-clamp-2">
-                    {n.summary}
-                  </p>
-                ) : null}
+                </span>
               </div>
+              {n.summary ? (
+                <p className="text-sm font-medium leading-relaxed text-[var(--surface-text)]">
+                  {n.summary}
+                </p>
+              ) : null}
+              <a
+                href={n.url}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1.5 block text-xs leading-relaxed text-[var(--surface-text-muted)] hover:text-[var(--surface-text)] hover:underline"
+              >
+                {n.title}
+              </a>
             </li>
           ))}
         </ul>
@@ -210,6 +217,15 @@ function PoliticalBlock({ signals }: { signals: PoliticalSignalCard[] }) {
   );
 }
 
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s;
+function compactNewsText(news: NewsItem[]): string {
+  const leadingImpact =
+    news.find((item) => item.impact !== "neutral")?.impact ?? news[0]?.impact ?? "neutral";
+  const summary = stripSummaryPrefix(news[0]?.summary || news[0]?.title || "");
+  const shortSummary = summary.length > 34 ? `${summary.slice(0, 34)}…` : summary;
+
+  return `${news.length}건 · ${IMPACT_EMOJI[leadingImpact]} ${IMPACT_LABEL[leadingImpact]} · ${shortSummary || "핵심 요약 확인"}`;
+}
+
+function stripSummaryPrefix(value: string): string {
+  return value.replace(/^핵심:\s*/, "").trim();
 }
