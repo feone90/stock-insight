@@ -1,9 +1,13 @@
 "use client";
 
 import {
+  ArrowLeft,
   ArrowRight,
   Brain,
+  ChevronDown,
+  Home,
   LineChart,
+  List,
   Moon,
   Newspaper,
   RefreshCw,
@@ -11,13 +15,17 @@ import {
   Sparkles,
   Star,
   Sun,
+  UserRound,
 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
-import { addFavorite, getStock, removeFavorite } from "@/services/api";
-import { onUserChanged } from "@/services/user";
+import { addFavorite, getFavorites, getStock, removeFavorite } from "@/services/api";
+import { getActiveUser, onUserChanged } from "@/services/user";
 import { isMarketOpen } from "@/lib/markets";
 import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
+import type { Stock } from "@/types/stock";
 import { AtAGlancePanel } from "./at-a-glance-panel";
 import { CardHeader } from "./card-header";
 import { DecisionSection } from "./decision-section";
@@ -63,6 +71,7 @@ function formatKoRelative(d: Date | null, now: number): string {
  * E the full state matrix, F the footer + canonical-route flip.
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
+  const router = useRouter();
   const { mode, toggle } = useTheme();
   const { card, state, refresh, refreshAll, refreshPrice, refreshNews, triggerAnalyze } =
     useStockCard(ticker);
@@ -105,6 +114,9 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   // 즐겨찾기 — user picker 변경 시 reload (사용자별 분리)
   const [isFav, setIsFav] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
+  const [favorites, setFavorites] = useState<Stock[]>([]);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [activeUser, setActiveUserName] = useState<string | null>(null);
 
   // cooldown 텍스트가 시간 흐르면서 갱신되도록 30s 주기 tick.
   const [now, setNow] = useState(() => Date.now());
@@ -147,9 +159,13 @@ export function StockCardPage({ ticker }: { ticker: string }) {
 
   useEffect(() => {
     const load = () => {
+      setActiveUserName(getActiveUser());
       getStock(ticker)
         .then((s) => setIsFav(s.is_favorite ?? false))
         .catch(() => setIsFav(false));
+      getFavorites()
+        .then((items) => setFavorites(items))
+        .catch(() => setFavorites([]));
     };
     load();
     return onUserChanged(load);
@@ -162,42 +178,48 @@ export function StockCardPage({ ticker }: { ticker: string }) {
       if (isFav) await removeFavorite(ticker);
       else await addFavorite(ticker);
       setIsFav(!isFav);
+      setFavorites((items) =>
+        isFav ? items.filter((item) => item.ticker !== ticker) : items,
+      );
+      getFavorites()
+        .then((items) => setFavorites(items))
+        .catch(() => {});
     } finally {
       setFavBusy(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (typeof window === "undefined") {
+      router.push("/");
+      return;
+    }
+    const sameOriginReferrer =
+      document.referrer && new URL(document.referrer).origin === window.location.origin;
+    if (sameOriginReferrer && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/");
     }
   };
 
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
       <div className="mx-auto max-w-[1200px] px-4 py-6 md:py-8">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-xs text-[var(--surface-text-subtle)]">
-            {card ? card.ticker : ticker}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleFav}
-              disabled={favBusy}
-              aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-              title={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-              className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11 disabled:opacity-50"
-            >
-              <Star
-                size={18}
-                className={isFav ? "fill-yellow-400 text-yellow-400" : ""}
-              />
-            </button>
-            <button
-              type="button"
-              onClick={toggle}
-              aria-label={mode === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
-              className="inline-flex items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)] transition-colors min-w-11 min-h-11"
-            >
-              {mode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-          </div>
-        </div>
+        <StockLocalNav
+          ticker={ticker}
+          stockName={card?.name_ko || card?.name_en}
+          activeUser={activeUser}
+          favorites={favorites}
+          favoritesOpen={favoritesOpen}
+          onToggleFavorites={() => setFavoritesOpen((v) => !v)}
+          onBack={handleBack}
+          isFav={isFav}
+          favBusy={favBusy}
+          onToggleFav={toggleFav}
+          themeMode={mode}
+          onToggleTheme={toggle}
+        />
 
         {card ? (
           <>
@@ -399,6 +421,161 @@ function RefreshCommandBar({
           </div>
         </div>
       </div>
+    </section>
+  );
+}
+
+function StockLocalNav({
+  ticker,
+  stockName,
+  activeUser,
+  favorites,
+  favoritesOpen,
+  onToggleFavorites,
+  onBack,
+  isFav,
+  favBusy,
+  onToggleFav,
+  themeMode,
+  onToggleTheme,
+}: {
+  ticker: string;
+  stockName?: string;
+  activeUser: string | null;
+  favorites: Stock[];
+  favoritesOpen: boolean;
+  onToggleFavorites: () => void;
+  onBack: () => void;
+  isFav: boolean;
+  favBusy: boolean;
+  onToggleFav: () => Promise<void>;
+  themeMode: "dark" | "light";
+  onToggleTheme: () => void;
+}) {
+  const normalizedTicker = ticker.toUpperCase();
+  const favoriteCount = favorites.length;
+
+  return (
+    <section className="mb-4 overflow-hidden rounded-xl border border-[var(--surface-border)] bg-[var(--surface-card)]/80">
+      <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="이전 화면으로 이동"
+            title="이전 화면"
+            className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] px-2.5 text-sm font-medium text-[var(--surface-text)] transition-colors hover:bg-[var(--surface-section-hover)]"
+          >
+            <ArrowLeft size={17} />
+            <span className="hidden sm:inline">뒤로</span>
+          </button>
+          <Link
+            href="/"
+            title="홈의 즐겨찾기 목록으로 이동"
+            className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] px-2.5 text-[var(--surface-text-muted)] transition-colors hover:bg-[var(--surface-section-hover)] hover:text-[var(--surface-text)]"
+          >
+            <Home size={17} />
+          </Link>
+          <div className="min-w-0 border-l border-[var(--surface-border)] pl-3">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--surface-text-subtle)]">
+              종목 상세
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="font-semibold text-[var(--surface-text)]">{normalizedTicker}</span>
+              {stockName ? (
+                <span className="truncate text-sm text-[var(--surface-text-muted)]">
+                  {stockName}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={onToggleFavorites}
+            aria-expanded={favoritesOpen}
+            className="inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/20 sm:flex-none dark:text-amber-300"
+            title="현재 사용자의 즐겨찾기 종목 빠른 전환"
+          >
+            <List size={16} />
+            <span className="truncate">
+              {activeUser ? `${activeUser} 관심목록` : "내 즐겨찾기"}
+            </span>
+            <span className="rounded border border-amber-500/25 px-1.5 py-0.5 text-[11px] leading-none">
+              {favoriteCount}
+            </span>
+            <ChevronDown
+              size={15}
+              className={`transition-transform ${favoritesOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleFav}
+            disabled={favBusy}
+            aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+            title={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+            className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] transition-colors hover:bg-[var(--surface-section-hover)] disabled:opacity-50"
+          >
+            <Star
+              size={18}
+              className={isFav ? "fill-yellow-400 text-yellow-400" : ""}
+            />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            aria-label={themeMode === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+            title={themeMode === "dark" ? "라이트 모드" : "다크 모드"}
+            className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] transition-colors hover:bg-[var(--surface-section-hover)]"
+          >
+            {themeMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {favoritesOpen ? (
+        <div className="border-t border-[var(--surface-border)] bg-[var(--surface-bg)]/45 px-2 py-2">
+          {favorites.length > 0 ? (
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {favorites.map((stock) => {
+                const selected = stock.ticker.toUpperCase() === normalizedTicker;
+                return (
+                  <Link
+                    key={stock.ticker}
+                    href={`/stock/${stock.ticker}`}
+                    className={`group min-w-[132px] rounded-md border px-2.5 py-2 transition-colors ${
+                      selected
+                        ? "border-blue-500/45 bg-blue-500/15 text-blue-700 dark:text-blue-300"
+                        : "border-[var(--surface-border)] bg-[var(--surface-card)] hover:bg-[var(--surface-section-hover)]"
+                    }`}
+                    aria-current={selected ? "page" : undefined}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold">{stock.ticker}</span>
+                      {selected ? (
+                        <span className="rounded border border-blue-500/30 px-1.5 py-0.5 text-[10px] leading-none">
+                          현재
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-[var(--surface-text-muted)]">
+                      {stock.name || stock.market}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--surface-border)] px-3 py-2 text-sm text-[var(--surface-text-muted)]">
+              <UserRound size={16} />
+              관심목록이 비어 있어요. 별표를 눌러 현재 종목을 추가할 수 있습니다.
+            </div>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
