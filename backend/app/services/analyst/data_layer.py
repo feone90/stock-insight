@@ -420,12 +420,15 @@ async def _build_news(res: Any, pool: _CitationPool) -> list[NewsItem]:
         raw_summary = (it.get("summary") or it.get("content") or "")
         fallback = _fallback_news_analysis(raw_summary, title)
         analysis = analyses.get(idx, {})
-        summary = analysis.get("summary") or fallback["summary"]
-        key_quote = _validated_quote(
-            analysis.get("key_quote"),
-            raw_summary,
-        ) or fallback.get("key_quote")
-        why_it_matters = analysis.get("why_it_matters") or fallback.get("why_it_matters")
+        summary = _korean_or_none(analysis.get("summary")) or fallback["summary"]
+        if _is_mostly_english(raw_summary):
+            key_quote = _korean_or_none(analysis.get("key_quote")) or fallback.get("key_quote")
+        else:
+            key_quote = _validated_quote(
+                analysis.get("key_quote"),
+                raw_summary,
+            ) or fallback.get("key_quote")
+        why_it_matters = _korean_or_none(analysis.get("why_it_matters")) or fallback.get("why_it_matters")
         items.append(
             NewsItem(
                 title=title,
@@ -529,6 +532,12 @@ def _news_summary(raw_summary: str, title: str) -> str:
 
 def _fallback_news_analysis(raw_summary: str, title: str) -> dict[str, str | None]:
     body = (raw_summary or "").strip()
+    if _is_mostly_english(body):
+        return {
+            "summary": "영문 기사 본문은 확보했지만 한국어 요약 생성에 실패했습니다. 뉴스/공시 새로고침 또는 AI 의견 다시로 재생성해 주세요.",
+            "key_quote": None,
+            "why_it_matters": None,
+        }
     key_quote = _select_key_quote(body)
     if body:
         sentence = _first_sentences(body, max_chars=NEWS_SUMMARY_MAX)
@@ -585,6 +594,17 @@ def _validated_quote(candidate: str | None, body: str) -> str | None:
     if compact_quote and compact_quote in compact_body:
         return quote[:140]
     return None
+
+
+def _contains_hangul(value: str | None) -> bool:
+    return bool(re.search(r"[가-힣]", value or ""))
+
+
+def _korean_or_none(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text or not _contains_hangul(text):
+        return None
+    return text
 
 
 def _build_relations(
@@ -1286,8 +1306,9 @@ async def _analyze_news_items(items: list[dict]) -> dict[int, dict[str, str]]:
 
     prompt = (
         "다음은 주식 카드에 표시할 최근 뉴스다. 각 항목마다 아래 3가지를 뽑아라.\n"
+        "모든 출력값은 반드시 한국어로 작성한다. 영어 원문을 그대로 복사하지 마라.\n"
         "1) summary: 제목 반복 금지. 기사 본문이 실제로 말하는 내용을 한국어 한 문장으로 요약.\n"
-        "2) key_quote: 투자 판단에 중요한 원문 문장 1개를 BODY에서 그대로 짧게 인용. 없으면 빈 문자열.\n"
+        "2) key_quote: 투자 판단에 중요한 BODY 문장 1개를 한국어로 번역/압축한 핵심 문장. 없으면 빈 문자열.\n"
         "3) why_it_matters: 해당 종목의 실적·주가·사업에 왜 중요한지 한국어 한 문장.\n"
         "확인되지 않은 전망은 단정하지 말고, BODY에 없는 내용은 만들지 마라.\n\n"
         f"{payload}\n\n"

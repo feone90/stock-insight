@@ -411,6 +411,123 @@ async def test_build_news_surfaces_body_quote_and_importance(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_news_never_surfaces_english_summary_for_us_news(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer.llm_classify_news",
+        AsyncMock(return_value={"items": [{"index": 0, "impact": "positive"}]}),
+    )
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer._analyze_news_items",
+        AsyncMock(return_value={}),
+    )
+    pool = _CitationPool()
+
+    items = await _build_news(
+        {
+            "items": [
+                {
+                    "title": "Why Microsoft stock is trading up today",
+                    "source": "Yahoo Finance",
+                    "url": "https://finance.yahoo.com/msft",
+                    "published_at": datetime.utcnow(),
+                    "summary": (
+                        "Microsoft shares rose after reports revealed stronger Azure demand. "
+                        "Analysts said enterprise AI spending remained resilient across large customers."
+                    ),
+                }
+            ]
+        },
+        pool,
+    )
+
+    assert "Microsoft shares rose" not in items[0].summary
+    assert "영문 기사 본문" in items[0].summary
+    assert items[0].key_quote is None
+
+
+@pytest.mark.asyncio
+async def test_build_news_rejects_non_korean_llm_output_for_us_news(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer.llm_classify_news",
+        AsyncMock(return_value={"items": [{"index": 0, "impact": "positive"}]}),
+    )
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer._analyze_news_items",
+        AsyncMock(return_value={
+            0: {
+                "summary": "Microsoft shares rose after stronger Azure demand.",
+                "key_quote": "Azure demand remained resilient.",
+                "why_it_matters": "Cloud revenue is important for margins.",
+            }
+        }),
+    )
+    pool = _CitationPool()
+
+    items = await _build_news(
+        {
+            "items": [
+                {
+                    "title": "Why Microsoft stock is trading up today",
+                    "source": "Yahoo Finance",
+                    "url": "https://finance.yahoo.com/msft",
+                    "published_at": datetime.utcnow(),
+                    "summary": (
+                        "Microsoft shares rose after reports revealed stronger Azure demand. "
+                        "Analysts said enterprise AI spending remained resilient across large customers."
+                    ),
+                }
+            ]
+        },
+        pool,
+    )
+
+    assert "Microsoft shares rose" not in items[0].summary
+    assert items[0].key_quote is None
+    assert items[0].why_it_matters is None
+
+
+@pytest.mark.asyncio
+async def test_build_news_accepts_korean_analysis_for_us_news(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer.llm_classify_news",
+        AsyncMock(return_value={"items": [{"index": 0, "impact": "positive"}]}),
+    )
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer._analyze_news_items",
+        AsyncMock(return_value={
+            0: {
+                "summary": "마이크로소프트 주가는 애저 수요와 투자자 매수 소식에 상승했다.",
+                "key_quote": "애저 수요가 견조하다는 점이 주가 상승의 핵심 배경으로 제시됐다.",
+                "why_it_matters": "클라우드 성장세는 마이크로소프트의 이익률과 AI 투자 회수 가능성을 좌우한다.",
+            }
+        }),
+    )
+    pool = _CitationPool()
+
+    items = await _build_news(
+        {
+            "items": [
+                {
+                    "title": "Why Microsoft stock is trading up today",
+                    "source": "Yahoo Finance",
+                    "url": "https://finance.yahoo.com/msft",
+                    "published_at": datetime.utcnow(),
+                    "summary": (
+                        "Microsoft shares rose after reports revealed stronger Azure demand. "
+                        "Analysts said enterprise AI spending remained resilient across large customers."
+                    ),
+                }
+            ]
+        },
+        pool,
+    )
+
+    assert items[0].summary.startswith("마이크로소프트")
+    assert items[0].key_quote.startswith("애저 수요")
+    assert items[0].why_it_matters.startswith("클라우드 성장세")
+
+
+@pytest.mark.asyncio
 async def test_fetch_recent_news_drops_caption_duplicates(db_for_data_layer):
     db = db_for_data_layer
     s = Stock(ticker="TSTCAP", name="삼성전자", market="KRX", sector="반도체", current_price=10)
