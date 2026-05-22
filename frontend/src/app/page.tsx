@@ -41,6 +41,13 @@ export default function Home() {
           <p className="mb-8 text-sm text-slate-400">
             관심 종목을 선택하여 분석을 확인하세요. ⌘K로 종목을 검색할 수 있습니다.
           </p>
+          <Link
+            href="/portfolio"
+            className="mb-5 inline-flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm font-medium text-blue-200 transition-colors hover:bg-blue-500/15"
+          >
+            관심종목 레이더로 전체 흐름 보기
+            <span aria-hidden>→</span>
+          </Link>
           <div className="grid gap-4 sm:grid-cols-2">
             {favorites.map((stock) => (
               <Link
