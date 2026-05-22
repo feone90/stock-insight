@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Layers3,
   Newspaper,
+  RefreshCw,
   Signal,
   Sparkles,
 } from "lucide-react";
@@ -18,8 +19,9 @@ import {
   getStockCard,
   getStockEventMarkers,
   getStockPrices,
+  priceRefreshStock,
 } from "@/services/api";
-import { currencyMark, isKRMarket } from "@/lib/markets";
+import { currencyMark, isKRMarket, isUSMarket } from "@/lib/markets";
 import { onUserChanged } from "@/services/user";
 import type { Stock, PriceRecord } from "@/types/stock";
 import type { StockCard, StockEventMarker } from "@/types/card";
@@ -31,7 +33,8 @@ type PortfolioItem = {
   events: StockEventMarker[];
   score: number;
   reason: string;
-  tone: "positive" | "negative" | "mixed" | "neutral";
+  priceTone: "positive" | "negative" | "neutral";
+  driverTone: "positive" | "negative" | "mixed" | "neutral";
 };
 
 const STANCE_LABEL = {
@@ -43,36 +46,53 @@ const STANCE_LABEL = {
 export default function PortfolioPage() {
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const loadPortfolio = useCallback(async (options?: { quiet?: boolean }) => {
+    if (!options?.quiet) setLoading(true);
+    setError(null);
+    try {
+      const favorites = await getFavorites();
+      const rows = await Promise.all(
+        favorites.map(async (stock) => buildPortfolioItem(stock)),
+      );
+      setItems(rows.sort(comparePortfolioItems));
+    } catch {
+      setError("관심종목을 불러오지 못했습니다.");
+    } finally {
+      if (!options?.quiet) setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
+    let alive = true;
 
     const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const favorites = await getFavorites();
-        const rows = await Promise.all(
-          favorites.map(async (stock) => buildPortfolioItem(stock)),
-        );
-        if (!cancelled) {
-          setItems(rows.sort((a, b) => b.score - a.score));
-        }
-      } catch {
-        if (!cancelled) setError("관심종목을 불러오지 못했습니다.");
-      } finally {
-        if (!cancelled) setLoading(false);
+      if (alive) {
+        await loadPortfolio();
       }
     };
 
     load();
     const unsubscribe = onUserChanged(load);
     return () => {
-      cancelled = true;
+      alive = false;
       unsubscribe();
     };
-  }, []);
+  }, [loadPortfolio]);
+
+  const refreshPortfolioPrices = useCallback(async () => {
+    if (refreshingPrices || items.length === 0) return;
+    setRefreshingPrices(true);
+    try {
+      await Promise.allSettled(items.map((item) => priceRefreshStock(item.stock.ticker)));
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await loadPortfolio({ quiet: true });
+    } finally {
+      setRefreshingPrices(false);
+    }
+  }, [items, loadPortfolio, refreshingPrices]);
 
   const leaders = useMemo(() => items.slice(0, 3), [items]);
   const stats = useMemo(() => summarize(items), [items]);
@@ -89,17 +109,28 @@ export default function PortfolioPage() {
             오늘 먼저 볼 종목
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400 md:text-[15px]">
-            즐겨찾기 전체를 가격 변동, AI 판단, 종합 원인 키워드, 뉴스와 관계 신호 기준으로
-            정렬했습니다.
+            즐겨찾기 전체를 국내장 먼저, 이후 미국장 순서로 묶고 각 시장 안에서 오늘 가격 변동,
+            AI 판단, 종합 요인, 뉴스와 관계 신호 기준으로 정렬했습니다.
           </p>
         </div>
-        <Link
-          href="/"
-          className="mt-4 inline-flex w-fit items-center gap-2 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 md:mt-0"
-        >
-          즐겨찾기 목록
-          <ArrowRight size={15} />
-        </Link>
+        <div className="mt-4 flex flex-wrap gap-2 md:mt-0">
+          <button
+            type="button"
+            onClick={refreshPortfolioPrices}
+            disabled={refreshingPrices || loading || items.length === 0}
+            className="inline-flex w-fit items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm text-blue-100 transition-colors hover:border-blue-400/60 hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-500"
+          >
+            <RefreshCw size={15} className={refreshingPrices ? "animate-spin" : ""} />
+            {refreshingPrices ? "가격 갱신 중" : "가격 새로고침"}
+          </button>
+          <Link
+            href="/"
+            className="inline-flex w-fit items-center gap-2 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
+          >
+            즐겨찾기 목록
+            <ArrowRight size={15} />
+          </Link>
+        </div>
       </header>
 
       {loading ? (
@@ -146,8 +177,21 @@ async function buildPortfolioItem(stock: Stock): Promise<PortfolioItem> {
     events,
     score,
     reason: pickReason(stock, card, latestEvent),
-    tone: latestEvent?.direction ?? directionFromChange(stock.change_percent),
+    priceTone: directionFromChange(stock.change_percent),
+    driverTone: latestEvent?.direction ?? "neutral",
   };
+}
+
+function comparePortfolioItems(a: PortfolioItem, b: PortfolioItem): number {
+  const marketDiff = marketOrder(a.stock.market) - marketOrder(b.stock.market);
+  if (marketDiff !== 0) return marketDiff;
+  return b.score - a.score;
+}
+
+function marketOrder(market: string): number {
+  if (isKRMarket(market)) return 0;
+  if (isUSMarket(market)) return 1;
+  return 2;
 }
 
 function importanceScore(
@@ -188,7 +232,7 @@ function pickReason(
 function summarize(items: PortfolioItem[]) {
   const up = items.filter((item) => item.stock.change_percent > 0).length;
   const down = items.filter((item) => item.stock.change_percent < 0).length;
-  const negativeDrivers = items.filter((item) => item.tone === "negative").length;
+  const negativeDrivers = items.filter((item) => item.driverTone === "negative").length;
   const buy = items.filter((item) => item.card?.glance.stance === "BUY").length;
   const activeEvents = items.filter((item) => item.events.length > 0).length;
   return { up, down, negativeDrivers, buy, activeEvents, total: items.length };
@@ -202,21 +246,21 @@ function PriorityPanel({ leaders }: { leaders: PortfolioItem[] }) {
           <Sparkles size={16} className="text-amber-300" />
           우선 확인
         </div>
-        <span className="text-xs text-slate-500">중요도순 Top 3</span>
+        <span className="text-xs text-slate-500">국내 우선 · 중요도 Top 3</span>
       </div>
       <div className="grid gap-2 md:grid-cols-3">
         {leaders.map((item, index) => (
           <Link
             key={item.stock.ticker}
             href={`/stock/${item.stock.ticker}`}
-            className={`group relative min-h-[132px] overflow-hidden rounded-lg border bg-slate-950/70 p-3 transition-colors hover:border-slate-500 ${toneBorder(item.tone)}`}
+            className={`group relative min-h-[132px] overflow-hidden rounded-lg border bg-slate-950/70 p-3 transition-colors hover:border-slate-500 ${toneBorder(item.priceTone)}`}
           >
-            <div className={`absolute inset-x-0 top-0 h-0.5 ${toneBar(item.tone)}`} />
+            <div className={`absolute inset-x-0 top-0 h-0.5 ${toneBar(item.priceTone)}`} />
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="rounded border border-slate-700/80 px-1.5 py-0.5 text-[10px] text-slate-400">
                 #{index + 1}
               </span>
-              <DirectionPill tone={item.tone} />
+              <PriceMovePill tone={item.priceTone} />
             </div>
             <div className="truncate text-sm font-semibold text-slate-50 group-hover:text-blue-300">
               {item.stock.name}
@@ -248,7 +292,7 @@ function MarketPulse({ stats }: { stats: ReturnType<typeof summarize> }) {
         <PulseTile label="원인" value={`${stats.activeEvents}/${stats.total}`} tone="neutral" />
       </div>
       <div className="mt-3 border-l-2 border-amber-400/70 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
-        악재성 원인 {stats.negativeDrivers}개. 파란 원인 카드는 먼저 읽어보는 편이 좋습니다.
+        전체 종목 기준 악재 요인 {stats.negativeDrivers}개. 특정 뉴스 1건이 아니라 daily 원인 분석의 방향입니다.
       </div>
     </section>
   );
@@ -287,7 +331,7 @@ function PortfolioCard({ item }: { item: PortfolioItem }) {
   return (
     <Link
       href={`/stock/${stock.ticker}`}
-      className={`group flex min-h-[306px] flex-col overflow-hidden rounded-lg border bg-slate-900/80 p-4 transition-colors hover:border-slate-500 ${toneBorder(item.tone)}`}
+      className={`group flex min-h-[306px] flex-col overflow-hidden rounded-lg border bg-slate-900/80 p-4 transition-colors hover:border-slate-500 ${toneBorder(item.priceTone)}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -315,13 +359,14 @@ function PortfolioCard({ item }: { item: PortfolioItem }) {
       <div className="mt-3 flex flex-wrap gap-1.5">
         {stance ? <Badge tone={stanceTone(stance)}>{STANCE_LABEL[stance]}</Badge> : null}
         {card?.glance.final_grade ? <Badge tone="neutral">등급 {card.glance.final_grade}</Badge> : null}
-        {latestEvent ? <DirectionPill tone={latestEvent.direction} /> : <Badge tone="neutral">원인 대기</Badge>}
+        <PriceMovePill tone={item.priceTone} />
+        {latestEvent ? <DriverPill tone={latestEvent.direction} /> : <Badge tone="neutral">요인 대기</Badge>}
       </div>
 
-      <div className={`mt-3 border-l-2 px-3 py-1.5 ${toneLeftBorder(item.tone)}`}>
+      <div className={`mt-3 border-l-2 px-3 py-1.5 ${toneLeftBorder(item.priceTone)}`}>
         <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500">
           <Activity size={13} />
-          가장 중요한 신호
+          오늘 먼저 볼 신호
         </div>
         <p className="line-clamp-2 text-sm font-medium leading-relaxed text-slate-100">
           {item.reason}
@@ -414,11 +459,17 @@ function MiniMetric({
   );
 }
 
-function DirectionPill({ tone }: { tone: PortfolioItem["tone"] }) {
-  if (tone === "positive") return <Badge tone="positive">상승 원인</Badge>;
-  if (tone === "negative") return <Badge tone="negative">하락 원인</Badge>;
-  if (tone === "mixed") return <Badge tone="mixed">호재·악재 혼재</Badge>;
-  return <Badge tone="neutral">중립</Badge>;
+function PriceMovePill({ tone }: { tone: PortfolioItem["priceTone"] }) {
+  if (tone === "positive") return <Badge tone="positive">오늘 상승</Badge>;
+  if (tone === "negative") return <Badge tone="negative">오늘 하락</Badge>;
+  return <Badge tone="neutral">보합</Badge>;
+}
+
+function DriverPill({ tone }: { tone: PortfolioItem["driverTone"] }) {
+  if (tone === "positive") return <Badge tone="positive">호재 요인</Badge>;
+  if (tone === "negative") return <Badge tone="negative">악재 요인</Badge>;
+  if (tone === "mixed") return <Badge tone="mixed">요인 혼재</Badge>;
+  return <Badge tone="neutral">중립 요인</Badge>;
 }
 
 function Badge({
@@ -483,7 +534,7 @@ function formatShortDate(value?: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-function directionFromChange(change: number): PortfolioItem["tone"] {
+function directionFromChange(change: number): PortfolioItem["priceTone"] {
   if (change > 0) return "positive";
   if (change < 0) return "negative";
   return "neutral";
@@ -499,21 +550,21 @@ function changeClass(change: number): string {
   return `mt-1 text-xs font-medium ${change >= 0 ? "text-red-300" : "text-blue-300"}`;
 }
 
-function toneBorder(tone: PortfolioItem["tone"]): string {
+function toneBorder(tone: PortfolioItem["priceTone"] | PortfolioItem["driverTone"]): string {
   if (tone === "positive") return "border-red-500/25";
   if (tone === "negative") return "border-blue-500/30";
   if (tone === "mixed") return "border-amber-500/30";
   return "border-slate-800";
 }
 
-function toneBar(tone: PortfolioItem["tone"]): string {
+function toneBar(tone: PortfolioItem["priceTone"] | PortfolioItem["driverTone"]): string {
   if (tone === "positive") return "bg-red-400";
   if (tone === "negative") return "bg-blue-400";
   if (tone === "mixed") return "bg-amber-400";
   return "bg-slate-600";
 }
 
-function toneLeftBorder(tone: PortfolioItem["tone"]): string {
+function toneLeftBorder(tone: PortfolioItem["priceTone"] | PortfolioItem["driverTone"]): string {
   if (tone === "positive") return "border-red-400/70";
   if (tone === "negative") return "border-blue-400/70";
   if (tone === "mixed") return "border-amber-400/70";
