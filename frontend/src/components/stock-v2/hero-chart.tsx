@@ -73,6 +73,7 @@ export function HeroChart({
         return;
       }
       if (cancelled || !node || prices.length === 0) return;
+      const chartEvents = selectChartEvents(markerEvents);
       setEvents(markerEvents);
 
       // PriceHistory는 desc일 수도 — 캔들은 ascending 시간 필요.
@@ -133,15 +134,13 @@ export function HeroChart({
       );
       createSeriesMarkers(
         candle,
-        markerEvents
-          .slice()
+        chartEvents
           .sort((a, b) => a.date.localeCompare(b.date))
           .map<SeriesMarker<Time>>((event) => ({
             time: event.date as Time,
             position: markerPosition(event.direction),
             shape: markerShape(event.direction),
             color: markerColor(event.direction, mode),
-            text: compactMarkerText(event),
           })),
         { zOrder: "top" },
       );
@@ -205,6 +204,15 @@ export function HeroChart({
             />
             20일 평균
           </span>
+          <span
+            className="flex items-center gap-1.5"
+            title="차트에는 날짜별 대표 이벤트 위치만 표시하고, 자세한 이유는 아래 이벤트 카드에서 확인합니다."
+          >
+            <span className="inline-flex h-3 w-3 items-center justify-center rounded-full border border-[var(--surface-text-muted)] text-[8px] leading-none">
+              !
+            </span>
+            이벤트
+          </span>
         </div>
         <div className="flex w-full items-center gap-1 overflow-x-auto rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] p-0.5 sm:w-auto">
           {PERIOD_OPTIONS.map((opt) => (
@@ -230,8 +238,8 @@ export function HeroChart({
 }
 
 function ChartEventStrip({ events }: { events: StockEventMarker[] }) {
-  const visible = events.slice(0, 5);
-  if (visible.length === 0) {
+  const groups = groupEventsByDate(events).slice(0, 5);
+  if (groups.length === 0) {
     return (
       <div className="mt-2 rounded-md border border-dashed border-[var(--surface-border)] px-3 py-2 text-xs text-[var(--surface-text-muted)]">
         아직 차트에 남길 과거 이벤트가 없습니다. daily 분석이 쌓이면 상승·하락 원인이 여기에 기록됩니다.
@@ -241,22 +249,40 @@ function ChartEventStrip({ events }: { events: StockEventMarker[] }) {
 
   return (
     <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
-      {visible.map((event) => (
-        <a
-          key={event.id}
-          href={event.url || undefined}
-          target={event.url ? "_blank" : undefined}
-          rel={event.url ? "noreferrer" : undefined}
-          className={`min-w-[180px] rounded-md border px-2.5 py-2 text-left transition-colors ${eventTone(event.direction)}`}
-          title={event.summary}
+      {groups.map((group) => (
+        <div
+          key={group.date}
+          className="min-w-[230px] rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] px-2.5 py-2"
         >
           <div className="flex items-center justify-between gap-2 text-[10px]">
-            <span>{formatEventDate(event.date)}</span>
-            <span>{SOURCE_LABEL[event.source_type]}</span>
+            <span className="font-medium text-[var(--surface-text-muted)]">
+              {formatEventDate(group.date)}
+            </span>
+            <span className="text-[var(--surface-text-subtle)]">
+              원인 {group.events.length}개
+            </span>
           </div>
-          <div className="mt-1 truncate text-xs font-semibold">{event.keyword}</div>
-          <div className="mt-0.5 line-clamp-2 text-[11px] opacity-85">{event.summary}</div>
-        </a>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {group.events.slice(0, 5).map((event) => (
+              <a
+                key={event.id}
+                href={event.url || undefined}
+                target={event.url ? "_blank" : undefined}
+                rel={event.url ? "noreferrer" : undefined}
+                className={`max-w-full rounded border px-1.5 py-0.5 text-[10px] transition-colors ${eventTone(event.direction)}`}
+                title={`${SOURCE_LABEL[event.source_type]} · ${event.summary}`}
+              >
+                <span className="mr-1 opacity-70">{SOURCE_LABEL[event.source_type]}</span>
+                <span>{event.keyword}</span>
+              </a>
+            ))}
+            {group.events.length > 5 ? (
+              <span className="rounded border border-[var(--surface-border)] px-1.5 py-0.5 text-[10px] text-[var(--surface-text-muted)]">
+                +{group.events.length - 5}
+              </span>
+            ) : null}
+          </div>
+        </div>
       ))}
     </div>
   );
@@ -301,15 +327,60 @@ function eventTone(direction: EventDirection): string {
   return "border-[var(--surface-border)] bg-[var(--surface-card)] text-[var(--surface-text-muted)] hover:bg-[var(--surface-section-hover)]";
 }
 
-function compactMarkerText(event: StockEventMarker): string {
-  const text = event.keyword || SOURCE_LABEL[event.source_type];
-  return text.length > 8 ? `${text.slice(0, 8)}…` : text;
-}
-
 function formatEventDate(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function selectChartEvents(events: StockEventMarker[]): StockEventMarker[] {
+  const byDate = new Map<string, StockEventMarker>();
+  for (const event of events) {
+    const existing = byDate.get(event.date);
+    if (!existing || eventPriority(event) > eventPriority(existing)) {
+      byDate.set(event.date, event);
+    }
+  }
+  return Array.from(byDate.values())
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 10);
+}
+
+function groupEventsByDate(events: StockEventMarker[]): Array<{
+  date: string;
+  events: StockEventMarker[];
+}> {
+  const seen = new Set<string>();
+  const byDate = new Map<string, StockEventMarker[]>();
+  for (const event of events) {
+    const key = `${event.date}|${event.source_type}|${event.keyword}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const list = byDate.get(event.date) ?? [];
+    list.push(event);
+    byDate.set(event.date, list);
+  }
+  return Array.from(byDate.entries())
+    .map(([date, list]) => ({
+      date,
+      events: list.sort((a, b) => eventPriority(b) - eventPriority(a)),
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function eventPriority(event: StockEventMarker): number {
+  const sourceScore: Record<EventSourceType, number> = {
+    price_move: 4,
+    catalyst: 3,
+    news: 2,
+  };
+  const directionScore: Record<EventDirection, number> = {
+    positive: 2,
+    negative: 2,
+    mixed: 1,
+    neutral: 0,
+  };
+  return sourceScore[event.source_type] * 10 + directionScore[event.direction];
 }
 
 function formatKoreanDate(t: Time, includeYear: boolean): string {
