@@ -27,7 +27,7 @@ from app.schemas.card_history import AnalysisHistoryResponse, StockEventsRespons
 from app.models.financial import Financial
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.engine import analyze, is_analyzable
-from app.services.analyst.history import build_analysis_history, build_event_markers, driver_markers
+from app.services.analyst.history import build_analysis_history, driver_markers
 from app.services.ontology import extract_news_relations_for_ticker
 
 logger = logging.getLogger(__name__)
@@ -330,28 +330,9 @@ async def get_stock_events(
             .limit(safe_limit)
         )
     ).scalars().all()
-    if driver_rows:
-        return StockEventsResponse(
-            ticker=ticker.upper(),
-            events=driver_markers(list(driver_rows), ticker=ticker, limit=safe_limit),
-        )
-
-    analysis_rows = (
-        await db.execute(
-            select(Analysis)
-            .where(
-                Analysis.stock_id == stock.id,
-                Analysis.schema_version == "v2",
-                Analysis.card_data.is_not(None),
-                Analysis.date >= since,
-            )
-            .order_by(Analysis.date.desc())
-            .limit(safe_days)
-        )
-    ).scalars().all()
     return StockEventsResponse(
         ticker=ticker.upper(),
-        events=build_event_markers(list(analysis_rows), limit=safe_limit),
+        events=driver_markers(list(driver_rows), ticker=ticker, limit=safe_limit),
     )
 
 

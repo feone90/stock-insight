@@ -147,6 +147,40 @@ async def test_get_stock_events_prefers_daily_drivers(client, db):
 
 
 @pytest.mark.asyncio
+async def test_get_stock_events_does_not_fallback_to_legacy_news(client, db):
+    s = Stock(ticker="NOLEGACY", name="x", market="KRX", sector="x")
+    db.add(s)
+    await db.flush()
+    db.add(
+        Analysis(
+            stock_id=s.id,
+            date=date.today(),
+            period_type="daily",
+            summary="legacy",
+            feedback="legacy",
+            schema_version="v2",
+            card_data={
+                "news": [
+                    {
+                        "title": "Legacy news title",
+                        "summary": "This should not become a chart driver.",
+                        "impact": "positive",
+                        "published_at": date.today().isoformat(),
+                    }
+                ]
+            },
+            persona_version="analyst_v1",
+        )
+    )
+    await db.commit()
+
+    resp = await client.get("/api/stocks/NOLEGACY/events?days=30&limit=5")
+
+    assert resp.status_code == 200
+    assert resp.json()["events"] == []
+
+
+@pytest.mark.asyncio
 async def test_analyze_endpoint_queues_engine(client, db, monkeypatch):
     _seed_analyzable_stock(db, "ANAL1")
     await db.commit()
