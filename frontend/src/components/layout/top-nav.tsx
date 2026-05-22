@@ -151,7 +151,7 @@ export function TopNav() {
           href="/portfolio"
           className="hidden md:inline text-sm text-blue-400 hover:text-blue-300 transition-colors"
         >
-          레이더
+          포트폴리오
         </Link>
 
         {/* 가족 user picker — 인증 없이 즐겨찾기 분리. 모바일에서도 항상 보임. */}

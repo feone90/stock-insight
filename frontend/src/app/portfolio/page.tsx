@@ -7,9 +7,9 @@ import {
   ArrowRight,
   BarChart3,
   Clock3,
+  LayoutDashboard,
   Layers3,
   Newspaper,
-  Radar,
   Signal,
   Sparkles,
 } from "lucide-react";
@@ -24,7 +24,7 @@ import { onUserChanged } from "@/services/user";
 import type { Stock, PriceRecord } from "@/types/stock";
 import type { StockCard, StockEventMarker } from "@/types/card";
 
-type RadarItem = {
+type PortfolioItem = {
   stock: Stock;
   card: StockCard | null;
   prices: PriceRecord[];
@@ -41,7 +41,7 @@ const STANCE_LABEL = {
 } as const;
 
 export default function PortfolioPage() {
-  const [items, setItems] = useState<RadarItem[]>([]);
+  const [items, setItems] = useState<PortfolioItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +54,7 @@ export default function PortfolioPage() {
       try {
         const favorites = await getFavorites();
         const rows = await Promise.all(
-          favorites.map(async (stock) => buildRadarItem(stock)),
+          favorites.map(async (stock) => buildPortfolioItem(stock)),
         );
         if (!cancelled) {
           setItems(rows.sort((a, b) => b.score - a.score));
@@ -82,8 +82,8 @@ export default function PortfolioPage() {
       <header className="mb-5 border-b border-slate-800 pb-5 md:mb-7 md:flex md:items-end md:justify-between">
         <div>
           <div className="inline-flex items-center gap-2 rounded border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-1 text-xs font-medium text-cyan-200">
-            <Radar size={14} />
-            관심종목 레이더
+            <LayoutDashboard size={14} />
+            포트폴리오
           </div>
           <h1 className="mt-3 text-[26px] font-semibold tracking-tight text-slate-50 md:text-4xl">
             오늘 먼저 볼 종목
@@ -119,7 +119,7 @@ export default function PortfolioPage() {
 
           <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
             {items.map((item) => (
-              <RadarCard key={item.stock.ticker} item={item} />
+              <PortfolioCard key={item.stock.ticker} item={item} />
             ))}
           </section>
         </>
@@ -128,7 +128,7 @@ export default function PortfolioPage() {
   );
 }
 
-async function buildRadarItem(stock: Stock): Promise<RadarItem> {
+async function buildPortfolioItem(stock: Stock): Promise<PortfolioItem> {
   const [cardResult, pricesResult, eventsResult] = await Promise.allSettled([
     getStockCard(stock.ticker),
     getStockPrices(stock.ticker, 60),
@@ -185,7 +185,7 @@ function pickReason(
   return "새 분석 신호를 기다리는 중입니다.";
 }
 
-function summarize(items: RadarItem[]) {
+function summarize(items: PortfolioItem[]) {
   const up = items.filter((item) => item.stock.change_percent > 0).length;
   const down = items.filter((item) => item.stock.change_percent < 0).length;
   const negativeDrivers = items.filter((item) => item.tone === "negative").length;
@@ -194,7 +194,7 @@ function summarize(items: RadarItem[]) {
   return { up, down, negativeDrivers, buy, activeEvents, total: items.length };
 }
 
-function PriorityPanel({ leaders }: { leaders: RadarItem[] }) {
+function PriorityPanel({ leaders }: { leaders: PortfolioItem[] }) {
   return (
     <section className="min-w-0">
       <div className="mb-3 flex items-center justify-between">
@@ -277,7 +277,7 @@ function PulseTile({
   );
 }
 
-function RadarCard({ item }: { item: RadarItem }) {
+function PortfolioCard({ item }: { item: PortfolioItem }) {
   const { stock, card, prices, events } = item;
   const latestEvent = events[0] ?? null;
   const stance = card?.glance.stance;
@@ -414,7 +414,7 @@ function MiniMetric({
   );
 }
 
-function DirectionPill({ tone }: { tone: RadarItem["tone"] }) {
+function DirectionPill({ tone }: { tone: PortfolioItem["tone"] }) {
   if (tone === "positive") return <Badge tone="positive">상승 원인</Badge>;
   if (tone === "negative") return <Badge tone="negative">하락 원인</Badge>;
   if (tone === "mixed") return <Badge tone="mixed">호재·악재 혼재</Badge>;
@@ -483,7 +483,7 @@ function formatShortDate(value?: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-function directionFromChange(change: number): RadarItem["tone"] {
+function directionFromChange(change: number): PortfolioItem["tone"] {
   if (change > 0) return "positive";
   if (change < 0) return "negative";
   return "neutral";
@@ -499,21 +499,21 @@ function changeClass(change: number): string {
   return `mt-1 text-xs font-medium ${change >= 0 ? "text-red-300" : "text-blue-300"}`;
 }
 
-function toneBorder(tone: RadarItem["tone"]): string {
+function toneBorder(tone: PortfolioItem["tone"]): string {
   if (tone === "positive") return "border-red-500/25";
   if (tone === "negative") return "border-blue-500/30";
   if (tone === "mixed") return "border-amber-500/30";
   return "border-slate-800";
 }
 
-function toneBar(tone: RadarItem["tone"]): string {
+function toneBar(tone: PortfolioItem["tone"]): string {
   if (tone === "positive") return "bg-red-400";
   if (tone === "negative") return "bg-blue-400";
   if (tone === "mixed") return "bg-amber-400";
   return "bg-slate-600";
 }
 
-function toneLeftBorder(tone: RadarItem["tone"]): string {
+function toneLeftBorder(tone: PortfolioItem["tone"]): string {
   if (tone === "positive") return "border-red-400/70";
   if (tone === "negative") return "border-blue-400/70";
   if (tone === "mixed") return "border-amber-400/70";

@@ -45,7 +45,7 @@ export default function Home() {
             href="/portfolio"
             className="mb-5 inline-flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm font-medium text-blue-200 transition-colors hover:bg-blue-500/15"
           >
-            관심종목 레이더로 전체 흐름 보기
+            포트폴리오로 전체 흐름 보기
             <span aria-hidden>→</span>
           </Link>
           <div className="grid gap-4 sm:grid-cols-2">
