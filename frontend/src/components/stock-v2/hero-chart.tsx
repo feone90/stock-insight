@@ -311,7 +311,7 @@ function ChartEventStrip({ events }: { events: StockEventMarker[] }) {
   if (groups.length === 0) {
     return (
       <div className="mt-2 rounded-md border border-dashed border-[var(--surface-border)] px-3 py-2 text-xs text-[var(--surface-text-muted)]">
-        아직 차트에 남길 과거 이벤트가 없습니다. daily 분석이 쌓이면 상승·하락 원인이 여기에 기록됩니다.
+        아직 확정된 과거 원인 키워드가 없습니다. 과거 데이터 기준 키워드 추출이 끝나면 상승·하락 원인이 여기에 기록됩니다.
       </div>
     );
   }

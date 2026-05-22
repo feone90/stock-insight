@@ -27,7 +27,6 @@ import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import type { Stock } from "@/types/stock";
 import { AtAGlancePanel } from "./at-a-glance-panel";
-import { AnalysisHistorySection } from "./analysis-history-section";
 import { CardHeader } from "./card-header";
 import { DecisionSection } from "./decision-section";
 import { EarningsAnalystSection } from "./earnings-analyst-section";
@@ -265,7 +264,6 @@ export function StockCardPage({ ticker }: { ticker: string }) {
               {/* Left — chart + secondary */}
               <div className="space-y-3 min-w-0">
                 <HeroChart ticker={card.ticker} priceAsof={card.price_asof} />
-                <AnalysisHistorySection ticker={card.ticker} />
                 <RelationsSection relations={card.relations} ticker={card.ticker} />
                 <NewsSection news={card.news} political={card.political_signals} />
                 <MacroSection macro={card.macro} />

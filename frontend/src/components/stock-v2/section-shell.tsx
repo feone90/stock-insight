@@ -69,30 +69,28 @@ export function SectionShell({
 
   return (
     <section
-      className={`relative rounded-xl border border-[var(--surface-border)] ${surfaceClass} ${stripeClass} overflow-hidden`}
+      className={`relative rounded-lg border border-[var(--surface-border)] ${surfaceClass} ${stripeClass} overflow-hidden`}
     >
       <div className="flex w-full items-stretch">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="flex flex-1 items-center justify-between gap-3 px-4 py-3 text-left min-h-11 hover:bg-[var(--surface-section-hover)]/50 transition-colors"
+          className="grid min-h-14 flex-1 grid-cols-[22px_minmax(72px,auto)_minmax(0,1fr)_18px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--surface-section-hover)]/50 sm:min-h-11 sm:grid-cols-[22px_auto_minmax(0,1fr)_18px] sm:px-4 sm:py-3"
           aria-expanded={open}
         >
-          <span className="flex items-center gap-2.5 min-w-0 flex-1">
-            <span
-              aria-hidden
-              className="inline-flex size-5 shrink-0 items-center justify-center text-[var(--surface-text-muted)]"
-            >
-              {icon ?? <span className="text-base">{emoji}</span>}
-            </span>
-            <span className="font-semibold text-[var(--surface-text)] shrink-0">
-              {title}
-            </span>
-            <span className="text-sm text-[var(--surface-text-muted)] truncate min-w-0 flex-1">
-              {compact}
-            </span>
+          <span
+            aria-hidden
+            className="inline-flex size-[22px] items-center justify-center text-[var(--surface-text-muted)]"
+          >
+            {icon ?? <span className="text-base">{emoji}</span>}
           </span>
-          <span className="shrink-0 text-[var(--surface-text-subtle)]">
+          <span className="whitespace-nowrap text-sm font-semibold leading-none text-[var(--surface-text)] sm:text-[15px]">
+            {title}
+          </span>
+          <span className="min-w-0 truncate text-xs leading-none text-[var(--surface-text-muted)] sm:text-sm">
+            {compact}
+          </span>
+          <span className="inline-flex justify-end text-[var(--surface-text-subtle)]">
             {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
           </span>
         </button>
@@ -105,7 +103,7 @@ export function SectionShell({
             }}
             aria-label={`${title} 도움말`}
             title="이 섹션이 뭔지 설명 보기"
-            className={`relative shrink-0 inline-flex items-center justify-center w-10 min-h-11 border-l border-[var(--surface-border)] transition-colors ${
+            className={`relative inline-flex min-h-14 w-10 shrink-0 items-center justify-center border-l border-[var(--surface-border)] transition-colors sm:min-h-11 ${
               helpOpen
                 ? "bg-blue-500/10 text-blue-700 dark:text-blue-300"
                 : "text-[var(--surface-text-subtle)] hover:text-[var(--surface-text-muted)] hover:bg-[var(--surface-section-hover)]/50"
@@ -121,7 +119,7 @@ export function SectionShell({
         </div>
       ) : null}
       {open && expanded ? (
-        <div className="border-t border-[var(--surface-border)] px-4 py-3">
+        <div className="border-t border-[var(--surface-border)] px-3 py-3 sm:px-4">
           {expanded}
           {sources ? (
             <div className="mt-3 border-t border-[var(--surface-border)] pt-3 text-xs text-[var(--surface-text-muted)]">
