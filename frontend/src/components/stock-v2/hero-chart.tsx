@@ -50,6 +50,7 @@ export function HeroChart({
   const { mode } = useTheme();
   const [days, setDays] = useState(initialDays);
   const [events, setEvents] = useState<StockEventMarker[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -58,6 +59,7 @@ export function HeroChart({
     let cancelled = false;
     let chart: IChartApi | null = null;
     let onResize: (() => void) | null = null;
+    let onClick: ((param: { hoveredObjectId?: unknown; time?: Time }) => void) | null = null;
 
     (async () => {
       let prices;
@@ -137,6 +139,7 @@ export function HeroChart({
         chartEvents
           .sort((a, b) => a.date.localeCompare(b.date))
           .map<SeriesMarker<Time>>((event) => ({
+            id: event.id,
             time: event.date as Time,
             position: markerPosition(event.direction),
             shape: markerShape(event.direction),
@@ -144,6 +147,17 @@ export function HeroChart({
           })),
         { zOrder: "top" },
       );
+      onClick = (param) => {
+        const objectId = typeof param.hoveredObjectId === "string" ? param.hoveredObjectId : null;
+        const eventFromMarker = objectId
+          ? chartEvents.find((event) => event.id === objectId)
+          : null;
+        const dateFromClick = eventFromMarker?.date ?? (param.time ? timeToDateString(param.time) : null);
+        if (!dateFromClick) return;
+        const hasEvents = markerEvents.some((event) => event.date === dateFromClick);
+        if (hasEvents) setSelectedDate(dateFromClick);
+      };
+      chart.subscribeClick(onClick);
 
       // MA20 — 옅은 회색 점선. 단기·장기 추세 비교용 (정배열/역배열).
       if (sorted.length >= 20) {
@@ -178,9 +192,14 @@ export function HeroChart({
     return () => {
       cancelled = true;
       if (onResize) window.removeEventListener("resize", onResize);
+      if (onClick) chart?.unsubscribeClick(onClick);
       chart?.remove();
     };
   }, [ticker, days, mode, priceAsof]);
+
+  const selectedEvents = selectedDate
+    ? events.filter((event) => event.date === selectedDate)
+    : [];
 
   return (
     <div className="relative">
@@ -232,7 +251,57 @@ export function HeroChart({
         </div>
       </div>
       <div ref={containerRef} className="w-full h-[260px] md:h-[340px]" />
+      <SelectedEventPanel
+        date={selectedDate}
+        events={selectedEvents}
+        onClose={() => setSelectedDate(null)}
+      />
       <ChartEventStrip events={events} />
+    </div>
+  );
+}
+
+function SelectedEventPanel({
+  date,
+  events,
+  onClose,
+}: {
+  date: string | null;
+  events: StockEventMarker[];
+  onClose: () => void;
+}) {
+  if (!date || events.length === 0) return null;
+  return (
+    <div className="mt-2 rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-[var(--surface-text)]">
+          {formatEventDate(date)} 종합 원인
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded px-2 py-1 text-xs text-[var(--surface-text-muted)] hover:bg-[var(--surface-section-hover)]"
+        >
+          닫기
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {events.flatMap((event) => event.keywords?.length ? event.keywords : [event.keyword]).map((keyword, index) => (
+          <span
+            key={`${keyword}-${index}`}
+            className={`rounded border px-2 py-1 text-xs ${eventTone(events[Math.min(index, events.length - 1)].direction)}`}
+          >
+            {keyword}
+          </span>
+        ))}
+      </div>
+      <div className="mt-2 space-y-1">
+        {events.slice(0, 3).map((event) => (
+          <p key={event.id} className="text-xs leading-relaxed text-[var(--surface-text-muted)]">
+            {event.summary}
+          </p>
+        ))}
+      </div>
     </div>
   );
 }
@@ -289,6 +358,7 @@ function ChartEventStrip({ events }: { events: StockEventMarker[] }) {
 }
 
 const SOURCE_LABEL: Record<EventSourceType, string> = {
+  daily_driver: "종합",
   price_move: "가격원인",
   news: "뉴스",
   catalyst: "예정",
@@ -333,6 +403,13 @@ function formatEventDate(value: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+function timeToDateString(t: Time): string {
+  if (typeof t === "string") return t.slice(0, 10);
+  if (typeof t === "number") return new Date(t * 1000).toISOString().slice(0, 10);
+  const bd = t as { year: number; month: number; day: number };
+  return `${bd.year}-${String(bd.month).padStart(2, "0")}-${String(bd.day).padStart(2, "0")}`;
+}
+
 function selectChartEvents(events: StockEventMarker[]): StockEventMarker[] {
   const byDate = new Map<string, StockEventMarker>();
   for (const event of events) {
@@ -370,6 +447,7 @@ function groupEventsByDate(events: StockEventMarker[]): Array<{
 
 function eventPriority(event: StockEventMarker): number {
   const sourceScore: Record<EventSourceType, number> = {
+    daily_driver: 5,
     price_move: 4,
     catalyst: 3,
     news: 2,

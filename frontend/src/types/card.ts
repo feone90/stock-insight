@@ -341,7 +341,7 @@ export interface StockCard {
 }
 
 export type EventDirection = "positive" | "negative" | "mixed" | "neutral";
-export type EventSourceType = "price_move" | "news" | "catalyst";
+export type EventSourceType = "daily_driver" | "price_move" | "news" | "catalyst";
 
 export interface AnalysisHistoryNews {
   title: string;
@@ -377,6 +377,7 @@ export interface StockEventMarker {
   title: string;
   summary: string;
   keyword: string;
+  keywords: string[];
   confidence?: string | null;
   source_label?: string | null;
   url?: string | null;

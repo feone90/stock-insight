@@ -25,6 +25,7 @@ from app.services.political.analyzer import analyze_pending_signals
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
+from app.services.analyst.daily_drivers import run_daily_driver_batch
 from app.services.llm.adapter import get_adapter
 from app.services.llm.analyzer import analyze_stock
 from app.services.ontology import (
@@ -395,6 +396,16 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # Finalized previous-trading-day price drivers. Runs after US market close
+    # and before KR open. Missing-only: once a date has a driver row, refreshes
+    # never re-spend LLM cost for that historical day.
+    scheduler.add_job(
+        run_daily_driver_batch,
+        CronTrigger(hour=8, minute=10, timezone=tz),
+        id="daily_drivers",
+        replace_existing=True,
+    )
+
     # Truth Social hourly pipeline (트럼프 발언 fetch + LLM 영향 종목 매핑).
     # 매시 정각 — 트럼프 게시물 빈도 (~10-30/day) 고려 hourly 충분. 비용 보호는
     # can_proceed() (daily LLM budget cap)이 처리.
@@ -409,7 +420,7 @@ def init_scheduler():
     logger.info(
         "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s "
         "+ universe refresh 06:00 + sector_match 06:30 + sec_8k 06:45 "
-        "+ news 06:50 + inverse_verify 07:00 (%s)",
+        "+ news 06:50 + inverse_verify 07:00 + daily_drivers 08:10 (%s)",
         settings.scheduler_morning,
         settings.scheduler_evening,
         settings.schedule_kr_morning,

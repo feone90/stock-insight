@@ -12,6 +12,7 @@ from app.models.relation_candidate import RelationCandidate
 from app.models.macro_factor import MacroFactor
 from app.models.political_signal import PoliticalSignal, PoliticalSignalTicker
 from app.models.refresh_cooldown import RefreshCooldown
+from app.models.daily_driver import DailyPriceDriver
 
 __all__ = [
     "Base",
@@ -32,4 +33,5 @@ __all__ = [
     "PoliticalSignal",
     "PoliticalSignalTicker",
     "RefreshCooldown",
+    "DailyPriceDriver",
 ]

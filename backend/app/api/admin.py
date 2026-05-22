@@ -145,11 +145,13 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
       - inverse_verify      : inverse signal 가격 상관관계 검증
       - universe_refresh    : reference universe (KOSPI + S&P 500) refresh
       - sync_favorites      : 즐겨찾기 종목 가격/재무/뉴스/공시 동기화
+      - daily_drivers       : 직전 완료 거래일의 종합 원인 키워드 missing-only 생성
     """
     from app.scheduler import (
         run_fred_macro_sync,
         run_inverse_verification,
         run_news_extraction,
+        run_daily_driver_batch,
         run_sec_8k_extraction,
         scheduled_sync_job,
     )
@@ -216,6 +218,7 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
         "inverse_verify": run_inverse_verification,
         "universe_refresh": nightly_universe_refresh,
         "sync_favorites": scheduled_sync_job,
+        "daily_drivers": run_daily_driver_batch,
         "truth_social": _truth_social_job,
         "political_analyze": _political_analyze_job,
     }
@@ -230,6 +233,30 @@ async def run_job(job_id: str, _admin: UserInfo = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"job '{job_id}' failed: {e}")
     # job 함수가 dict 반환 시 그대로 노출 (None인 경우 빈 dict). 검증/디버깅용.
     return {"status": "ok", "job": job_id, "result": result if result is not None else {}}
+
+
+@router.post("/daily_drivers/backfill")
+async def backfill_daily_price_drivers(
+    ticker: str | None = None,
+    days: int = 30,
+    limit: int = 80,
+    force: bool = False,
+    _admin: UserInfo = Depends(require_admin),
+):
+    """수집된 과거 데이터 기준 daily 종합 원인 키워드 수동 백필.
+
+    기본은 missing-only라 이미 추출된 과거 날짜는 다시 LLM 호출하지 않는다.
+    force=true 는 복구/디버깅용으로만 사용.
+    """
+    from app.services.analyst.daily_drivers import backfill_daily_drivers
+
+    result = await backfill_daily_drivers(
+        ticker=ticker,
+        days=days,
+        limit=limit,
+        force=force,
+    )
+    return result.model_dump(mode="json")
 
 
 @router.post("/extract_relations/{ticker}")

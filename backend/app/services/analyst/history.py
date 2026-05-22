@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from app.models.analysis import Analysis
+from app.models.daily_driver import DailyPriceDriver
 from app.schemas.card_history import (
     AnalysisHistoryItem,
     AnalysisHistoryNews,
@@ -40,6 +41,30 @@ def build_event_markers(rows: list[Analysis], limit: int = 80) -> list[StockEven
         key=lambda e: (e.date, e.source_type, e.title),
         reverse=True,
     )[: max(1, min(limit, 200))]
+
+
+def driver_markers(rows: list[DailyPriceDriver], ticker: str, limit: int = 80) -> list[StockEventMarker]:
+    events: list[StockEventMarker] = []
+    for row in rows[: max(1, min(limit, 200))]:
+        keywords = [str(k).strip() for k in (row.keywords or []) if str(k).strip()]
+        keyword = keywords[0] if keywords else "원인 미확인"
+        events.append(
+            StockEventMarker(
+                id=f"driver-{row.id}",
+                date=row.trade_date,
+                source_type="daily_driver",
+                direction=_normalize_direction(row.direction),
+                title=keyword,
+                summary=row.summary or keyword,
+                keyword=keyword,
+                keywords=keywords,
+                confidence=row.confidence,
+                source_label=f"{ticker.upper()} 종합 원인",
+                url=None,
+                analysis_date=row.trade_date,
+            )
+        )
+    return events
 
 
 def _history_item(row: Analysis) -> AnalysisHistoryItem:
@@ -105,6 +130,7 @@ def _price_move_events(row: Analysis) -> list[StockEventMarker]:
             title=one_line,
             summary=summary,
             keyword=_keyword_from_text(summary or one_line),
+            keywords=[_keyword_from_text(summary or one_line)],
             confidence=_clean(confidence),
             source_label="가격 움직임",
             url=None,
@@ -131,6 +157,7 @@ def _news_events(row: Analysis) -> list[StockEventMarker]:
                 title=title,
                 summary=summary,
                 keyword=_keyword_from_text(summary),
+                keywords=[_keyword_from_text(summary)],
                 confidence=None,
                 source_label=_clean(n.get("source")) or "뉴스",
                 url=_clean(n.get("url")),
@@ -159,6 +186,7 @@ def _catalyst_events(row: Analysis) -> list[StockEventMarker]:
                 title=event,
                 summary=impact,
                 keyword=_keyword_from_text(event),
+                keywords=[_keyword_from_text(event)],
                 confidence=None,
                 source_label="예정 이벤트",
                 url=None,
