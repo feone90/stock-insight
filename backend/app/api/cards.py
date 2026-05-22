@@ -23,9 +23,11 @@ from app.database import async_session, get_db
 from app.dependencies import get_stock_or_404
 from app.models import News, PriceHistory, RefreshCooldown, Stock
 from app.models.analysis import Analysis
+from app.schemas.card_history import AnalysisHistoryResponse, StockEventsResponse
 from app.models.financial import Financial
 from app.services.analyst.cost import can_proceed
 from app.services.analyst.engine import analyze, is_analyzable
+from app.services.analyst.history import build_analysis_history, build_event_markers
 from app.services.ontology import extract_news_relations_for_ticker
 
 logger = logging.getLogger(__name__)
@@ -270,6 +272,69 @@ async def get_card(
                 r["today_change_pct"] = change_map[t]
 
     return card
+
+
+@router.get("/{ticker}/card/history", response_model=AnalysisHistoryResponse)
+async def get_card_history(
+    ticker: str,
+    limit: int = 14,
+    stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """Daily card archive — stock memory for previous AI decisions.
+
+    Phase 1 intentionally reuses `analyses.card_data` snapshots so old cards
+    remain useful without a DB migration. Frontend uses this to show "what
+    changed since yesterday" instead of losing prior reasoning on each refresh.
+    """
+    safe_limit = max(1, min(limit, 60))
+    rows = (
+        await db.execute(
+            select(Analysis)
+            .where(
+                Analysis.stock_id == stock.id,
+                Analysis.schema_version == "v2",
+                Analysis.card_data.is_not(None),
+            )
+            .order_by(Analysis.date.desc())
+            .limit(safe_limit)
+        )
+    ).scalars().all()
+    return AnalysisHistoryResponse(
+        ticker=ticker.upper(),
+        items=build_analysis_history(list(rows)),
+    )
+
+
+@router.get("/{ticker}/events", response_model=StockEventsResponse)
+async def get_stock_events(
+    ticker: str,
+    days: int = 365,
+    limit: int = 80,
+    stock: Stock = Depends(get_stock_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chart event markers extracted from previous daily cards."""
+    safe_days = max(7, min(days, 730))
+    safe_limit = max(1, min(limit, 200))
+    since = date.today() - timedelta(days=safe_days)
+    rows = (
+        await db.execute(
+            select(Analysis)
+            .where(
+                Analysis.stock_id == stock.id,
+                Analysis.schema_version == "v2",
+                Analysis.card_data.is_not(None),
+                Analysis.date >= since,
+            )
+            .order_by(Analysis.date.desc())
+            .limit(safe_days)
+        )
+    ).scalars().all()
+    return StockEventsResponse(
+        ticker=ticker.upper(),
+        events=build_event_markers(list(rows), limit=safe_limit),
+    )
 
 
 @router.post("/{ticker}/analyze", status_code=202)

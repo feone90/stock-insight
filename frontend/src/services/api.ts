@@ -1,5 +1,5 @@
 import type { Stock, PriceRecord, Analysis } from "@/types/stock";
-import type { StockCard } from "@/types/card";
+import type { AnalysisHistoryResponse, StockCard, StockEventsResponse } from "@/types/card";
 import { getToken } from "@/services/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -127,6 +127,24 @@ export async function syncAll(): Promise<SyncAllResult> {
 
 export async function getStockCard(ticker: string): Promise<StockCard> {
   return fetchJson(`/api/stocks/${ticker}/card`);
+}
+
+export async function getAnalysisHistory(
+  ticker: string,
+  limit: number = 14,
+): Promise<AnalysisHistoryResponse> {
+  return fetchJson(`/api/stocks/${ticker}/card/history?limit=${limit}`);
+}
+
+export async function getStockEventMarkers(
+  ticker: string,
+  options: { days?: number; limit?: number } = {},
+): Promise<StockEventsResponse> {
+  const params = new URLSearchParams();
+  if (options.days) params.set("days", String(options.days));
+  if (options.limit) params.set("limit", String(options.limit));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/api/stocks/${ticker}/events${suffix}`);
 }
 
 export async function refreshStockCard(ticker: string): Promise<StockCard> {

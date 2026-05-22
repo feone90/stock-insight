@@ -339,3 +339,51 @@ export interface StockCard {
   price_asof?: string | null;
   news_latest_at?: string | null;
 }
+
+export type EventDirection = "positive" | "negative" | "mixed" | "neutral";
+export type EventSourceType = "price_move" | "news" | "catalyst";
+
+export interface AnalysisHistoryNews {
+  title: string;
+  source: string;
+  impact: EventDirection;
+  summary: string;
+  published_at?: string | null;
+  url?: string | null;
+}
+
+export interface AnalysisHistoryItem {
+  date: string;
+  generated_at?: string | null;
+  stance?: Stance | null;
+  final_grade?: FinalGrade | string | null;
+  one_line: string;
+  thesis?: string | null;
+  price_move?: string | null;
+  news_count: number;
+  key_news: AnalysisHistoryNews[];
+}
+
+export interface AnalysisHistoryResponse {
+  ticker: string;
+  items: AnalysisHistoryItem[];
+}
+
+export interface StockEventMarker {
+  id: string;
+  date: string;
+  source_type: EventSourceType;
+  direction: EventDirection;
+  title: string;
+  summary: string;
+  keyword: string;
+  confidence?: string | null;
+  source_label?: string | null;
+  url?: string | null;
+  analysis_date: string;
+}
+
+export interface StockEventsResponse {
+  ticker: string;
+  events: StockEventMarker[];
+}

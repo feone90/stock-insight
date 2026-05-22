@@ -7,15 +7,18 @@ import {
   CrosshairMode,
   LineSeries,
   LineStyle,
+  createSeriesMarkers,
   type CandlestickData,
   type IChartApi,
   type LineData,
+  type SeriesMarker,
   type Time,
   createChart,
 } from "lightweight-charts";
 import { chartTokens, pick } from "@/lib/design-tokens";
 import { useTheme } from "@/lib/use-theme";
-import { getStockPrices } from "@/services/api";
+import { getStockEventMarkers, getStockPrices } from "@/services/api";
+import type { EventDirection, EventSourceType, StockEventMarker } from "@/types/card";
 
 /**
  * Hero chart — 캔들 (상승=emerald, 하락=rose) + MA20 (옅은 점선).
@@ -46,6 +49,7 @@ export function HeroChart({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const { mode } = useTheme();
   const [days, setDays] = useState(initialDays);
+  const [events, setEvents] = useState<StockEventMarker[]>([]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -57,12 +61,19 @@ export function HeroChart({
 
     (async () => {
       let prices;
+      let markerEvents: StockEventMarker[] = [];
       try {
-        prices = await getStockPrices(ticker, days);
+        const [priceRows, eventRows] = await Promise.all([
+          getStockPrices(ticker, days),
+          getStockEventMarkers(ticker, { days, limit: 40 }).catch(() => ({ events: [] })),
+        ]);
+        prices = priceRows;
+        markerEvents = eventRows.events;
       } catch {
         return;
       }
       if (cancelled || !node || prices.length === 0) return;
+      setEvents(markerEvents);
 
       // PriceHistory는 desc일 수도 — 캔들은 ascending 시간 필요.
       const sorted = [...prices].sort((a, b) => a.date.localeCompare(b.date));
@@ -119,6 +130,20 @@ export function HeroChart({
           low: p.low,
           close: p.close,
         })),
+      );
+      createSeriesMarkers(
+        candle,
+        markerEvents
+          .slice()
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .map<SeriesMarker<Time>>((event) => ({
+            time: event.date as Time,
+            position: markerPosition(event.direction),
+            shape: markerShape(event.direction),
+            color: markerColor(event.direction, mode),
+            text: compactMarkerText(event),
+          })),
+        { zOrder: "top" },
       );
 
       // MA20 — 옅은 회색 점선. 단기·장기 추세 비교용 (정배열/역배열).
@@ -199,8 +224,92 @@ export function HeroChart({
         </div>
       </div>
       <div ref={containerRef} className="w-full h-[260px] md:h-[340px]" />
+      <ChartEventStrip events={events} />
     </div>
   );
+}
+
+function ChartEventStrip({ events }: { events: StockEventMarker[] }) {
+  const visible = events.slice(0, 5);
+  if (visible.length === 0) {
+    return (
+      <div className="mt-2 rounded-md border border-dashed border-[var(--surface-border)] px-3 py-2 text-xs text-[var(--surface-text-muted)]">
+        아직 차트에 남길 과거 이벤트가 없습니다. daily 분석이 쌓이면 상승·하락 원인이 여기에 기록됩니다.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+      {visible.map((event) => (
+        <a
+          key={event.id}
+          href={event.url || undefined}
+          target={event.url ? "_blank" : undefined}
+          rel={event.url ? "noreferrer" : undefined}
+          className={`min-w-[180px] rounded-md border px-2.5 py-2 text-left transition-colors ${eventTone(event.direction)}`}
+          title={event.summary}
+        >
+          <div className="flex items-center justify-between gap-2 text-[10px]">
+            <span>{formatEventDate(event.date)}</span>
+            <span>{SOURCE_LABEL[event.source_type]}</span>
+          </div>
+          <div className="mt-1 truncate text-xs font-semibold">{event.keyword}</div>
+          <div className="mt-0.5 line-clamp-2 text-[11px] opacity-85">{event.summary}</div>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+const SOURCE_LABEL: Record<EventSourceType, string> = {
+  price_move: "가격원인",
+  news: "뉴스",
+  catalyst: "예정",
+};
+
+function markerPosition(direction: EventDirection): "aboveBar" | "belowBar" | "inBar" {
+  if (direction === "positive") return "belowBar";
+  if (direction === "negative") return "aboveBar";
+  return "inBar";
+}
+
+function markerShape(direction: EventDirection): "arrowUp" | "arrowDown" | "circle" | "square" {
+  if (direction === "positive") return "arrowUp";
+  if (direction === "negative") return "arrowDown";
+  if (direction === "mixed") return "square";
+  return "circle";
+}
+
+function markerColor(direction: EventDirection, mode: "light" | "dark"): string {
+  if (direction === "positive") return mode === "dark" ? "#f87171" : "#dc2626";
+  if (direction === "negative") return mode === "dark" ? "#60a5fa" : "#2563eb";
+  if (direction === "mixed") return mode === "dark" ? "#fbbf24" : "#a16207";
+  return mode === "dark" ? "#94a3b8" : "#64748b";
+}
+
+function eventTone(direction: EventDirection): string {
+  if (direction === "positive") {
+    return "border-red-500/30 bg-red-500/10 text-red-700 hover:bg-red-500/15 dark:text-red-300";
+  }
+  if (direction === "negative") {
+    return "border-blue-500/30 bg-blue-500/10 text-blue-700 hover:bg-blue-500/15 dark:text-blue-300";
+  }
+  if (direction === "mixed") {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-300";
+  }
+  return "border-[var(--surface-border)] bg-[var(--surface-card)] text-[var(--surface-text-muted)] hover:bg-[var(--surface-section-hover)]";
+}
+
+function compactMarkerText(event: StockEventMarker): string {
+  const text = event.keyword || SOURCE_LABEL[event.source_type];
+  return text.length > 8 ? `${text.slice(0, 8)}…` : text;
+}
+
+function formatEventDate(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 function formatKoreanDate(t: Time, includeYear: boolean): string {
