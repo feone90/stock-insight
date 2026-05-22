@@ -7,11 +7,9 @@ import {
   CrosshairMode,
   LineSeries,
   LineStyle,
-  createSeriesMarkers,
   type CandlestickData,
   type IChartApi,
   type LineData,
-  type SeriesMarker,
   type Time,
   createChart,
 } from "lightweight-charts";
@@ -59,7 +57,7 @@ export function HeroChart({
     let cancelled = false;
     let chart: IChartApi | null = null;
     let onResize: (() => void) | null = null;
-    let onClick: ((param: { hoveredObjectId?: unknown; time?: Time }) => void) | null = null;
+    let onClick: ((param: { time?: Time }) => void) | null = null;
 
     (async () => {
       let prices;
@@ -75,7 +73,6 @@ export function HeroChart({
         return;
       }
       if (cancelled || !node || prices.length === 0) return;
-      const chartEvents = selectChartEvents(markerEvents);
       setEvents(markerEvents);
 
       // PriceHistory는 desc일 수도 — 캔들은 ascending 시간 필요.
@@ -134,25 +131,8 @@ export function HeroChart({
           close: p.close,
         })),
       );
-      createSeriesMarkers(
-        candle,
-        chartEvents
-          .sort((a, b) => a.date.localeCompare(b.date))
-          .map<SeriesMarker<Time>>((event) => ({
-            id: event.id,
-            time: event.date as Time,
-            position: markerPosition(event.direction),
-            shape: markerShape(event.direction),
-            color: markerColor(event.direction, mode),
-          })),
-        { zOrder: "top" },
-      );
       onClick = (param) => {
-        const objectId = typeof param.hoveredObjectId === "string" ? param.hoveredObjectId : null;
-        const eventFromMarker = objectId
-          ? chartEvents.find((event) => event.id === objectId)
-          : null;
-        const dateFromClick = eventFromMarker?.date ?? (param.time ? timeToDateString(param.time) : null);
+        const dateFromClick = param.time ? timeToDateString(param.time) : null;
         if (!dateFromClick) return;
         const hasEvents = markerEvents.some((event) => event.date === dateFromClick);
         if (hasEvents) setSelectedDate(dateFromClick);
@@ -203,35 +183,60 @@ export function HeroChart({
 
   return (
     <div className="relative">
-      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--surface-text-muted)]">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-2 h-3 bg-red-500 dark:bg-red-400" />
-            상승
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-2 h-3 bg-blue-500 dark:bg-blue-400" />
-            하락
-          </span>
-          <span
-            className="flex items-center gap-1.5"
-            title="20일 평균 가격. 현재가(캔들)가 점선 위면 단기 추세 우상향, 아래면 약세."
-          >
-            <span
-              className="inline-block w-3 h-0 border-t border-dashed"
-              style={{ borderColor: "var(--surface-text-muted)" }}
-            />
-            20일 평균
-          </span>
-          <span
-            className="flex items-center gap-1.5"
-            title="차트에는 날짜별 대표 이벤트 위치만 표시하고, 자세한 이유는 아래 이벤트 카드에서 확인합니다."
-          >
-            <span className="inline-flex h-3 w-3 items-center justify-center rounded-full border border-[var(--surface-text-muted)] text-[8px] leading-none">
-              !
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1.5 text-[11px] text-[var(--surface-text-muted)]">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--surface-text-subtle)]">
+              캔들
             </span>
-            이벤트
-          </span>
+            <span
+              className="flex items-center gap-1.5"
+              title="해당 기간 종가가 시가보다 오른 캔들"
+            >
+              <span className="inline-block w-2 h-3 bg-red-500 dark:bg-red-400" />
+              상승
+            </span>
+            <span
+              className="flex items-center gap-1.5"
+              title="해당 기간 종가가 시가보다 내린 캔들"
+            >
+              <span className="inline-block w-2 h-3 bg-blue-500 dark:bg-blue-400" />
+              하락
+            </span>
+            <span
+              className="flex items-center gap-1.5"
+              title="20일 평균 가격. 현재가(캔들)가 점선 위면 단기 추세 우상향, 아래면 약세."
+            >
+              <span
+                className="inline-block w-3 h-0 border-t border-dashed"
+                style={{ borderColor: "var(--surface-text-muted)" }}
+              />
+              20일 평균
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--surface-text-subtle)]">
+              원인 레일
+            </span>
+            <LegendDot
+              className="bg-red-500 dark:bg-red-400"
+              label="상승 원인"
+              title="종합 키워드가 주가에 긍정적으로 작용한 날"
+            />
+            <LegendDot
+              className="bg-blue-500 dark:bg-blue-400"
+              label="하락 원인"
+              title="종합 키워드가 주가에 부정적으로 작용한 날"
+            />
+            <span className="flex items-center gap-1.5" title="호재와 악재가 동시에 확인된 날">
+              <span className="inline-block h-2.5 w-2.5 rounded-[2px] bg-amber-500 dark:bg-amber-400" />
+              혼재
+            </span>
+            <span className="flex items-center gap-1.5" title="뚜렷한 방향성 또는 근거가 부족한 날">
+              <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-500 dark:bg-slate-400" />
+              중립
+            </span>
+          </div>
         </div>
         <div className="flex w-full items-center gap-1 overflow-x-auto rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)] p-0.5 sm:w-auto">
           {PERIOD_OPTIONS.map((opt) => (
@@ -258,6 +263,23 @@ export function HeroChart({
       />
       <ChartEventStrip events={events} />
     </div>
+  );
+}
+
+function LegendDot({
+  className,
+  label,
+  title,
+}: {
+  className: string;
+  label: string;
+  title: string;
+}) {
+  return (
+    <span className="flex items-center gap-1.5" title={title}>
+      <span className={`inline-block h-2.5 w-2.5 rounded-full ${className}`} />
+      {label}
+    </span>
   );
 }
 
@@ -364,26 +386,6 @@ const SOURCE_LABEL: Record<EventSourceType, string> = {
   catalyst: "예정",
 };
 
-function markerPosition(direction: EventDirection): "aboveBar" | "belowBar" | "inBar" {
-  if (direction === "positive") return "belowBar";
-  if (direction === "negative") return "aboveBar";
-  return "inBar";
-}
-
-function markerShape(direction: EventDirection): "arrowUp" | "arrowDown" | "circle" | "square" {
-  if (direction === "positive") return "arrowUp";
-  if (direction === "negative") return "arrowDown";
-  if (direction === "mixed") return "square";
-  return "circle";
-}
-
-function markerColor(direction: EventDirection, mode: "light" | "dark"): string {
-  if (direction === "positive") return mode === "dark" ? "#f87171" : "#dc2626";
-  if (direction === "negative") return mode === "dark" ? "#60a5fa" : "#2563eb";
-  if (direction === "mixed") return mode === "dark" ? "#fbbf24" : "#a16207";
-  return mode === "dark" ? "#94a3b8" : "#64748b";
-}
-
 function eventTone(direction: EventDirection): string {
   if (direction === "positive") {
     return "border-red-500/30 bg-red-500/10 text-red-700 hover:bg-red-500/15 dark:text-red-300";
@@ -408,19 +410,6 @@ function timeToDateString(t: Time): string {
   if (typeof t === "number") return new Date(t * 1000).toISOString().slice(0, 10);
   const bd = t as { year: number; month: number; day: number };
   return `${bd.year}-${String(bd.month).padStart(2, "0")}-${String(bd.day).padStart(2, "0")}`;
-}
-
-function selectChartEvents(events: StockEventMarker[]): StockEventMarker[] {
-  const byDate = new Map<string, StockEventMarker>();
-  for (const event of events) {
-    const existing = byDate.get(event.date);
-    if (!existing || eventPriority(event) > eventPriority(existing)) {
-      byDate.set(event.date, event);
-    }
-  }
-  return Array.from(byDate.values())
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 10);
 }
 
 function groupEventsByDate(events: StockEventMarker[]): Array<{
