@@ -288,23 +288,6 @@ async def get_card_history(
     changed since yesterday" instead of losing prior reasoning on each refresh.
     """
     safe_limit = max(1, min(limit, 60))
-    rows = (
-        await db.execute(
-            select(DailyPriceDriver)
-            .where(
-                DailyPriceDriver.stock_id == stock.id,
-                DailyPriceDriver.trade_date >= since,
-            )
-            .order_by(DailyPriceDriver.trade_date.desc())
-            .limit(safe_limit)
-        )
-    ).scalars().all()
-    if rows:
-        return StockEventsResponse(
-            ticker=ticker.upper(),
-            events=driver_markers(list(rows), ticker=ticker, limit=safe_limit),
-        )
-
     analysis_rows = (
         await db.execute(
             select(Analysis)
@@ -319,7 +302,7 @@ async def get_card_history(
     ).scalars().all()
     return AnalysisHistoryResponse(
         ticker=ticker.upper(),
-        items=build_analysis_history(list(rows)),
+        items=build_analysis_history(list(analysis_rows)),
     )
 
 
@@ -331,11 +314,29 @@ async def get_stock_events(
     stock: Stock = Depends(get_stock_or_404),
     db: AsyncSession = Depends(get_db),
 ):
-    """Chart event markers extracted from previous daily cards."""
+    """Chart event markers extracted from finalized drivers or previous daily cards."""
     safe_days = max(7, min(days, 730))
     safe_limit = max(1, min(limit, 200))
     since = date.today() - timedelta(days=safe_days)
-    rows = (
+
+    driver_rows = (
+        await db.execute(
+            select(DailyPriceDriver)
+            .where(
+                DailyPriceDriver.stock_id == stock.id,
+                DailyPriceDriver.trade_date >= since,
+            )
+            .order_by(DailyPriceDriver.trade_date.desc())
+            .limit(safe_limit)
+        )
+    ).scalars().all()
+    if driver_rows:
+        return StockEventsResponse(
+            ticker=ticker.upper(),
+            events=driver_markers(list(driver_rows), ticker=ticker, limit=safe_limit),
+        )
+
+    analysis_rows = (
         await db.execute(
             select(Analysis)
             .where(

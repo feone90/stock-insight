@@ -11,6 +11,7 @@ import pytest
 
 from app.models import Stock
 from app.models.analysis import Analysis
+from app.models.daily_driver import DailyPriceDriver
 
 
 def _seed_analyzable_stock(db, ticker: str) -> Stock:
@@ -80,6 +81,69 @@ async def test_get_card_skips_v1_rows(client, db):
 
     resp = await client.get("/api/stocks/ONLYV1/card")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_card_history_returns_analysis_rows(client, db):
+    s = Stock(ticker="HISTAPI", name="x", market="KRX", sector="x")
+    db.add(s)
+    await db.flush()
+    db.add(
+        Analysis(
+            stock_id=s.id,
+            date=date.today(),
+            period_type="daily",
+            summary="AI 수요 확인",
+            feedback="x",
+            schema_version="v2",
+            card_data={
+                "glance": {
+                    "stance": "WATCH",
+                    "final_grade": "B+",
+                    "one_line": "AI 수요와 밸류에이션을 같이 봐야 함",
+                },
+                "news": [],
+            },
+            persona_version="analyst_v1",
+        )
+    )
+    await db.commit()
+
+    resp = await client.get("/api/stocks/HISTAPI/card/history")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ticker"] == "HISTAPI"
+    assert body["items"][0]["one_line"] == "AI 수요와 밸류에이션을 같이 봐야 함"
+
+
+@pytest.mark.asyncio
+async def test_get_stock_events_prefers_daily_drivers(client, db):
+    s = Stock(ticker="EVTAPI", name="x", market="KRX", sector="x")
+    db.add(s)
+    await db.flush()
+    db.add(
+        DailyPriceDriver(
+            stock_id=s.id,
+            trade_date=date.today(),
+            direction="positive",
+            keywords=["OpenAI 계약 기대", "클라우드 수요"],
+            summary="AI 인프라 계약 기대가 주가를 지지했다.",
+            evidence=[],
+            confidence="medium",
+            source_hash="test",
+            model_version="daily_driver_v1",
+        )
+    )
+    await db.commit()
+
+    resp = await client.get("/api/stocks/EVTAPI/events?days=30&limit=5")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ticker"] == "EVTAPI"
+    assert body["events"][0]["source_type"] == "daily_driver"
+    assert body["events"][0]["keywords"] == ["OpenAI 계약 기대", "클라우드 수요"]
 
 
 @pytest.mark.asyncio
