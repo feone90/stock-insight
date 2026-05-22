@@ -232,10 +232,16 @@ function pickReason(
 function summarize(items: PortfolioItem[]) {
   const up = items.filter((item) => item.stock.change_percent > 0).length;
   const down = items.filter((item) => item.stock.change_percent < 0).length;
-  const negativeDrivers = items.filter((item) => item.driverTone === "negative").length;
+  const negativeDriverItems = items.filter((item) => item.driverTone === "negative");
+  const negativeDrivers = negativeDriverItems.length;
+  const cautionDrivers = negativeDriverItems.slice(0, 3).map((item) => ({
+    ticker: item.stock.ticker,
+    name: compactStockName(item.stock),
+    reason: item.reason,
+  }));
   const buy = items.filter((item) => item.card?.glance.stance === "BUY").length;
   const activeEvents = items.filter((item) => item.events.length > 0).length;
-  return { up, down, negativeDrivers, buy, activeEvents, total: items.length };
+  return { up, down, negativeDrivers, cautionDrivers, buy, activeEvents, total: items.length };
 }
 
 function PriorityPanel({ leaders }: { leaders: PortfolioItem[] }) {
@@ -289,10 +295,28 @@ function MarketPulse({ stats }: { stats: ReturnType<typeof summarize> }) {
         <PulseTile label="상승" value={stats.up} tone="positive" />
         <PulseTile label="하락" value={stats.down} tone="negative" />
         <PulseTile label="매수" value={stats.buy} tone="positive" />
-        <PulseTile label="원인" value={`${stats.activeEvents}/${stats.total}`} tone="neutral" />
+        <PulseTile label="요인" value={`${stats.activeEvents}/${stats.total}`} tone="neutral" />
       </div>
       <div className="mt-3 border-l-2 border-amber-400/70 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-100">
-        전체 종목 기준 악재 요인 {stats.negativeDrivers}개. 특정 뉴스 1건이 아니라 daily 원인 분석의 방향입니다.
+        <div className="font-medium text-amber-50">
+          가격 방향: 상승 {stats.up}개 · 하락 {stats.down}개
+        </div>
+        {stats.cautionDrivers.length > 0 ? (
+          <div className="mt-1.5">
+            주의 요인:{" "}
+            {stats.cautionDrivers.map((item, index) => (
+              <span key={item.ticker}>
+                {index > 0 ? " / " : ""}
+                {item.name} - {item.reason}
+              </span>
+            ))}
+            {stats.negativeDrivers > stats.cautionDrivers.length
+              ? ` 외 ${stats.negativeDrivers - stats.cautionDrivers.length}개`
+              : ""}
+          </div>
+        ) : (
+          <div className="mt-1.5">주의 요인으로 따로 잡힌 종목은 없습니다.</div>
+        )}
       </div>
     </section>
   );
@@ -525,6 +549,10 @@ function EmptyPortfolio() {
 function formatPrice(stock: Stock): string {
   if (isKRMarket(stock.market)) return `${stock.current_price.toLocaleString()}원`;
   return `${currencyMark(stock.market)}${stock.current_price.toLocaleString()}`;
+}
+
+function compactStockName(stock: Stock): string {
+  return stock.name || stock.ticker;
 }
 
 function formatShortDate(value?: string | null): string {
