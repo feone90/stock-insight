@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { StockSearch } from "@/components/search/stock-search";
 import { getKnownUsers, syncAll } from "@/services/api";
-import { getStoredAuth, isAdmin, login, logout, type AuthUser } from "@/services/auth";
+import { isAdmin } from "@/services/auth";
 import {
   addUser,
   getActiveUser,
@@ -17,10 +17,6 @@ import { showToast } from "@/components/ui/toast";
 
 export function TopNav() {
   const [syncing, setSyncing] = useState(false);
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [showLogin, setShowLogin] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
 
   // 가족 user picker (localStorage 기반)
   const [users, setUsers] = useState<string[]>([]);
@@ -29,7 +25,6 @@ export function TopNav() {
   const [newUserName, setNewUserName] = useState("");
 
   useEffect(() => {
-    setUser(getStoredAuth());
     setActive(getActiveUser());
 
     // localStorage user list + backend known users merge
@@ -74,26 +69,6 @@ export function TopNav() {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const u = await login(email, password);
-      setUser(u);
-      setShowLogin(false);
-      setEmail("");
-      setPassword("");
-      showToast(`${u.email} 로그인 완료`, "success");
-    } catch {
-      showToast("로그인 실패", "error");
-    }
-  };
-
-  const handleLogout = () => {
-    logout();
-    setUser(null);
-    showToast("로그아웃 완료", "info");
-  };
-
   const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
     const name = newUserName.trim();
@@ -135,12 +110,12 @@ export function TopNav() {
             {syncing ? "동기화 중..." : "전체 동기화"}
           </button>
         )}
-        <Link
-          href="/chat"
-          className="hidden md:inline text-sm text-purple-400 transition-colors hover:text-purple-300"
+        <span
+          className="hidden cursor-not-allowed rounded border border-slate-800 px-2 py-1 text-xs text-slate-500 md:inline-flex"
+          title="Ask AI는 아직 준비중입니다."
         >
-          Ask AI
-        </Link>
+          Ask AI 준비중
+        </span>
         <Link
           href="/"
           className="hidden md:inline text-sm text-yellow-400 hover:text-yellow-300 transition-colors"
@@ -211,50 +186,12 @@ export function TopNav() {
           )}
         </div>
 
-        {user ? (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">{user.email}</span>
-            <button
-              onClick={handleLogout}
-              className="text-xs text-slate-500 hover:text-slate-300"
-            >
-              로그아웃
-            </button>
-          </div>
-        ) : (
-          <>
-            <button
-              onClick={() => setShowLogin(!showLogin)}
-              className="text-sm text-slate-400 hover:text-slate-200"
-            >
-              로그인
-            </button>
-            {showLogin && (
-              <form onSubmit={handleLogin} className="absolute right-4 top-14 z-50 rounded-lg border border-slate-700 bg-slate-900 p-4 shadow-xl">
-                <input
-                  type="email"
-                  placeholder="이메일"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="mb-2 w-56 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 outline-none focus:border-blue-500"
-                />
-                <input
-                  type="password"
-                  placeholder="비밀번호"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="mb-3 w-56 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 outline-none focus:border-blue-500"
-                />
-                <button
-                  type="submit"
-                  className="w-full rounded bg-blue-600 py-1.5 text-sm text-white hover:bg-blue-500"
-                >
-                  로그인
-                </button>
-              </form>
-            )}
-          </>
-        )}
+        <span
+          className="hidden cursor-not-allowed rounded border border-slate-800 px-2 py-1 text-xs text-slate-500 md:inline-flex"
+          title="로그인 기능은 외부 테스트 중에는 열지 않습니다."
+        >
+          로그인 준비중
+        </span>
       </div>
     </nav>
   );
