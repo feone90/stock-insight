@@ -16,7 +16,7 @@ export function StockSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Stock[]>([]);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -37,7 +37,7 @@ export function StockSearch() {
     } else {
       setQuery("");
       setResults([]);
-      setSelectedIndex(0);
+      setSelectedIndex(-1);
     }
   }, [open]);
 
@@ -53,7 +53,7 @@ export function StockSearch() {
         // effect cleanup 후 stale 응답은 무시 (race protection)
         if (active) {
           setResults(data);
-          setSelectedIndex(0);
+          setSelectedIndex(findExactMatchIndex(data, query));
         }
       } catch (e) {
         console.error("search failed:", e);
@@ -78,7 +78,7 @@ export function StockSearch() {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter" && results[selectedIndex]) {
+    } else if (e.key === "Enter" && selectedIndex >= 0 && results[selectedIndex]) {
       handleSelect(results[selectedIndex].ticker);
     }
   };
@@ -125,15 +125,25 @@ export function StockSearch() {
               <button
                 key={stock.ticker}
                 onClick={() => handleSelect(stock.ticker)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
                   index === selectedIndex
                     ? "bg-slate-800 text-slate-50"
                     : "text-slate-300 hover:bg-slate-800/50"
                 }`}
               >
-                <span className="font-medium">{stock.name}</span>
-                <span className="text-sm text-slate-500">
-                  {stock.ticker} · {stock.market}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{stock.name}</span>
+                  <span className="mt-0.5 block truncate text-xs text-slate-500">
+                    {stock.sector || "업종 정보 없음"}
+                  </span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="block font-mono text-xs text-slate-400">
+                    {stock.ticker} · {stock.market}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {formatSearchPrice(stock)}
+                  </span>
                 </span>
               </button>
             ))}
@@ -142,4 +152,20 @@ export function StockSearch() {
       </Dialog>
     </>
   );
+}
+
+function findExactMatchIndex(results: Stock[], query: string): number {
+  const q = query.trim().toUpperCase();
+  if (!q) return -1;
+  return results.findIndex(
+    (stock) => stock.ticker.toUpperCase() === q || stock.name.toUpperCase() === q,
+  );
+}
+
+function formatSearchPrice(stock: Stock): string {
+  if (!stock.current_price) return "가격 대기";
+  if (stock.market === "KOSPI" || stock.market === "KOSDAQ" || stock.market === "KRX") {
+    return `${Math.round(stock.current_price).toLocaleString()}원`;
+  }
+  return `$${stock.current_price.toLocaleString()}`;
 }

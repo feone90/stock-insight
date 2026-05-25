@@ -25,6 +25,32 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
 
+def _looks_like_us_ticker(q: str) -> bool:
+    stripped = q.strip().upper()
+    return stripped.isalpha() and 1 <= len(stripped) <= 5
+
+
+def _search_rank(stock: StockResponse, q: str) -> tuple[int]:
+    needle = q.strip().upper()
+    ticker = stock.ticker.upper()
+    name = stock.name.upper()
+    if ticker == needle:
+        return (0,)
+    if name == needle:
+        return (1,)
+    if ticker.startswith(needle):
+        return (2,)
+    if name.startswith(needle):
+        return (3,)
+    if ticker.endswith(needle):
+        return (4,)
+    if needle in name:
+        return (5,)
+    if needle in ticker:
+        return (6,)
+    return (7,)
+
+
 @router.get("/search", response_model=list[StockResponse])
 async def search(q: str = "", db: AsyncSession = Depends(get_db)):
     if not q:
@@ -46,8 +72,11 @@ async def search(q: str = "", db: AsyncSession = Depends(get_db)):
         for s in db_stocks
     ]
 
-    # 2. DB 결과가 적으면 외부 API에서 추가 검색
-    if len(responses) < 5:
+    # 2. DB 결과가 적으면 외부 API에서 추가 검색.
+    # 짧은 US ticker는 DB에 "BE"가 없더라도 ADBE/GOOGL 같은 부분 매치가
+    # 5개 이상 나와 외부 검색이 skip되던 문제가 있었다. ticker처럼 보이면
+    # exact lookup/search를 반드시 한 번 태운다.
+    if len(responses) < 5 or _looks_like_us_ticker(q):
         try:
             external = await search_external(q)
             for ext in external:
@@ -60,7 +89,7 @@ async def search(q: str = "", db: AsyncSession = Depends(get_db)):
         except Exception:
             pass
 
-    return responses
+    return sorted(responses, key=lambda s: _search_rank(s, q))
 
 
 async def _get_or_register_stock(ticker: str, db: AsyncSession) -> Stock:

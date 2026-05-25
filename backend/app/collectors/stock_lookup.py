@@ -9,7 +9,8 @@ from app.models import Stock
 
 
 _NASDAQ_CODES = {"NMS", "NGM", "NCM", "NASDAQ", "NAS"}
-_NYSE_CODES = {"NYQ", "NYSE", "NYS", "PCX", "BTS", "ASE"}
+_NYSE_CODES = {"NYQ", "NYSE", "NYS", "PCX", "BTS"}
+_AMEX_CODES = {"ASE", "AMEX", "ASEMKT"}
 _KRX_CODES = {"KSC", "KOE", "KRX", "KOSPI", "KOSDAQ"}
 
 
@@ -22,6 +23,8 @@ def _normalize_market(exchange: str, ticker_candidate: str = "") -> str:
         return "NASDAQ"
     if ex in _NYSE_CODES or "NYS" in ex:
         return "NYSE"
+    if ex in _AMEX_CODES:
+        return "AMEX"
     return exchange or "OTHER"
 
 
@@ -56,6 +59,43 @@ def _lookup_yfinance(query: str) -> list[dict]:  # pragma: no cover
     return []
 
 
+def _lookup_yfinance_search(query: str) -> list[dict]:  # pragma: no cover
+    """Yahoo Finance search for company-name queries.
+
+    `yf.Ticker(query).info` only works when `query` is already a ticker. This
+    search path covers non-S&P and not-yet-seeded US names such as
+    "Bloom Energy" -> BE.
+    """
+    import yfinance as yf
+
+    try:
+        search = yf.Search(query.strip(), max_results=10)
+    except Exception:
+        return []
+
+    results: list[dict] = []
+    seen: set[str] = set()
+    for quote in getattr(search, "quotes", []) or []:
+        if (quote.get("quoteType") or "").upper() != "EQUITY":
+            continue
+        symbol = (quote.get("symbol") or "").upper().strip()
+        if not symbol or symbol in seen:
+            continue
+        exchange = (quote.get("exchange") or quote.get("exchDisp") or "").upper()
+        market = _normalize_market(exchange, symbol)
+        if market not in {"NASDAQ", "NYSE", "AMEX"}:
+            continue
+        seen.add(symbol)
+        results.append({
+            "ticker": symbol,
+            "name": quote.get("longname") or quote.get("shortname") or symbol,
+            "market": market,
+            "sector": quote.get("sector") or quote.get("sectorDisp") or "",
+            "current_price": quote.get("regularMarketPrice") or 0,
+        })
+    return results
+
+
 def _lookup_fdr(query: str) -> list[dict]:  # pragma: no cover
     """FinanceDataReader로 한국 종목을 검색한다 (동기 호출)."""
     try:
@@ -85,16 +125,32 @@ def _lookup_fdr(query: str) -> list[dict]:  # pragma: no cover
 
 async def search_external(query: str) -> list[dict]:
     """외부 API에서 종목을 검색한다. KR(FDR) + US(yfinance) 동시 조회."""
-    fdr_results, yf_results = await asyncio.gather(
+    fdr_results, yf_results, yf_search_results = await asyncio.gather(
         asyncio.to_thread(_lookup_fdr, query),
         asyncio.to_thread(_lookup_yfinance, query),
+        asyncio.to_thread(_lookup_yfinance_search, query),
         return_exceptions=True,
     )
     results = []
+    seen: set[str] = set()
     if isinstance(fdr_results, list):
-        results.extend(fdr_results)
+        for item in fdr_results:
+            ticker = item.get("ticker")
+            if ticker and ticker not in seen:
+                results.append(item)
+                seen.add(ticker)
     if isinstance(yf_results, list):
-        results.extend(yf_results)
+        for item in yf_results:
+            ticker = item.get("ticker")
+            if ticker and ticker not in seen:
+                results.append(item)
+                seen.add(ticker)
+    if isinstance(yf_search_results, list):
+        for item in yf_search_results:
+            ticker = item.get("ticker")
+            if ticker and ticker not in seen:
+                results.append(item)
+                seen.add(ticker)
     return results
 
 

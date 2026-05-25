@@ -2,6 +2,9 @@ import pytest
 from unittest.mock import patch, AsyncMock
 from httpx import AsyncClient
 
+from app.api.stocks import _looks_like_us_ticker, _search_rank
+from app.schemas.stock import StockResponse
+
 
 @pytest.mark.asyncio
 async def test_health(client: AsyncClient):
@@ -18,7 +21,7 @@ async def test_search_stocks(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert len(data) >= 1
-    assert data[0]["ticker"] == "005930"
+    assert any(s["ticker"] == "005930" for s in data)
 
 
 @pytest.mark.asyncio
@@ -41,6 +44,69 @@ async def test_search_no_results(client: AsyncClient):
     response = await client.get("/api/stocks/search?q=ZZZZZNOTEXIST")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_search_external_runs_for_short_us_tickers():
+    assert _looks_like_us_ticker("BE")
+    assert _looks_like_us_ticker("TSLA")
+    assert not _looks_like_us_ticker("Bloom Energy")
+    assert not _looks_like_us_ticker("005930")
+
+
+def test_search_rank_prefers_exact_ticker():
+    results = [
+        StockResponse(ticker="ADBE", name="Adobe Inc.", market="US", sector="", current_price=0),
+        StockResponse(ticker="BE", name="Bloom Energy Corporation", market="NYSE", sector="", current_price=0),
+    ]
+
+    assert sorted(results, key=lambda s: _search_rank(s, "BE"))[0].ticker == "BE"
+
+
+def test_search_rank_prefers_exact_name():
+    results = [
+        StockResponse(ticker="000810", name="삼성화재", market="KOSPI", sector="", current_price=0),
+        StockResponse(ticker="005930", name="삼성전자", market="KOSPI", sector="", current_price=0),
+    ]
+
+    assert sorted(results, key=lambda s: _search_rank(s, "삼성전자"))[0].ticker == "005930"
+
+
+def test_search_rank_keeps_broad_name_matches_tied():
+    samsung_electronics = StockResponse(
+        ticker="005930",
+        name="삼성전자",
+        market="KOSPI",
+        sector="",
+        current_price=0,
+    )
+    samsung_fire = StockResponse(
+        ticker="000810",
+        name="삼성화재",
+        market="KOSPI",
+        sector="",
+        current_price=0,
+    )
+
+    assert _search_rank(samsung_electronics, "삼성") == _search_rank(samsung_fire, "삼성")
+
+
+@pytest.mark.asyncio
+async def test_search_short_us_ticker_uses_external_and_ranks_exact(client: AsyncClient):
+    external = AsyncMock(return_value=[{
+        "ticker": "BE",
+        "name": "Bloom Energy Corporation",
+        "market": "NYSE",
+        "sector": "Industrials",
+        "current_price": 0,
+    }])
+
+    with patch("app.api.stocks.search_external", external):
+        response = await client.get("/api/stocks/search?q=BE")
+
+    assert response.status_code == 200
+    external.assert_awaited_once()
+    data = response.json()
+    assert data[0]["ticker"] == "BE"
 
 
 # --- Stock Detail ---
