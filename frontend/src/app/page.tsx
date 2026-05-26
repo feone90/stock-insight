@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Clock3,
@@ -141,7 +142,7 @@ function HomeGuide({
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[linear-gradient(135deg,rgba(2,6,23,0.98),rgba(15,23,42,0.92))]">
       <div className="border-b border-slate-800 px-4 py-4 md:px-5 md:py-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-end">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300">
               관심종목 운영판
@@ -150,13 +151,16 @@ function HomeGuide({
               즐겨찾기만 정하면 가격과 뉴스, AI 판단이 자동 갱신됩니다.
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-slate-400">
-              상단에서 사용자를 고르고 종목을 추가하세요. 포트폴리오는 전체 우선순위, 종목 카드는 판단 근거를 보여줍니다.
+              상단에서 사용자를 고르고 종목을 추가하세요. 포트폴리오는 전체 우선순위, 종목 카드는 판단 근거와 캔들별 상승·하락 이유를 보여줍니다.
             </p>
           </div>
-          <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-700/80 bg-slate-950/70 text-center">
-            <Metric label="내 관심종목" value={`${favoriteCount}개`} />
-            <Metric label="중복 분석" value="종목당 1회" />
-            <Metric label="표기 시간" value="한국시간" />
+          <div className="space-y-3">
+            <ChartGuidePreview />
+            <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-700/80 bg-slate-950/70 text-center">
+              <Metric label="내 관심종목" value={`${favoriteCount}개`} />
+              <Metric label="중복 분석" value="종목당 1회" />
+              <Metric label="표기 시간" value="한국시간" />
+            </div>
           </div>
         </div>
       </div>
@@ -188,7 +192,18 @@ function HomeGuide({
             </div>
             <p className="mt-2 text-xs leading-relaxed text-cyan-100/70">
               차트 이벤트 키워드, 관계망, 뉴스/이슈, 매크로, 펀더멘털, 최근 흐름, 의사결정을 한 화면에서 확인합니다.
+              차트의 각 캔들(기둥)을 누르면 daily 분석이 확정한 그날의 상승·하락 이유 키워드가 열립니다.
             </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <GuideNote
+                label="캔들 클릭"
+                body="키워드가 있는 기둥을 누르면 해당일의 상승 이유 또는 하락 이유가 열립니다."
+              />
+              <GuideNote
+                label="과거 원인 보관"
+                body="어제까지 확정된 이슈만 1번 추출해, 이후 새로고침 때 다시 쓰지 않습니다."
+              />
+            </div>
           </div>
         </div>
 
@@ -228,6 +243,21 @@ function HomeGuide({
         </div>
       </div>
     </section>
+  );
+}
+
+function ChartGuidePreview() {
+  return (
+    <figure className="overflow-hidden rounded-xl border border-cyan-500/25 bg-slate-950/75 shadow-[0_18px_50px_rgba(8,47,73,0.22)]">
+      <Image
+        src="/guide-chart-sample.svg"
+        alt="차트의 캔들 기둥을 클릭하면 daily 최종 상승 하락 이유 키워드가 열리는 화면 예시"
+        width={720}
+        height={360}
+        priority
+        className="h-auto w-full"
+      />
+    </figure>
   );
 }
 
@@ -300,6 +330,15 @@ function MiniRule({
         {title}
       </div>
       <p className="text-[11px] leading-relaxed text-slate-500">{body}</p>
+    </div>
+  );
+}
+
+function GuideNote({ label, body }: { label: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-cyan-400/15 bg-slate-950/45 px-3 py-2">
+      <div className="text-[11px] font-semibold text-cyan-100">{label}</div>
+      <p className="mt-1 text-[11px] leading-relaxed text-cyan-100/65">{body}</p>
     </div>
   );
 }
