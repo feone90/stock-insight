@@ -82,6 +82,27 @@ async def _sync_single_stock(stock: Stock) -> dict:
             return results
 
 
+async def _sync_single_price(stock: Stock) -> dict:
+    """종목 하나의 가격만 동기화한다.
+
+    가격은 장중 가장 자주 바뀌는 값이고 LLM 비용도 없어서, 08:00 전체
+    동기화와 분리해 장 시작 직후 별도 스케줄로 돌린다.
+    """
+    async with SYNC_SEMAPHORE:
+        async with async_session() as db:
+            try:
+                prices = await sync_prices(db, stock)
+                errors = [prices["error"]] if "error" in prices else []
+                return {
+                    "ticker": stock.ticker,
+                    "prices": prices.get("prices_synced", 0),
+                    "errors": errors,
+                }
+            except Exception as e:  # noqa: BLE001
+                logger.error("Price sync failed for %s: %s", stock.ticker, e)
+                return {"ticker": stock.ticker, "prices": 0, "errors": [str(e)]}
+
+
 async def cleanup_old_news_content():
     """오래된 뉴스의 본문(content)을 NULL 처리하여 DB 용량을 관리한다."""
     cutoff = date.today() - timedelta(days=settings.news_content_retention_days)
@@ -126,6 +147,67 @@ async def scheduled_sync_job():
 
     synced = [r["ticker"] for r in results if isinstance(r, dict) and "ticker" in r]
     logger.info("Scheduled sync completed: %d stocks synced (%s)", len(synced), ", ".join(synced))
+
+
+async def scheduled_price_sync_job(
+    markets: list[str] | None = None,
+    label: str = "price_sync",
+) -> dict:
+    """가격 전용 스케줄 잡.
+
+    08:00 전체 동기화는 한국장 개장 전이라 월요일/휴일 직후에는 며칠 전
+    종가가 그대로 보일 수 있다. 장 시작 직후/마감 직후에 가격만 다시
+    동기화해서 카드와 포트폴리오의 현재가를 AI 분석 비용 없이 최신화한다.
+    """
+    market_desc = ",".join(markets or ["ALL"])
+    logger.info("Scheduled price sync started: %s markets=%s", label, market_desc)
+
+    async with async_session() as db:
+        stmt = select(Stock).join(Favorite, Favorite.stock_id == Stock.id).distinct()
+        if markets:
+            stmt = stmt.where(Stock.market.in_(markets))
+        fav_result = await db.execute(stmt)
+        stocks = fav_result.scalars().all()
+
+    if not stocks:
+        logger.info("No favorited stocks to price-sync for %s", label)
+        return {
+            "label": label,
+            "markets": markets or [],
+            "stocks_seen": 0,
+            "stocks_synced": 0,
+            "price_rows_synced": 0,
+            "errors": [],
+        }
+
+    results = await asyncio.gather(
+        *[_sync_single_price(stock) for stock in stocks],
+        return_exceptions=True,
+    )
+    ok_results = [r for r in results if isinstance(r, dict)]
+    price_rows = sum(int(r.get("prices", 0) or 0) for r in ok_results)
+    errors: list[str] = []
+    for r in results:
+        if isinstance(r, Exception):
+            errors.append(str(r))
+        elif isinstance(r, dict):
+            errors.extend(str(e) for e in r.get("errors", []) if e)
+
+    logger.info(
+        "Scheduled price sync completed: %s stocks=%d price_rows=%d errors=%d",
+        label,
+        len(ok_results),
+        price_rows,
+        len(errors),
+    )
+    return {
+        "label": label,
+        "markets": markets or [],
+        "stocks_seen": len(stocks),
+        "stocks_synced": len(ok_results),
+        "price_rows_synced": price_rows,
+        "errors": errors,
+    }
 
 
 async def run_kr_analysis_batch() -> None:
@@ -317,6 +399,48 @@ def init_scheduler():
         replace_existing=True,
     )
 
+    # Price-only market refreshes. The 08:00 sync runs before KR open, so it can
+    # legitimately leave Friday/previous-session prices on the screen. These are
+    # cheap collector-only jobs: no financials/news/disclosures/LLM.
+    scheduler.add_job(
+        scheduled_price_sync_job,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=10, timezone=tz),
+        args=[list(KR_MARKETS), "kr_open"],
+        id="kr_open_price_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        scheduled_price_sync_job,
+        CronTrigger(day_of_week="mon-fri", hour=15, minute=40, timezone=tz),
+        args=[list(KR_MARKETS), "kr_close"],
+        id="kr_close_price_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        scheduled_price_sync_job,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute=35,
+            timezone=ZoneInfo("America/New_York"),
+        ),
+        args=[list(US_MARKETS), "us_open"],
+        id="us_open_price_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        scheduled_price_sync_job,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=16,
+            minute=5,
+            timezone=ZoneInfo("America/New_York"),
+        ),
+        args=[list(US_MARKETS), "us_close"],
+        id="us_close_price_sync",
+        replace_existing=True,
+    )
+
     # v2 KR/US split — cron strings configured in .env
     scheduler.add_job(
         run_kr_analysis_batch,
@@ -418,7 +542,8 @@ def init_scheduler():
 
     scheduler.start()
     logger.info(
-        "Scheduler started: phase A %s/%s + v2 KR %s,%s + v2 US %s,%s "
+        "Scheduler started: phase A %s/%s + price KR 09:10/15:40 KST "
+        "+ price US 09:35/16:05 ET + v2 KR %s,%s + v2 US %s,%s "
         "+ universe refresh 06:00 + sector_match 06:30 + sec_8k 06:45 "
         "+ news 06:50 + inverse_verify 07:00 + daily_drivers 08:10 (%s)",
         settings.scheduler_morning,

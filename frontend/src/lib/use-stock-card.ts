@@ -58,6 +58,7 @@ interface State {
 type Action =
   | { type: "loadStart" }
   | { type: "analyzeStart" }
+  | { type: "partialOk"; card: StockCard }
   | { type: "loadOk"; card: StockCard }
   | { type: "loadErr"; error: string };
 
@@ -67,6 +68,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, status: "loading", error: null };
     case "analyzeStart":
       return { ...state, status: "analyzing", error: null };
+    case "partialOk":
+      return { ...state, card: action.card, error: null };
     case "loadOk":
       return { card: action.card, status: "ready", error: null };
     case "loadErr":
@@ -162,8 +165,11 @@ export function useStockCard(ticker: string): {
   const refreshAll = useCallback(async () => {
     // 전체 새로고침 — backend 가 sync_prices + sync_news + sync_disclosures
     // 후 analyze() 무조건. LLM $0.25, 5분 cooldown. generated_at advance 까지
-    // long poll (analyze 평균 30-60s).
+    // long poll (analyze 평균 30-60s). 가격은 AI 완료 전에도 먼저 반영한다.
     const prevGeneratedAt = cardRef.current?.generated_at;
+    const prevPriceAsof = cardRef.current?.price_asof;
+    let priceOverlayUpdated = false;
+    let latestCard: StockCard | null = null;
     dispatch({ type: "analyzeStart" });
     try {
       await fullRefreshStock(ticker);
@@ -178,6 +184,11 @@ export function useStockCard(ticker: string): {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       try {
         const c = await getStockCard(ticker);
+        latestCard = c;
+        if (!priceOverlayUpdated && c.price_asof && c.price_asof !== prevPriceAsof) {
+          dispatch({ type: "partialOk", card: c });
+          priceOverlayUpdated = true;
+        }
         if (!prevGeneratedAt || c.generated_at !== prevGeneratedAt) {
           dispatch({ type: "loadOk", card: c });
           return;
@@ -186,10 +197,14 @@ export function useStockCard(ticker: string): {
         /* keep polling */
       }
     }
-    dispatch({
-      type: "loadErr",
-      error: "전체 새로고침이 1분 30초 안에 끝나지 않았어요. 잠시 후 새로고침 해보세요.",
-    });
+    if (latestCard && priceOverlayUpdated) {
+      dispatch({ type: "loadOk", card: latestCard });
+    } else {
+      dispatch({
+        type: "loadErr",
+        error: "전체 새로고침이 1분 30초 안에 끝나지 않았어요. 잠시 후 새로고침 해보세요.",
+      });
+    }
   }, [ticker]);
 
   const refreshPrice = useCallback(async () => {

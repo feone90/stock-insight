@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import select
 
-from app.scheduler import _sync_single_stock, scheduled_sync_job, init_scheduler, cleanup_old_news_content
+from app.scheduler import (
+    _sync_single_stock,
+    cleanup_old_news_content,
+    init_scheduler,
+    scheduled_price_sync_job,
+    scheduled_sync_job,
+)
 
 
 def _make_stock(ticker="005930", name="삼성전자"):
@@ -124,6 +130,34 @@ class TestScheduledSyncJob:
         mock_rates.assert_called_once()
 
 
+class TestScheduledPriceSyncJob:
+    @pytest.mark.asyncio
+    @patch("app.scheduler._sync_single_price", new_callable=AsyncMock)
+    @patch("app.scheduler.async_session")
+    async def test_syncs_distinct_favorites_for_selected_markets(
+        self, mock_session, mock_single_price
+    ):
+        stock_kr = _make_stock("005930")
+        stock_us = _make_stock("TSLA", "Tesla")
+        stock_us.market = "NASDAQ"
+
+        db_fav = AsyncMock()
+        fav_result = MagicMock()
+        fav_result.scalars.return_value.all.return_value = [stock_kr, stock_us]
+        db_fav.execute = AsyncMock(return_value=fav_result)
+
+        mock_session.return_value.__aenter__ = AsyncMock(return_value=db_fav)
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
+        mock_single_price.return_value = {"ticker": "005930", "prices": 3, "errors": []}
+
+        result = await scheduled_price_sync_job(markets=["KOSPI", "KOSDAQ", "KRX"], label="kr_open")
+
+        assert result["stocks_seen"] == 2
+        assert result["stocks_synced"] == 2
+        assert mock_single_price.call_count == 2
+        db_fav.execute.assert_called_once()
+
+
 class TestInitScheduler:
     @patch("app.scheduler.scheduler")
     @patch("app.scheduler.settings")
@@ -145,10 +179,18 @@ class TestInitScheduler:
         mock_settings.schedule_us_evening = "0 7 * * 1-5"
         mock_settings.schedule_us_night = "30 22 * * 1-5"
         init_scheduler()
-        # 2 phase A + 4 v2 + 1 universe refresh + 1 sector match + 1 sec 8-K
-        # + 1 news + 1 inverse-verify + 1 fred + 1 truth_social pipeline
-        # (added with political signals) = 13 jobs
-        assert mock_sched.add_job.call_count == 13
+        # 2 phase A + 4 price-only market refreshes + 4 v2
+        # + 1 universe refresh + 1 sector match + 1 sec 8-K + 1 news
+        # + 1 inverse-verify + 1 fred + 1 daily_drivers
+        # + 1 truth_social pipeline = 18 jobs
+        assert mock_sched.add_job.call_count == 18
+        job_ids = {call.kwargs["id"] for call in mock_sched.add_job.call_args_list}
+        assert {
+            "kr_open_price_sync",
+            "kr_close_price_sync",
+            "us_open_price_sync",
+            "us_close_price_sync",
+        } <= job_ids
         mock_sched.start.assert_called_once()
 
 
