@@ -124,7 +124,7 @@ export default function PortfolioPage() {
             {refreshingPrices ? "가격 갱신 중" : "가격 새로고침"}
           </button>
           <Link
-            href="/"
+            href="/favorites"
             className="inline-flex w-fit items-center gap-2 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
           >
             즐겨찾기 목록

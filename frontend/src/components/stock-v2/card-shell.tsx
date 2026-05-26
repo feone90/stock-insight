@@ -470,8 +470,8 @@ function StockLocalNav({
             <span className="hidden sm:inline">뒤로</span>
           </button>
           <Link
-            href="/"
-            title="홈의 즐겨찾기 목록으로 이동"
+            href="/favorites"
+            title="즐겨찾기 목록으로 이동"
             className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] px-2.5 text-[var(--surface-text-muted)] transition-colors hover:bg-[var(--surface-section-hover)] hover:text-[var(--surface-text)]"
           >
             <Home size={17} />

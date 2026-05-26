@@ -26,7 +26,7 @@ export default function ChatPage() {
             포트폴리오 보기
           </Link>
           <Link
-            href="/"
+            href="/favorites"
             className="inline-flex items-center justify-center rounded-md border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
           >
             즐겨찾기 목록

@@ -117,7 +117,7 @@ export function TopNav() {
           Ask AI 준비중
         </span>
         <Link
-          href="/"
+          href="/favorites"
           className="hidden md:inline text-sm text-yellow-400 hover:text-yellow-300 transition-colors"
         >
           즐겨찾기

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
+  ArrowRight,
   Clock3,
   FolderKanban,
   LineChart,
@@ -12,10 +12,6 @@ import {
   Search,
   UserRound,
 } from "lucide-react";
-import { getFavorites } from "@/services/api";
-import { onUserChanged } from "@/services/user";
-import { currencyMark, isKRMarket } from "@/lib/markets";
-import type { Stock } from "@/types/stock";
 
 const RECOMMENDATIONS: { ticker: string; name: string; market: string; desc: string }[] = [
   { ticker: "005930", name: "삼성전자", market: "KOSPI", desc: "한국 대표 반도체" },
@@ -24,121 +20,15 @@ const RECOMMENDATIONS: { ticker: string; name: string; market: string; desc: str
 ];
 
 export default function Home() {
-  const [favorites, setFavorites] = useState<Stock[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [shortcut] = useState(getShortcutLabel);
-
-  useEffect(() => {
-    const reload = () => {
-      setLoading(true);
-      getFavorites()
-        .then(setFavorites)
-        .catch(console.error)
-        .finally(() => setLoading(false));
-    };
-    reload();
-    return onUserChanged(reload);
-  }, []);
-
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-9">
-      <HomeGuide shortcut={shortcut} favoriteCount={favorites.length} />
-
-      {loading ? (
-        <div className="mt-6 text-slate-500">로딩 중...</div>
-      ) : favorites.length === 0 ? (
-        <EmptyState shortcut={shortcut} />
-      ) : (
-        <section className="mt-7">
-          <div className="mb-4 flex flex-col gap-3 border-t border-slate-800 pt-5 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-slate-50">
-                즐겨찾기 종목
-              </h1>
-              <p className="mt-1 text-sm text-slate-400">
-                현재 선택한 사용자의 관심 종목입니다. 카드를 열면 차트, 뉴스/이슈,
-                관계망, AI 판단을 한 화면에서 볼 수 있습니다.
-              </p>
-            </div>
-            <Link
-              href="/portfolio"
-              className="inline-flex w-fit items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-sm font-medium text-blue-100 transition-colors hover:bg-blue-500/15"
-            >
-              <FolderKanban size={15} />
-              포트폴리오 전체 흐름
-            </Link>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {favorites.map((stock) => (
-              <Link
-                key={stock.ticker}
-                href={`/stock/${stock.ticker}`}
-                className="group rounded-lg border border-slate-800 bg-slate-900 p-4 transition-colors hover:border-slate-600"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-semibold text-slate-50 group-hover:text-blue-400 transition-colors">
-                      {stock.name}
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      {stock.ticker} · {stock.market}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-slate-50">
-                      {isKRMarket(stock.market) ? (
-                        <>
-                          {stock.current_price.toLocaleString()}
-                          <span className="text-xs ml-0.5">원</span>
-                        </>
-                      ) : (
-                        <>
-                          {currencyMark(stock.market)}
-                          {stock.current_price.toLocaleString()}
-                        </>
-                      )}
-                    </div>
-                    <div
-                      className={`text-sm ${
-                        stock.change_percent >= 0
-                          ? "text-red-400"
-                          : "text-blue-400"
-                      }`}
-                    >
-                      {stock.change_percent >= 0 ? "▲" : "▼"}{" "}
-                      {Math.abs(stock.change).toLocaleString()} (
-                      {stock.change_percent >= 0 ? "+" : ""}
-                      {stock.change_percent}%)
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
+      <HomeGuide />
+      <SampleStocks />
     </div>
   );
 }
 
-function getShortcutLabel() {
-  if (typeof navigator === "undefined") return "Ctrl+K";
-  const platform =
-    (navigator as Navigator & { userAgentData?: { platform?: string } })
-      .userAgentData?.platform ||
-    navigator.platform ||
-    navigator.userAgent ||
-    "";
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? "⌘K" : "Ctrl+K";
-}
-
-function HomeGuide({
-  shortcut,
-  favoriteCount,
-}: {
-  shortcut: string;
-  favoriteCount: number;
-}) {
+function HomeGuide() {
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[linear-gradient(135deg,rgba(2,6,23,0.98),rgba(15,23,42,0.92))]">
       <div className="border-b border-slate-800 px-4 py-4 md:px-5 md:py-5">
@@ -151,13 +41,28 @@ function HomeGuide({
               즐겨찾기만 정하면 가격과 뉴스, AI 판단이 자동 갱신됩니다.
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-slate-400">
-              상단에서 사용자를 고르고 종목을 추가하세요. 포트폴리오는 전체 우선순위, 종목 카드는 판단 근거와 캔들별 상승·하락 이유를 보여줍니다.
+              이 화면은 StockInsight의 구조를 설명하는 홈입니다. 매일 보는 개인 종목은 즐겨찾기와 포트폴리오에서 바로 확인합니다.
             </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Link
+                href="/favorites"
+                className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+              >
+                내 즐겨찾기 보기
+                <ArrowRight size={15} />
+              </Link>
+              <Link
+                href="/portfolio"
+                className="inline-flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500"
+              >
+                포트폴리오 보기
+              </Link>
+            </div>
           </div>
           <div className="space-y-3">
             <ChartGuidePreview />
             <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-slate-700/80 bg-slate-950/70 text-center">
-              <Metric label="내 관심종목" value={`${favoriteCount}개`} />
+              <Metric label="홈 역할" value="사용 안내" />
               <Metric label="중복 분석" value="종목당 1회" />
               <Metric label="표기 시간" value="한국시간" />
             </div>
@@ -177,7 +82,7 @@ function HomeGuide({
             <GuideStep
               icon={<Search size={15} />}
               title="종목 추가"
-              body={`${shortcut} 또는 상단 검색창에서 국내/미국 종목을 찾고, 카드의 별 버튼으로 관심종목에 넣습니다.`}
+              body="상단 검색창에서 국내/미국 종목을 찾고, 카드의 별 버튼으로 관심종목에 넣습니다."
             />
             <GuideStep
               icon={<FolderKanban size={15} />}
@@ -343,18 +248,15 @@ function GuideNote({ label, body }: { label: string; body: string }) {
   );
 }
 
-function EmptyState({ shortcut }: { shortcut: string }) {
+function SampleStocks() {
   return (
     <div className="mt-7 space-y-7 border-t border-slate-800 pt-5">
       <div>
         <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-[var(--surface-text)]">
-          관심 종목을 추가하세요
+          샘플 종목으로 먼저 확인
         </h1>
         <p className="mt-3 text-sm text-[var(--surface-text-muted)] leading-relaxed">
-          <kbd className="inline-flex items-center gap-1 text-xs border border-[var(--surface-border)] rounded px-1.5 py-0.5 font-mono text-[var(--surface-text)]">
-            {shortcut}
-          </kbd>
-          {"  "}로 종목을 검색하면 분석 카드가 생성됩니다. 아래 종목으로 먼저 열어볼 수 있습니다.
+          검색 전에도 종목 카드의 차트, 뉴스/이슈, 관계망, AI 판단 흐름을 바로 열어볼 수 있습니다.
         </p>
       </div>
 
