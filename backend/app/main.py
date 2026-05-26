@@ -107,4 +107,19 @@ app.include_router(ontology_router)
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok"}
+    jobs = []
+    if scheduler.running:
+        for job in scheduler.get_jobs():
+            jobs.append({
+                "id": job.id,
+                "next_run_time": job.next_run_time.isoformat()
+                if job.next_run_time
+                else None,
+            })
+    return {
+        "status": "ok",
+        "scheduler_enabled": settings.scheduler_enabled,
+        "scheduler_running": scheduler.running,
+        "scheduler_timezone": settings.scheduler_timezone,
+        "scheduler_jobs": jobs,
+    }

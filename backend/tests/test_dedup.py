@@ -1,11 +1,12 @@
 """Dedup logic tests for the scheduler's unique-ticker selection."""
+from datetime import date
 from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
 
-from app.models import Favorite, Stock
-from app.services.analyst.dedup import unique_favorite_tickers
+from app.models import Analysis, Favorite, Stock
+from app.services.analyst.dedup import _parse_generated_at, unique_favorite_tickers
 
 
 @pytest_asyncio.fixture
@@ -54,3 +55,49 @@ async def test_unique_favorites_filters_by_market(db_for_dedup):
 
     us_only = await unique_favorite_tickers(markets=["NASDAQ", "NYSE"])
     assert "USONLY" in us_only
+
+
+@pytest.mark.asyncio
+async def test_unique_favorites_orders_missing_and_stale_cards_first(db_for_dedup):
+    db = db_for_dedup
+    missing = Stock(ticker="MISS1", name="missing", market="US", sector="x")
+    stale = Stock(ticker="STALE1", name="stale", market="US", sector="x")
+    fresh = Stock(ticker="FRESH1", name="fresh", market="US", sector="x")
+    db.add_all([fresh, stale, missing])
+    await db.flush()
+
+    db.add_all([
+        Favorite(user_id="u1", stock_id=fresh.id),
+        Favorite(user_id="u1", stock_id=stale.id),
+        Favorite(user_id="u1", stock_id=missing.id),
+        Analysis(
+            stock_id=fresh.id,
+            date=date.today(),
+            period_type="daily",
+            summary="fresh",
+            feedback="fresh",
+            schema_version="v2",
+            card_data={"generated_at": "2026-05-26T00:00:00Z"},
+        ),
+        Analysis(
+            stock_id=stale.id,
+            date=date.today(),
+            period_type="daily",
+            summary="stale",
+            feedback="stale",
+            schema_version="v2",
+            card_data={"generated_at": "2026-05-22T00:00:00Z"},
+        ),
+    ])
+    await db.commit()
+
+    out = await unique_favorite_tickers(markets=["US"])
+
+    assert out.index("MISS1") < out.index("STALE1") < out.index("FRESH1")
+
+
+def test_parse_generated_at_handles_z_and_offset():
+    assert _parse_generated_at("2026-05-26T00:00:00Z") == _parse_generated_at(
+        "2026-05-26T00:00:00+00:00"
+    )
+    assert _parse_generated_at("not-a-date") is None
