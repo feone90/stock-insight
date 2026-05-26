@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -108,18 +109,24 @@ app.include_router(ontology_router)
 @app.get("/api/health")
 async def health_check():
     jobs = []
+    display_tz = ZoneInfo(settings.scheduler_timezone)
     if scheduler.running:
         for job in scheduler.get_jobs():
-            jobs.append({
-                "id": job.id,
-                "next_run_time": job.next_run_time.isoformat()
-                if job.next_run_time
-                else None,
-            })
+            jobs.append(_scheduler_job_payload(job, display_tz))
     return {
         "status": "ok",
         "scheduler_enabled": settings.scheduler_enabled,
         "scheduler_running": scheduler.running,
         "scheduler_timezone": settings.scheduler_timezone,
         "scheduler_jobs": jobs,
+    }
+
+
+def _scheduler_job_payload(job, display_tz: ZoneInfo) -> dict:
+    next_run_time = job.next_run_time
+    return {
+        "id": job.id,
+        "next_run_time": next_run_time.astimezone(display_tz).isoformat()
+        if next_run_time
+        else None,
     }

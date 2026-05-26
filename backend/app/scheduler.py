@@ -543,7 +543,7 @@ def init_scheduler():
     scheduler.start()
     logger.info(
         "Scheduler started: phase A %s/%s + price KR 09:10/15:40 KST "
-        "+ price US 09:35/16:05 ET + v2 KR %s,%s + v2 US %s,%s "
+        "+ price US market open/close + v2 KR %s,%s + v2 US %s,%s "
         "+ universe refresh 06:00 + sector_match 06:30 + sec_8k 06:45 "
         "+ news 06:50 + inverse_verify 07:00 + daily_drivers 08:10 (%s)",
         settings.scheduler_morning,

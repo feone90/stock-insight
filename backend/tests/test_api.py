@@ -1,7 +1,11 @@
 import pytest
+from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
+from zoneinfo import ZoneInfo
 from httpx import AsyncClient
 
+from app.main import _scheduler_job_payload
 from app.api.stocks import _looks_like_us_ticker, _search_rank
 from app.schemas.stock import StockResponse
 
@@ -11,6 +15,20 @@ async def test_health(client: AsyncClient):
     response = await client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_scheduler_job_payload_converts_next_run_time_to_kst():
+    job = SimpleNamespace(
+        id="us_open_price_sync",
+        next_run_time=datetime(2026, 5, 26, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    payload = _scheduler_job_payload(job, ZoneInfo("Asia/Seoul"))
+
+    assert payload == {
+        "id": "us_open_price_sync",
+        "next_run_time": "2026-05-26T22:35:00+09:00",
+    }
 
 
 # --- Search ---
