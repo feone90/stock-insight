@@ -5,10 +5,12 @@ import json
 import logging
 from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import async_session
 from app.models import Analysis, Favorite, News, PriceHistory, Stock
 from app.models.daily_driver import DailyPriceDriver
@@ -23,8 +25,23 @@ _NEWS_LIMIT = 12
 _BODY_LIMIT = 1200
 
 
-async def run_daily_driver_batch(limit: int = 80) -> DailyDriverRunResult:
-    """Create finalized drivers for each favorite stock's latest completed date."""
+def local_today(now: datetime | None = None) -> date:
+    """Business date for scheduler work, independent of server UTC timezone."""
+    tz = ZoneInfo(settings.scheduler_timezone)
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=tz)
+    return current.astimezone(tz).date()
+
+
+async def run_daily_driver_batch(limit: int = 80, days: int = 7) -> DailyDriverRunResult:
+    """Create finalized drivers for recent completed dates.
+
+    A price row can arrive late. If the 08:10 job only checks the single latest
+    date available at that moment, a later price refresh can insert yesterday's
+    row after the driver job has already skipped it. Looking back a short window
+    keeps the job missing-only while recovering those delayed historical dates.
+    """
     if not can_proceed():
         return DailyDriverRunResult(
             status="skipped_budget", processed=0, created=0, skipped=0, errors=[]
@@ -43,17 +60,27 @@ async def run_daily_driver_batch(limit: int = 80) -> DailyDriverRunResult:
     for stock in stocks:
         try:
             async with async_session() as db:
-                trade_date = await latest_completed_trade_date(db, stock.id)
-                if trade_date is None:
+                trade_dates = await completed_trade_dates(db, stock.id, days=days)
+                if not trade_dates:
                     skipped += 1
                     continue
-                result = await ensure_daily_driver(db, stock, trade_date)
-                processed += 1
-                if result is None:
-                    skipped += 1
-                else:
-                    created += 1
-                    rows.append(_response(stock.ticker, result))
+                for trade_date in trade_dates:
+                    if not can_proceed():
+                        return DailyDriverRunResult(
+                            status="skipped_budget",
+                            processed=processed,
+                            created=created,
+                            skipped=skipped,
+                            errors=errors,
+                            rows=rows,
+                        )
+                    result = await ensure_daily_driver(db, stock, trade_date)
+                    processed += 1
+                    if result is None:
+                        skipped += 1
+                    else:
+                        created += 1
+                        rows.append(_response(stock.ticker, result))
         except Exception as e:  # noqa: BLE001
             logger.exception("daily driver batch failed for %s: %s", stock.ticker, e)
             errors.append(f"{stock.ticker}: {e}")
@@ -80,7 +107,8 @@ async def backfill_daily_drivers(
             status="skipped_budget", processed=0, created=0, skipped=0, errors=[]
         )
 
-    since = date.today() - timedelta(days=max(1, min(days, 730)))
+    today = local_today()
+    since = today - timedelta(days=max(1, min(days, 730)))
     async with async_session() as db:
         stmt = select(Stock)
         if ticker:
@@ -100,7 +128,7 @@ async def backfill_daily_drivers(
                     .where(
                         PriceHistory.stock_id == stock.id,
                         PriceHistory.date >= since,
-                        PriceHistory.date < date.today(),
+                        PriceHistory.date < today,
                     )
                     .order_by(PriceHistory.date.asc())
                 )
@@ -130,14 +158,37 @@ async def backfill_daily_drivers(
 
 
 async def latest_completed_trade_date(db: AsyncSession, stock_id: int) -> date | None:
+    today = local_today()
     return (
         await db.execute(
             select(func.max(PriceHistory.date)).where(
                 PriceHistory.stock_id == stock_id,
-                PriceHistory.date < date.today(),
+                PriceHistory.date < today,
             )
         )
     ).scalar_one_or_none()
+
+
+async def completed_trade_dates(
+    db: AsyncSession,
+    stock_id: int,
+    days: int = 7,
+) -> list[date]:
+    today = local_today()
+    since = today - timedelta(days=max(1, min(days, 30)))
+    return list(
+        (
+            await db.execute(
+                select(PriceHistory.date)
+                .where(
+                    PriceHistory.stock_id == stock_id,
+                    PriceHistory.date >= since,
+                    PriceHistory.date < today,
+                )
+                .order_by(PriceHistory.date.asc())
+            )
+        ).scalars().all()
+    )
 
 
 async def ensure_daily_driver(
