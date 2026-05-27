@@ -128,7 +128,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
   // 2026-05-18 — 자동 가격 polling. 30초마다 + tab visible + 장 개장 중일
   // 때만. backend price_refresh cooldown 이 30s — 자연스러운 하한선.
   // 장 외 시간엔 가격 자체 안 변하니 yfinance/pykrx 호출 절약.
-  // KR: 평일 09:00-15:30 KST. US: 평일 22:30-05:00 KST.
+  // KR: 평일 09:00-15:30 KST. US: 평일 09:30-16:00 New York.
   const cardMarket = card?.market;
   useEffect(() => {
     if (!cardMarket) return;

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -21,7 +21,7 @@ import {
   getStockPrices,
   priceRefreshStock,
 } from "@/services/api";
-import { currencyMark, isKRMarket, isUSMarket } from "@/lib/markets";
+import { currencyMark, isKRMarket, isMarketOpen, isUSMarket } from "@/lib/markets";
 import { onUserChanged } from "@/services/user";
 import type { Stock, PriceRecord } from "@/types/stock";
 import type { StockCard, StockEventMarker } from "@/types/card";
@@ -43,11 +43,17 @@ const STANCE_LABEL = {
   REJECT: "보류",
 } as const;
 
+const PRICE_POLL_MS = 30_000;
+
 export default function PortfolioPage() {
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [autoRefreshingPrices, setAutoRefreshingPrices] = useState(false);
+  const [lastAutoPriceRefreshAt, setLastAutoPriceRefreshAt] = useState<Date | null>(null);
+  const [marketClock, setMarketClock] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
+  const autoPriceRefreshInFlight = useRef(false);
 
   const loadPortfolio = useCallback(async (options?: { quiet?: boolean }) => {
     if (!options?.quiet) setLoading(true);
@@ -94,8 +100,96 @@ export default function PortfolioPage() {
     }
   }, [items, loadPortfolio, refreshingPrices]);
 
+  const refreshOpenMarketPrices = useCallback(async () => {
+    if (
+      loading ||
+      refreshingPrices ||
+      autoPriceRefreshInFlight.current ||
+      document.visibilityState !== "visible"
+    ) {
+      return;
+    }
+    const openItems = items.filter((item) => isMarketOpen(item.stock.market));
+    if (openItems.length === 0) return;
+
+    autoPriceRefreshInFlight.current = true;
+    setAutoRefreshingPrices(true);
+    try {
+      const targetTickers = new Set(openItems.map((item) => item.stock.ticker.toUpperCase()));
+      await Promise.allSettled(openItems.map((item) => priceRefreshStock(item.stock.ticker)));
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+
+      const [favoritesResult, priceResults] = await Promise.all([
+        getFavorites(),
+        Promise.allSettled(
+          openItems.map(async (item) => ({
+            ticker: item.stock.ticker.toUpperCase(),
+            prices: await getStockPrices(item.stock.ticker, 60),
+          })),
+        ),
+      ]);
+      const stockByTicker = new Map(
+        favoritesResult.map((stock) => [stock.ticker.toUpperCase(), stock]),
+      );
+      const pricesByTicker = new Map<string, PriceRecord[]>();
+      for (const result of priceResults) {
+        if (result.status === "fulfilled") {
+          pricesByTicker.set(result.value.ticker, result.value.prices);
+        }
+      }
+
+      setItems((current) =>
+        current
+          .map((item) => {
+            const ticker = item.stock.ticker.toUpperCase();
+            if (!targetTickers.has(ticker)) return item;
+            const stock = stockByTicker.get(ticker) ?? item.stock;
+            const prices = pricesByTicker.get(ticker) ?? item.prices;
+            const latestEvent = item.events[0] ?? null;
+            return {
+              ...item,
+              stock,
+              prices,
+              score: importanceScore(stock, item.card, latestEvent),
+              reason: pickReason(stock, item.card, latestEvent),
+              priceTone: directionFromChange(stock.change_percent),
+            };
+          })
+          .sort(comparePortfolioItems),
+      );
+      setLastAutoPriceRefreshAt(new Date());
+    } finally {
+      autoPriceRefreshInFlight.current = false;
+      setAutoRefreshingPrices(false);
+      setMarketClock(Date.now());
+    }
+  }, [items, loading, refreshingPrices]);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    const id = window.setInterval(() => {
+      setMarketClock(Date.now());
+      refreshOpenMarketPrices().catch(() => {});
+    }, PRICE_POLL_MS);
+    const onVisible = () => {
+      setMarketClock(Date.now());
+      if (document.visibilityState === "visible") {
+        refreshOpenMarketPrices().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [items.length, refreshOpenMarketPrices]);
+
   const leaders = useMemo(() => items.slice(0, 3), [items]);
   const stats = useMemo(() => summarize(items), [items]);
+  const openMarketCount = useMemo(() => {
+    const at = new Date(marketClock);
+    return items.filter((item) => isMarketOpen(item.stock.market, at)).length;
+  }, [items, marketClock]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-5 md:px-6 md:py-8">
@@ -114,6 +208,21 @@ export default function PortfolioPage() {
           </p>
         </div>
         <div className="mt-4 flex flex-wrap gap-2 md:mt-0">
+          <div className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-800 bg-slate-950/70 px-3 text-xs text-slate-400">
+            <span
+              className={`size-2 rounded-full ${
+                openMarketCount > 0 ? "bg-emerald-400" : "bg-slate-600"
+              } ${autoRefreshingPrices ? "animate-pulse" : ""}`}
+            />
+            {openMarketCount > 0
+              ? `장중 ${openMarketCount}개 · 30초 자동 갱신`
+              : "장중 종목 없음"}
+            {lastAutoPriceRefreshAt ? (
+              <span className="hidden text-slate-600 sm:inline">
+                · {formatAutoRefreshTime(lastAutoPriceRefreshAt)}
+              </span>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={refreshPortfolioPrices}
@@ -560,6 +669,13 @@ function formatShortDate(value?: string | null): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "완료";
   return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function formatAutoRefreshTime(value: Date): string {
+  return value.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function directionFromChange(change: number): PortfolioItem["priceTone"] {
