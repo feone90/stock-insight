@@ -34,6 +34,15 @@ def _looks_malformed_name(name: str | None, ticker: str) -> bool:
     )
 
 
+def _float_or_zero(value) -> float:
+    try:
+        if value is None or value != value:
+            return 0
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _normalize_market(exchange: str, ticker_candidate: str = "") -> str:
     """yfinance exchange 코드를 정규화된 market 값으로 변환한다."""
     ex = exchange.upper()
@@ -118,27 +127,58 @@ def _lookup_yfinance_search(query: str) -> list[dict]:  # pragma: no cover
     return results
 
 
+def _lookup_fdr_listing(
+    query: str,
+    listing,
+    *,
+    code_col: str,
+    sector_col: str,
+    price_col: str | None,
+    is_delisted: bool,
+) -> list[dict]:
+    q = query.upper()
+    matches = listing[
+        listing["Name"].str.contains(query, case=False, na=False) |
+        listing[code_col].astype(str).str.contains(q, case=False, na=False)
+    ].head(10)
+    results = []
+    for _, row in matches.iterrows():
+        results.append({
+            "ticker": row[code_col],
+            "name": row["Name"],
+            "market": row.get("Market", "KRX"),
+            "sector": row.get(sector_col, "") or "",
+            "current_price": _float_or_zero(row.get(price_col)) if price_col else 0,
+            "is_delisted": is_delisted,
+        })
+    return results
+
+
 def _lookup_fdr(query: str) -> list[dict]:  # pragma: no cover
-    """FinanceDataReader로 한국 종목을 검색한다 (동기 호출)."""
+    """FinanceDataReader로 한국 종목을 검색한다 (현재 상장 + 상장폐지 이력)."""
     try:
         import FinanceDataReader as fdr
         listing = fdr.StockListing("KRX")
-        # 이름 또는 코드로 검색
-        matches = listing[
-            listing["Name"].str.contains(query, case=False, na=False) |
-            listing["Code"].str.contains(query.upper(), na=False)
-        ].head(10)
-        results = []
-        for _, row in matches.iterrows():
-            market = row.get("Market", "KRX")
-            results.append({
-                "ticker": row["Code"],
-                "name": row["Name"],
-                "market": market,
-                "sector": row.get("Sector", "") or "",
-                "current_price": float(row.get("Close", 0) or 0),
-            })
-        return results
+        results = _lookup_fdr_listing(
+            query,
+            listing,
+            code_col="Code",
+            sector_col="Sector",
+            price_col="Close",
+            is_delisted=False,
+        )
+        if results:
+            return results
+
+        delisted = fdr.StockListing("KRX-DELISTING")
+        return _lookup_fdr_listing(
+            query,
+            delisted,
+            code_col="Symbol",
+            sector_col="Industry",
+            price_col=None,
+            is_delisted=True,
+        )
     except Exception:
         return []
 
@@ -199,6 +239,7 @@ async def register_stock(db: AsyncSession, ticker: str) -> Stock | None:
         market=info["market"],
         sector=info.get("sector", ""),
         current_price=info.get("current_price", 0),
+        is_delisted=info.get("is_delisted", False),
     )
     db.add(stock)
     await db.commit()
@@ -227,6 +268,7 @@ async def repair_stock_metadata_if_needed(db: AsyncSession, stock: Stock) -> Sto
     stock.name = info["name"]
     stock.market = info.get("market") or stock.market
     stock.sector = info.get("sector", "") or stock.sector or ""
+    stock.is_delisted = info.get("is_delisted", stock.is_delisted)
     current_price = info.get("current_price")
     if current_price:
         stock.current_price = current_price

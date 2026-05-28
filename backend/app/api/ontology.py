@@ -386,6 +386,7 @@ def _node_dict(s: Stock, *, is_center: bool) -> dict:
         "today_change_pct": s.change_percent,
         "node_kind": "stock",
         "is_virtual": False,
+        "is_delisted": s.is_delisted,
     }
 
 

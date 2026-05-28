@@ -14,6 +14,7 @@ export interface GraphNode {
   today_change_pct: number | null;
   node_kind?: "stock" | "private" | "theme" | "macro";
   is_virtual?: boolean;
+  is_delisted?: boolean;
 }
 
 export interface GraphLink {

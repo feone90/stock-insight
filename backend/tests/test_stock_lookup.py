@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 from app.collectors import stock_lookup
@@ -92,6 +93,45 @@ def test_lookup_yfinance_skips_bare_numeric_kr_artifacts(monkeypatch):
         "market": "KRX",
         "sector": "",
         "current_price": 97000,
+    }]
+
+
+def test_lookup_fdr_falls_back_to_delisted_krx_listing(monkeypatch):
+    calls: list[str] = []
+
+    class FakeFdr:
+        @staticmethod
+        def StockListing(market):
+            calls.append(market)
+            if market == "KRX":
+                return pd.DataFrame([{
+                    "Code": "005930",
+                    "Name": "삼성전자",
+                    "Market": "KOSPI",
+                    "Sector": "전기전자",
+                    "Close": 100,
+                }])
+            if market == "KRX-DELISTING":
+                return pd.DataFrame([{
+                    "Symbol": "010620",
+                    "Name": "HD현대미포",
+                    "Market": "KOSPI",
+                    "Industry": "운송장비·부품",
+                }])
+            raise AssertionError(market)
+
+    monkeypatch.setitem(__import__("sys").modules, "FinanceDataReader", FakeFdr)
+
+    results = stock_lookup._lookup_fdr("010620")
+
+    assert calls == ["KRX", "KRX-DELISTING"]
+    assert results == [{
+        "ticker": "010620",
+        "name": "HD현대미포",
+        "market": "KOSPI",
+        "sector": "운송장비·부품",
+        "current_price": 0,
+        "is_delisted": True,
     }]
 
 

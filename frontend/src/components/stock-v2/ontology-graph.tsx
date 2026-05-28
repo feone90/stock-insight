@@ -85,6 +85,7 @@ const VIRTUAL_NODE_COLOR: Record<NonNullable<GraphNode["node_kind"]>, string> = 
   theme: "#db2777",
   macro: "#ea580c",
 };
+const DELISTED_NODE_COLOR = "#94a3b8";
 
 type GraphView = "business" | "all";
 
@@ -304,13 +305,15 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             d3AlphaDecay={0.02}
             d3VelocityDecay={0.3}
             cooldownTime={6000}
-            nodeColor={(n) =>
-              (n as GraphNode).is_center
-                ? "#f59e0b"
-                : (n as GraphNode).is_virtual
-                  ? VIRTUAL_NODE_COLOR[(n as GraphNode).node_kind ?? "private"]
-                  : tierColors[(n as GraphNode).tier] ?? tierColors[1]
-            }
+            nodeColor={(n) => {
+              const node = n as GraphNode;
+              if (node.is_center) return "#f59e0b";
+              if (node.is_delisted) return DELISTED_NODE_COLOR;
+              if (node.is_virtual) {
+                return VIRTUAL_NODE_COLOR[node.node_kind ?? "private"];
+              }
+              return tierColors[node.tier] ?? tierColors[1];
+            }}
             nodeVal={(n) =>
               (n as GraphNode).is_center
                 ? 6
@@ -326,7 +329,9 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
                   ? ""
                   : ` · ${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
               const kind =
-                node.node_kind === "private"
+                node.is_delisted
+                  ? "상장폐지/합병"
+                  : node.node_kind === "private"
                   ? "비상장 핵심 관계"
                   : node.node_kind === "theme"
                     ? "테마"
@@ -409,7 +414,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             cooldownTicks={150}
             onNodeClick={(n) => {
               const node = n as GraphNode;
-              if (node.is_virtual || node.node_kind !== "stock") {
+              if (node.is_delisted || node.is_virtual || node.node_kind !== "stock") {
                 setSelectedLink(null);
                 setSelectedNode(node);
                 return;
@@ -450,12 +455,19 @@ function VirtualNodePanel({
   onClose: () => void;
 }) {
   const kind =
-    node.node_kind === "theme"
+    node.is_delisted
+      ? "상장폐지/합병 이력"
+      : node.node_kind === "theme"
       ? "테마"
       : node.node_kind === "macro"
         ? "매크로"
         : "비상장 관계 노드";
-  const chipColor = VIRTUAL_NODE_COLOR[node.node_kind ?? "private"];
+  const chipColor = node.is_delisted
+    ? DELISTED_NODE_COLOR
+    : VIRTUAL_NODE_COLOR[node.node_kind ?? "private"];
+  const description = node.is_delisted
+    ? "현재 거래 중인 종목 카드가 아니라 과거 상장·합병 이력으로 관계망에 남은 대상입니다. 시세보다 관계 근거를 중심으로 확인하세요."
+    : "이 항목은 상장 종목 카드가 아니라 관계망에서만 보는 사업 관계 대상입니다. 시세·차트·AI 종목 분석으로 이동하지 않습니다.";
 
   return (
     <div
@@ -489,8 +501,7 @@ function VirtualNodePanel({
         </button>
       </div>
       <p className="rounded-sm border border-[var(--surface-border)]/60 bg-[var(--surface-section)] p-2 text-[13px] leading-relaxed text-[var(--surface-text)]">
-        이 항목은 상장 종목 카드가 아니라 관계망에서만 보는 사업 관계 대상입니다.
-        시세·차트·AI 종목 분석으로 이동하지 않습니다.
+        {description}
       </p>
       <p className="mt-2 text-[11px] text-[var(--surface-text-subtle)]">
         선을 클릭하면 이 대상이 왜 연결됐는지 근거를 볼 수 있습니다.
@@ -605,6 +616,9 @@ function Legend({ tierColors }: { tierColors: Record<number, string> }) {
       </span>
       <span className="flex items-center gap-1" title="상장 종목 카드가 없는 관계망 전용 노드">
         <Dot color={VIRTUAL_NODE_COLOR.private} /> 비상장
+      </span>
+      <span className="flex items-center gap-1" title="합병·상장폐지 등으로 현재 거래되지 않는 과거 상장 종목">
+        <Dot color={DELISTED_NODE_COLOR} /> 상장폐지
       </span>
       <span className="flex items-center gap-1">
         <LineSwatch color="#dc2626" thick /> 핵심 관계
