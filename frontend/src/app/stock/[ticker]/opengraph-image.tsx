@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import { safeDecodeRouteParam } from "@/lib/stock-route";
 
 /**
  * Dynamic OG image per stock — Next.js 16 file convention. 카톡/Slack/X
@@ -29,7 +30,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchStockMeta(ticker: string): Promise<StockMeta | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/stocks/${ticker}`, {
+    const res = await fetch(`${API_BASE}/api/stocks/${encodeURIComponent(ticker)}`, {
       next: { revalidate: 60 },
     });
     if (!res.ok) return null;
@@ -65,7 +66,8 @@ export default async function OpengraphImage({
 }: {
   params: Promise<{ ticker: string }>;
 }) {
-  const { ticker } = await params;
+  const { ticker: rawTicker } = await params;
+  const ticker = safeDecodeRouteParam(rawTicker);
   const [meta, pretendard] = await Promise.all([
     fetchStockMeta(ticker),
     loadPretendard(),

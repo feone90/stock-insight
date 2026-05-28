@@ -3,20 +3,21 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { OntologyGraph } from "@/components/stock-v2/ontology-graph";
+import { safeDecodeRouteParam, stockHref } from "@/lib/stock-route";
 
 /**
  * Stock Universe ontology graph page — canonical route /stock/[ticker]/graph.
  */
 export default function StockGraphPage() {
   const params = useParams();
-  const ticker = params.ticker as string;
+  const ticker = safeDecodeRouteParam(params.ticker as string);
   return (
     <div className="min-h-screen bg-[var(--surface-bg)] text-[var(--surface-text)]">
       <div className="mx-auto max-w-[1400px] px-4 py-6 md:py-8">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-baseline gap-3">
             <Link
-              href={`/stock/${ticker}`}
+              href={stockHref(ticker)}
               className="text-sm text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
             >
               ← {ticker.toUpperCase()} 카드로

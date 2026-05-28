@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { getOntologyGraph } from "@/services/api";
+import { stockHref } from "@/lib/stock-route";
 import { useTheme } from "@/lib/use-theme";
 import type { GraphLink, GraphNode, GraphPayload } from "@/types/ontology";
 
@@ -128,6 +129,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
   const [depth, setDepth] = useState(1);
   const [view, setView] = useState<GraphView>("business");
   const [selectedLink, setSelectedLink] = useState<GraphLink | null>(null);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const { mode } = useTheme();
 
   // 노드 간 거리 / charge 강하게 — 라벨 안 겹치게.
@@ -149,6 +151,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
         setError(null);
         setData(null);
         setSelectedLink(null);
+        setSelectedNode(null);
       }
     });
     getOntologyGraph(ticker, {
@@ -406,12 +409,21 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             cooldownTicks={150}
             onNodeClick={(n) => {
               const node = n as GraphNode;
-              window.location.href = `/stock/${node.ticker}`;
+              if (node.is_virtual || node.node_kind !== "stock") {
+                setSelectedLink(null);
+                setSelectedNode(node);
+                return;
+              }
+              window.location.href = stockHref(node.ticker);
             }}
             onLinkClick={(l) => {
+              setSelectedNode(null);
               setSelectedLink(l as GraphLink);
             }}
-            onBackgroundClick={() => setSelectedLink(null)}
+            onBackgroundClick={() => {
+              setSelectedLink(null);
+              setSelectedNode(null);
+            }}
           />
         {selectedLink ? (
           <LinkDetailPanel
@@ -419,7 +431,70 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             onClose={() => setSelectedLink(null)}
           />
         ) : null}
+        {selectedNode ? (
+          <VirtualNodePanel
+            node={selectedNode}
+            onClose={() => setSelectedNode(null)}
+          />
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function VirtualNodePanel({
+  node,
+  onClose,
+}: {
+  node: GraphNode;
+  onClose: () => void;
+}) {
+  const kind =
+    node.node_kind === "theme"
+      ? "테마"
+      : node.node_kind === "macro"
+        ? "매크로"
+        : "비상장 관계 노드";
+  const chipColor = VIRTUAL_NODE_COLOR[node.node_kind ?? "private"];
+
+  return (
+    <div
+      className="absolute right-3 top-3 w-[320px] max-w-[calc(100%-1.5rem)] rounded-md border border-[var(--surface-border)] bg-[var(--surface-card)]/95 p-3 text-sm shadow-lg backdrop-blur"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-semibold text-[var(--surface-text)]">
+            {node.name}
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+            <span
+              className="rounded-sm px-1.5 py-0.5 font-medium text-white"
+              style={{ backgroundColor: chipColor }}
+            >
+              {kind}
+            </span>
+            <span className="text-[var(--surface-text-muted)]">
+              {node.market}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          className="shrink-0 text-lg leading-none text-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
+        >
+          ×
+        </button>
+      </div>
+      <p className="rounded-sm border border-[var(--surface-border)]/60 bg-[var(--surface-section)] p-2 text-[13px] leading-relaxed text-[var(--surface-text)]">
+        이 항목은 상장 종목 카드가 아니라 관계망에서만 보는 사업 관계 대상입니다.
+        시세·차트·AI 종목 분석으로 이동하지 않습니다.
+      </p>
+      <p className="mt-2 text-[11px] text-[var(--surface-text-subtle)]">
+        선을 클릭하면 이 대상이 왜 연결됐는지 근거를 볼 수 있습니다.
+      </p>
     </div>
   );
 }

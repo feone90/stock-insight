@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { StockPageClient } from "./StockPageClient";
+import { safeDecodeRouteParam } from "@/lib/stock-route";
 
 /**
  * Stock card page — canonical route + dynamic metadata for URL sharing.
@@ -23,7 +24,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function fetchStockMeta(ticker: string): Promise<StockMeta | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/stocks/${ticker}`, {
+    const res = await fetch(`${API_BASE}/api/stocks/${encodeURIComponent(ticker)}`, {
       // 60s ISR — OG 미리보기는 카카오/슬랙 등이 자체 캐시 (수분~수일) 하므로
       // 분 단위 정확도 불필요. 백엔드 부담 ↓.
       next: { revalidate: 60 },
@@ -49,7 +50,8 @@ export async function generateMetadata({
 }: {
   params: Promise<{ ticker: string }>;
 }): Promise<Metadata> {
-  const { ticker } = await params;
+  const { ticker: rawTicker } = await params;
+  const ticker = safeDecodeRouteParam(rawTicker);
   const meta = await fetchStockMeta(ticker);
 
   if (!meta) {
@@ -88,6 +90,7 @@ export default async function StockPage({
 }: {
   params: Promise<{ ticker: string }>;
 }) {
-  const { ticker } = await params;
+  const { ticker: rawTicker } = await params;
+  const ticker = safeDecodeRouteParam(rawTicker);
   return <StockPageClient ticker={ticker} />;
 }

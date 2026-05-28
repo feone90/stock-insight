@@ -23,6 +23,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { addFavorite, getFavorites, getStock, removeFavorite } from "@/services/api";
 import { getActiveUser, onUserChanged } from "@/services/user";
 import { isMarketOpen } from "@/lib/markets";
+import { isLikelyListedTicker } from "@/lib/stock-route";
 import { useStockCard } from "@/lib/use-stock-card";
 import { useTheme } from "@/lib/use-theme";
 import type { Stock } from "@/types/stock";
@@ -72,6 +73,7 @@ function formatKoRelative(d: Date | null, now: number): string {
  */
 export function StockCardPage({ ticker }: { ticker: string }) {
   const router = useRouter();
+  const routeLooksListed = isLikelyListedTicker(ticker);
   const { mode, toggle } = useTheme();
   const { card, state, refresh, refreshAll, refreshPrice, refreshNews, triggerAnalyze } =
     useStockCard(ticker);
@@ -219,6 +221,7 @@ export function StockCardPage({ ticker }: { ticker: string }) {
           onToggleFav={toggleFav}
           themeMode={mode}
           onToggleTheme={toggle}
+          routeLooksListed={routeLooksListed}
         />
 
         {card ? (
@@ -247,7 +250,11 @@ export function StockCardPage({ ticker }: { ticker: string }) {
         ) : state === "analyzing" && !card ? (
           <AnalyzingCard ticker={ticker} />
         ) : state === "error" && !card ? (
-          <ErrorCard ticker={ticker} onAnalyze={triggerAnalyze} />
+          <ErrorCard
+            ticker={ticker}
+            onAnalyze={triggerAnalyze}
+            canAnalyze={routeLooksListed}
+          />
         ) : card ? (
           <article
             className="rounded-2xl border border-[var(--surface-border)] bg-[var(--surface-card)] overflow-hidden"
@@ -438,6 +445,7 @@ function StockLocalNav({
   onToggleFav,
   themeMode,
   onToggleTheme,
+  routeLooksListed,
 }: {
   ticker: string;
   stockName?: string;
@@ -451,6 +459,7 @@ function StockLocalNav({
   onToggleFav: () => Promise<void>;
   themeMode: "dark" | "light";
   onToggleTheme: () => void;
+  routeLooksListed: boolean;
 }) {
   const normalizedTicker = ticker.toUpperCase();
   const favoriteCount = favorites.length;
@@ -478,7 +487,7 @@ function StockLocalNav({
           </Link>
           <div className="min-w-0 border-l border-[var(--surface-border)] pl-3">
             <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--surface-text-subtle)]">
-              종목 상세
+              {routeLooksListed ? "종목 상세" : "관계망 항목"}
             </div>
             <div className="flex min-w-0 items-center gap-2">
               <span className="font-semibold text-[var(--surface-text)]">{normalizedTicker}</span>
@@ -511,19 +520,21 @@ function StockLocalNav({
               className={`transition-transform ${favoritesOpen ? "rotate-180" : ""}`}
             />
           </button>
-          <button
-            type="button"
-            onClick={onToggleFav}
-            disabled={favBusy}
-            aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-            title={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
-            className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] transition-colors hover:bg-[var(--surface-section-hover)] disabled:opacity-50"
-          >
-            <Star
-              size={18}
-              className={isFav ? "fill-yellow-400 text-yellow-400" : ""}
-            />
-          </button>
+          {routeLooksListed ? (
+            <button
+              type="button"
+              onClick={onToggleFav}
+              disabled={favBusy}
+              aria-label={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+              title={isFav ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+              className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-section)] transition-colors hover:bg-[var(--surface-section-hover)] disabled:opacity-50"
+            >
+              <Star
+                size={18}
+                className={isFav ? "fill-yellow-400 text-yellow-400" : ""}
+              />
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onToggleTheme}
@@ -697,10 +708,29 @@ function SkeletonCard() {
 function ErrorCard({
   ticker,
   onAnalyze,
+  canAnalyze,
 }: {
   ticker: string;
   onAnalyze: () => Promise<void>;
+  canAnalyze: boolean;
 }) {
+  if (!canAnalyze) {
+    return (
+      <div
+        className="rounded-2xl border border-[var(--surface-border)] bg-[var(--surface-card)] p-6"
+        style={{ boxShadow: "var(--surface-shadow)" }}
+      >
+        <p className="font-medium text-[var(--surface-text)]">
+          {ticker}는 상장 종목 카드가 아니라 관계망에서만 보는 항목입니다.
+        </p>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--surface-text-muted)]">
+          비상장 회사, 테마, 매크로 노드는 시세·차트가 없어서 AI 종목 분석을 만들지 않습니다.
+          이전 관계망 화면에서 선을 클릭하면 연결 근거를 확인할 수 있습니다.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6"

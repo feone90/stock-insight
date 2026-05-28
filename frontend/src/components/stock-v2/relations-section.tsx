@@ -7,6 +7,7 @@ import type {
   RelationsSummary,
   SignalDirection,
 } from "@/types/card";
+import { stockHref } from "@/lib/stock-route";
 import { SectionShell } from "./section-shell";
 
 // 가족 친화 자연어 라벨 — 약어 / 영어 노출 X (feedback_card_user_facing_copy).
@@ -487,18 +488,7 @@ function ContextChips({ rels }: { rels: Relation[] }) {
       <ul className="flex flex-wrap gap-1.5">
         {shown.map((r, i) => (
           <li key={`${r.target_ticker}-${r.relation_type}-${i}`}>
-            <a
-              href={`/stock/${r.target_ticker}`}
-              className="inline-flex items-center gap-1 rounded-full border border-[var(--surface-border)] bg-[var(--surface-section-hover)] px-2 py-0.5 text-[11px] text-[var(--surface-text-muted)] hover:text-[var(--surface-text)] hover:border-[var(--surface-text-muted)]"
-              title={`${RELATION_LABEL[r.relation_type] ?? r.relation_type} · 신뢰 ${Math.round((r.confidence ?? 0.5) * 100)}%`}
-            >
-              <span>{r.target_name}</span>
-              {r.target_ticker && r.target_ticker !== r.target_name ? (
-                <span className="text-[10px] text-[var(--surface-text-subtle)]">
-                  {r.target_ticker}
-                </span>
-              ) : null}
-            </a>
+            <ContextChip rel={r} />
           </li>
         ))}
       </ul>
@@ -508,6 +498,46 @@ function ContextChips({ rels }: { rels: Relation[] }) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+function ContextChip({ rel }: { rel: Relation }) {
+  const title = `${RELATION_LABEL[rel.relation_type] ?? rel.relation_type} · 신뢰 ${Math.round((rel.confidence ?? 0.5) * 100)}%`;
+  const body = (
+    <>
+      <span>{rel.target_name}</span>
+      {rel.target_ticker && rel.target_ticker !== rel.target_name && rel.target_is_public !== false ? (
+        <span className="text-[10px] text-[var(--surface-text-subtle)]">
+          {rel.target_ticker}
+        </span>
+      ) : null}
+      {rel.target_is_public === false ? (
+        <span className="rounded border border-[var(--surface-border)] px-1 py-0.5 text-[10px] leading-none text-[var(--surface-text-subtle)]">
+          비상장
+        </span>
+      ) : null}
+    </>
+  );
+
+  if (rel.target_is_public === false || !rel.target_ticker) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full border border-[var(--surface-border)] bg-[var(--surface-section-hover)] px-2 py-0.5 text-[11px] text-[var(--surface-text-muted)]"
+        title={`${title} · 종목 카드 없음`}
+      >
+        {body}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={stockHref(rel.target_ticker)}
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--surface-border)] bg-[var(--surface-section-hover)] px-2 py-0.5 text-[11px] text-[var(--surface-text-muted)] hover:border-[var(--surface-text-muted)] hover:text-[var(--surface-text)]"
+      title={title}
+    >
+      {body}
+    </a>
   );
 }
 
