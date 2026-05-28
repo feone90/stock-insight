@@ -280,7 +280,7 @@ export function OntologyGraph({ ticker }: { ticker: string }) {
             표시할 참고 관계 없음
           </span>
         ) : null}
-        <Legend />
+        <Legend tierColors={tierColors} />
       </div>
       <div
         ref={containerRef}
@@ -591,20 +591,29 @@ function LinkDetailPanel({
   );
 }
 
-function Legend() {
+function Legend({ tierColors }: { tierColors: Record<number, string> }) {
   return (
     <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--surface-text-muted)]">
+      <span className="flex items-center gap-1" title="현재 보고 있는 중심 종목">
+        <Dot color="#f59e0b" /> 중심
+      </span>
+      <span className="flex items-center gap-1" title="기준 유니버스의 상장 종목">
+        <Dot color={tierColors[1]} /> 상장 핵심
+      </span>
+      <span className="flex items-center gap-1" title="사용자가 보거나 관심목록에 넣어 확장된 상장 종목">
+        <Dot color={tierColors[2]} /> 관심 확장
+      </span>
+      <span className="flex items-center gap-1" title="상장 종목 카드가 없는 관계망 전용 노드">
+        <Dot color={VIRTUAL_NODE_COLOR.private} /> 비상장
+      </span>
       <span className="flex items-center gap-1">
-        <LineSwatch color="#dc2626" thick /> 핵심
+        <LineSwatch color="#dc2626" thick /> 핵심 관계
       </span>
       <span className="flex items-center gap-1">
         <LineSwatch color="#a855f7" /> 사업 관계
       </span>
       <span className="flex items-center gap-1">
         <LineSwatch color="rgba(148,163,184,0.4)" /> 참고 관계
-      </span>
-      <span className="flex items-center gap-1">
-        <Dot color="#a855f7" /> 비상장·테마
       </span>
       <span className="flex items-center gap-1">
         <span

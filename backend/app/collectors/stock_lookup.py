@@ -14,6 +14,26 @@ _AMEX_CODES = {"ASE", "AMEX", "ASEMKT"}
 _KRX_CODES = {"KSC", "KOE", "KRX", "KOSPI", "KOSDAQ"}
 
 
+def _is_kr_ticker(value: str) -> bool:
+    return value.strip().isdigit() and len(value.strip()) == 6
+
+
+def _looks_malformed_name(name: str | None, ticker: str) -> bool:
+    """Detect provider artifacts accidentally stored as Korean stock names."""
+    n = (name or "").strip().upper()
+    t = ticker.strip().upper()
+    if not n:
+        return True
+    if _is_kr_ticker(t) and n == t:
+        return True
+    return (
+        "0P0000" in n
+        or n.startswith(f"{t}.KS,")
+        or n.startswith(f"{t}.KQ,")
+        or ("," in n and t in n)
+    )
+
+
 def _normalize_market(exchange: str, ticker_candidate: str = "") -> str:
     """yfinance exchange 코드를 정규화된 market 값으로 변환한다."""
     ex = exchange.upper()
@@ -33,10 +53,9 @@ def _lookup_yfinance(query: str) -> list[dict]:  # pragma: no cover
     import yfinance as yf
     q = query.upper().strip()
 
-    # 시도할 ticker 목록: 원본 + 한국 거래소 접미사
-    candidates = [q]
-    if q.isdigit():
-        candidates.extend([f"{q}.KS", f"{q}.KQ"])
+    # 한국 6자리 코드는 bare numeric Yahoo lookup 이 mutual fund/지수 symbol
+    # artifact 를 반환할 수 있어, 거래소 suffix 후보만 시도한다.
+    candidates = [f"{q}.KS", f"{q}.KQ"] if _is_kr_ticker(q) else [q]
 
     for candidate in candidates:
         try:
@@ -44,12 +63,15 @@ def _lookup_yfinance(query: str) -> list[dict]:  # pragma: no cover
             info = t.info or {}
             if not info.get("symbol") or not info.get("shortName"):
                 continue
+            short_name = info.get("shortName", info["symbol"])
+            if _looks_malformed_name(short_name, q):
+                continue
             exchange = (info.get("exchange") or "").upper()
             market = _normalize_market(exchange, candidate)
             ticker_clean = q if market == "KRX" else info["symbol"]
             return [{
                 "ticker": ticker_clean,
-                "name": info.get("shortName", info["symbol"]),
+                "name": short_name,
                 "market": market,
                 "sector": info.get("sector", ""),
                 "current_price": info.get("currentPrice") or info.get("regularMarketPrice") or 0,
@@ -109,8 +131,6 @@ def _lookup_fdr(query: str) -> list[dict]:  # pragma: no cover
         results = []
         for _, row in matches.iterrows():
             market = row.get("Market", "KRX")
-            if market in ("KOSPI", "KOSDAQ"):
-                market = "KRX"
             results.append({
                 "ticker": row["Code"],
                 "name": row["Name"],
@@ -159,11 +179,16 @@ async def register_stock(db: AsyncSession, ticker: str) -> Stock | None:
     existing = await db.execute(select(Stock).where(Stock.ticker == ticker))
     stock = existing.scalar_one_or_none()
     if stock:
-        return stock
+        return await repair_stock_metadata_if_needed(db, stock)
 
-    results = await asyncio.to_thread(_lookup_yfinance, ticker)
-    if not results:
+    if _is_kr_ticker(ticker):
         results = await asyncio.to_thread(_lookup_fdr, ticker)
+        if not results:
+            results = await asyncio.to_thread(_lookup_yfinance, ticker)
+    else:
+        results = await asyncio.to_thread(_lookup_yfinance, ticker)
+        if not results:
+            results = await asyncio.to_thread(_lookup_fdr, ticker)
     if not results:
         return None
 
@@ -176,6 +201,35 @@ async def register_stock(db: AsyncSession, ticker: str) -> Stock | None:
         current_price=info.get("current_price", 0),
     )
     db.add(stock)
+    await db.commit()
+    await db.refresh(stock)
+    return stock
+
+
+async def repair_stock_metadata_if_needed(db: AsyncSession, stock: Stock) -> Stock:
+    """Repair provider-artifact names for existing Korean stock rows.
+
+    A polluted row should not stay visible forever just because it already
+    exists in DB. Read paths call this cheap guard before rendering labels.
+    """
+    if not _is_kr_ticker(stock.ticker):
+        return stock
+    if not _looks_malformed_name(stock.name, stock.ticker):
+        return stock
+
+    results = await asyncio.to_thread(_lookup_fdr, stock.ticker)
+    if not results:
+        results = await asyncio.to_thread(_lookup_yfinance, stock.ticker)
+    if not results:
+        return stock
+
+    info = results[0]
+    stock.name = info["name"]
+    stock.market = info.get("market") or stock.market
+    stock.sector = info.get("sector", "") or stock.sector or ""
+    current_price = info.get("current_price")
+    if current_price:
+        stock.current_price = current_price
     await db.commit()
     await db.refresh(stock)
     return stock

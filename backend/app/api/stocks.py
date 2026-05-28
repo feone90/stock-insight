@@ -7,7 +7,11 @@ from sqlalchemy import func as sql_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.favorites import _get_user_id
-from app.collectors.stock_lookup import register_stock, search_external
+from app.collectors.stock_lookup import (
+    register_stock,
+    repair_stock_metadata_if_needed,
+    search_external,
+)
 from app.database import get_db
 from app.models import Favorite, PriceHistory, Stock
 from app.models.disclosure import Disclosure
@@ -62,6 +66,10 @@ async def search(q: str = "", db: AsyncSession = Depends(get_db)):
     )
     result = await db.execute(query)
     db_stocks = result.scalars().all()
+    db_stocks = [
+        await repair_stock_metadata_if_needed(db, stock)
+        for stock in db_stocks
+    ]
     db_tickers = {s.ticker for s in db_stocks}
 
     responses = [
@@ -99,6 +107,7 @@ async def _get_or_register_stock(ticker: str, db: AsyncSession) -> Stock:
     result = await db.execute(select(Stock).where(Stock.ticker == ticker))
     stock = result.scalar_one_or_none()
     if stock:
+        stock = await repair_stock_metadata_if_needed(db, stock)
         # P1.7 Phase B: tier 3 → 2 자동 승격 (이미 tier 1/2면 noop).
         asyncio.create_task(promote_to_tier_2(stock.id))
         return stock

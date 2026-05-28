@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
+from app.collectors.stock_lookup import repair_stock_metadata_if_needed
 from app.markets import KR_MARKETS, US_MARKETS
 from app.models import RelationCandidate, Stock, StockRelation
 from app.services.ontology.evidence import (
@@ -87,6 +88,7 @@ async def get_subgraph(
         ).scalar_one_or_none()
         if center is None:
             raise HTTPException(404, f"종목 {ticker} 없음")
+        center = await repair_stock_metadata_if_needed(session, center)
 
         seen_ids: set[int] = {center.id}
         seen_tickers: dict[str, Stock] = {center.ticker: center}
@@ -111,6 +113,8 @@ async def get_subgraph(
                         select(Stock).where(Stock.ticker.in_(target_tickers))
                     )
                 ).scalars().all()
+                for target_stock in target_stocks:
+                    await repair_stock_metadata_if_needed(session, target_stock)
                 target_by_ticker = {s.ticker: s for s in target_stocks}
                 for r in rels:
                     target_stock = target_by_ticker.get(r.to_target)
