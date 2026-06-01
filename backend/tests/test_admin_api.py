@@ -35,7 +35,11 @@ async def test_sync_stock(client):
     with patch("app.api.admin.sync_prices", new_callable=AsyncMock, return_value=mock_results["prices"]), \
          patch("app.api.admin.sync_financials", new_callable=AsyncMock, return_value=mock_results["financials"]), \
          patch("app.api.admin.sync_news", new_callable=AsyncMock, return_value=mock_results["news"]), \
-         patch("app.api.admin.sync_disclosures", new_callable=AsyncMock, return_value=mock_results["disclosures"]):
+         patch("app.api.admin.sync_disclosures", new_callable=AsyncMock, return_value=mock_results["disclosures"]), \
+         patch("app.api.admin.can_proceed", return_value=True, create=True), \
+         patch("app.api.admin.settings") as mock_settings, \
+         patch("app.api.admin.analyze", new_callable=AsyncMock, create=True) as mock_analyze:
+        mock_settings.llm_api_key = "test-key"
         resp = await client.post("/api/admin/sync/stock/005930")
 
     assert resp.status_code == 200
@@ -46,7 +50,9 @@ async def test_sync_stock(client):
     assert data["synced"]["financials"] == 1
     assert data["synced"]["news"] == 5
     assert data["synced"]["disclosures"] == 3
+    assert data["synced"]["analysis"] is True
     assert data["errors"] == []
+    mock_analyze.assert_awaited_once_with("005930")
 
 
 @pytest.mark.asyncio
@@ -105,7 +111,11 @@ async def test_sync_all(client):
          patch("app.api.admin.sync_financials", new_callable=AsyncMock, return_value={"financials_synced": 1}), \
          patch("app.api.admin.sync_news", new_callable=AsyncMock, return_value={"news_synced": 5}), \
          patch("app.api.admin.sync_disclosures", new_callable=AsyncMock, return_value={"disclosures_synced": 0}), \
-         patch("app.api.admin.sync_exchange_rates", new_callable=AsyncMock, return_value={"exchange_rates_synced": 3}):
+         patch("app.api.admin.sync_exchange_rates", new_callable=AsyncMock, return_value={"exchange_rates_synced": 3}), \
+         patch("app.api.admin.can_proceed", return_value=True, create=True), \
+         patch("app.api.admin.settings") as mock_settings, \
+         patch("app.api.admin.analyze", new_callable=AsyncMock, create=True) as mock_analyze:
+        mock_settings.llm_api_key = "test-key"
         resp = await client.post("/api/admin/sync/all")
 
     assert resp.status_code == 200
@@ -114,6 +124,8 @@ async def test_sync_all(client):
     assert data["global_synced"] is True
     assert isinstance(data["stocks_synced"], list)
     assert data["total_synced"]["exchange_rates"] == 3
+    assert data["total_synced"]["analyses"] == len(data["stocks_synced"])
+    assert mock_analyze.await_count == len(data["stocks_synced"])
 
 
 @pytest.mark.asyncio

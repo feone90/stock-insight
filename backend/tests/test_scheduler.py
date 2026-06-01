@@ -57,17 +57,15 @@ class TestSyncSingleStock:
     @patch("app.scheduler.sync_financials", new_callable=AsyncMock)
     @patch("app.scheduler.sync_news", new_callable=AsyncMock)
     @patch("app.scheduler.sync_disclosures", new_callable=AsyncMock)
-    @patch("app.scheduler.analyze_stock", new_callable=AsyncMock)
-    @patch("app.scheduler.get_adapter")
+    @patch("app.scheduler.analyze", new_callable=AsyncMock)
+    @patch("app.scheduler.can_proceed", return_value=True)
     @patch("app.scheduler.settings")
-    async def test_success_with_llm(self, mock_settings, mock_get_adapter, mock_analyze, mock_disc, mock_news, mock_fin, mock_prices, mock_session):
+    async def test_success_with_v2_analysis(self, mock_settings, mock_can_proceed, mock_analyze, mock_disc, mock_news, mock_fin, mock_prices, mock_session):
         mock_settings.llm_api_key = "test-key"
-        mock_settings.llm_provider = "azure_openai"
         mock_prices.return_value = {"prices_synced": 10}
         mock_fin.return_value = {"financials_synced": 1}
         mock_news.return_value = {"news_synced": 5}
         mock_disc.return_value = {"disclosures_synced": 3}
-        mock_analyze.return_value = {"analysis_created": True}
 
         db_mock = AsyncMock()
         mock_session.return_value.__aenter__ = AsyncMock(return_value=db_mock)
@@ -76,7 +74,8 @@ class TestSyncSingleStock:
         result = await _sync_single_stock(_make_stock())
 
         assert result["analysis"] is True
-        mock_analyze.assert_called_once()
+        mock_can_proceed.assert_called()
+        mock_analyze.assert_awaited_once_with("005930")
 
     @pytest.mark.asyncio
     @patch("app.scheduler.async_session")
@@ -255,6 +254,7 @@ async def db_for_v2_batch(db, monkeypatch):
 
     monkeypatch.setattr("app.services.analyst.dedup.async_session", _session)
     monkeypatch.setattr("app.services.analyst.engine.async_session", _session)
+    monkeypatch.setattr("app.scheduler.async_session", _session)
     return db
 
 
@@ -274,19 +274,20 @@ async def test_run_kr_batch_analyzes_only_kr_unique(db_for_v2_batch, monkeypatch
     ])
     await db.commit()
 
-    called: list[str] = []
+    synced: list[str] = []
 
-    async def fake_analyze(ticker: str):
-        called.append(ticker)
+    async def fake_sync(stock):
+        synced.append(stock.ticker)
+        return {"ticker": stock.ticker, "analysis": True, "errors": []}
 
-    monkeypatch.setattr("app.scheduler.analyze", fake_analyze)
+    monkeypatch.setattr("app.scheduler._sync_single_stock", fake_sync)
     monkeypatch.setattr("app.scheduler.can_proceed", lambda: True)
 
     await run_kr_analysis_batch()
     # Seed data may include other KR favorites — assert ours are present, US is absent.
-    assert "KR1" in called
-    assert "KR2" in called
-    assert "US1" not in called
+    assert "KR1" in synced
+    assert "KR2" in synced
+    assert "US1" not in synced
 
 
 @pytest.mark.asyncio
@@ -304,14 +305,14 @@ async def test_run_us_batch_analyzes_only_us_unique(db_for_v2_batch, monkeypatch
             db.add(Favorite(user_id="u", stock_id=r.id))
     await db.commit()
 
-    called: list[str] = []
-    monkeypatch.setattr("app.scheduler.analyze", lambda t: _push(called, t))
+    synced: list[str] = []
+    monkeypatch.setattr("app.scheduler._sync_single_stock", lambda stock: _push(synced, stock.ticker))
     monkeypatch.setattr("app.scheduler.can_proceed", lambda: True)
 
     await run_us_analysis_batch()
-    assert "US10" in called
-    assert "US20" in called
-    assert "KR_X" not in called
+    assert "US10" in synced
+    assert "US20" in synced
+    assert "KR_X" not in synced
 
 
 @pytest.mark.asyncio

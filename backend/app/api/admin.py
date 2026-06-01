@@ -13,10 +13,22 @@ from app.collectors.financials import sync_financials
 from app.collectors.news import sync_news
 from app.collectors.disclosure import sync_disclosures
 from app.collectors.exchange_rate import sync_exchange_rates
-from app.services.llm.adapter import get_adapter
-from app.services.llm.analyzer import analyze_stock
+from app.services.analyst.cost import can_proceed
+from app.services.analyst.engine import analyze
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+async def _run_v2_analysis(ticker: str) -> dict:
+    if not settings.llm_api_key:
+        return {"analysis_created": False}
+    if not can_proceed():
+        return {"analysis_created": False, "error": "daily analysis budget exceeded"}
+    try:
+        await analyze(ticker)
+        return {"analysis_created": True}
+    except Exception as e:  # noqa: BLE001
+        return {"analysis_created": False, "error": f"v2 analysis failed: {e}"}
 
 
 @router.post("/sync/stock/{ticker}", response_model=SyncResult)
@@ -28,10 +40,7 @@ async def sync_stock(stock: Stock = Depends(get_stock_or_404), db: AsyncSession 
     disclosures_result = await sync_disclosures(db, stock)
 
     # LLM 분석 (API 키가 설정된 경우만)
-    analysis_result = {"analysis_created": False}
-    if settings.llm_api_key:
-        adapter = get_adapter()
-        analysis_result = await analyze_stock(db, stock, adapter)
+    analysis_result = await _run_v2_analysis(stock.ticker)
 
     errors = []
     for r in [prices_result, financials_result, news_result, disclosures_result, analysis_result]:
@@ -85,9 +94,7 @@ async def sync_all(db: AsyncSession = Depends(get_db), _admin: UserInfo = Depend
     errors = []
     tickers_synced = []
 
-    # LLM 어댑터 (키 설정 시 한 번만 생성)
-    adapter = get_adapter() if settings.llm_api_key else None
-
+    # Run current v2 card analysis after collectors when an LLM key is configured.
     for stock in stocks:
         tickers_synced.append(stock.ticker)
 
@@ -96,10 +103,8 @@ async def sync_all(db: AsyncSession = Depends(get_db), _admin: UserInfo = Depend
         news_result = await sync_news(db, stock)
         disclosures_result = await sync_disclosures(db, stock)
 
-        # LLM 분석
-        analysis_result = {"analysis_created": False}
-        if adapter:
-            analysis_result = await analyze_stock(db, stock, adapter)
+        # v2 card analysis
+        analysis_result = await _run_v2_analysis(stock.ticker)
 
         total["prices"] += prices_result.get("prices_synced", 0)
         total["financials"] += financials_result.get("financials_synced", 0)

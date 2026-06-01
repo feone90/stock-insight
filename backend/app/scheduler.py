@@ -26,8 +26,6 @@ from app.services.analyst.cost import can_proceed
 from app.services.analyst.dedup import unique_favorite_tickers
 from app.services.analyst.engine import analyze
 from app.services.analyst.daily_drivers import run_daily_driver_batch
-from app.services.llm.adapter import get_adapter
-from app.services.llm.analyzer import analyze_stock
 from app.services.ontology import (
     extract_news_relations_for_universe,
     extract_sec_contracts_for_universe,
@@ -41,6 +39,19 @@ logger = logging.getLogger(__name__)
 SYNC_SEMAPHORE = asyncio.Semaphore(3)
 
 scheduler = AsyncIOScheduler()
+
+
+async def _run_v2_analysis(ticker: str) -> dict:
+    if not settings.llm_api_key:
+        return {"analysis_created": False}
+    if not can_proceed():
+        return {"analysis_created": False, "error": "daily analysis budget exceeded"}
+    try:
+        await analyze(ticker)
+        return {"analysis_created": True}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("v2 analysis failed for %s: %s", ticker, e)
+        return {"analysis_created": False, "error": f"v2 analysis failed: {e}"}
 
 
 async def _sync_single_stock(stock: Stock) -> dict:
@@ -64,13 +75,11 @@ async def _sync_single_stock(stock: Stock) -> dict:
                 }
 
                 # LLM 분석
-                if settings.llm_api_key:
-                    adapter = get_adapter()
-                    analysis = await analyze_stock(db, stock, adapter)
-                    results["analysis"] = analysis.get("analysis_created", False)
+                analysis = await _run_v2_analysis(stock.ticker)
+                results["analysis"] = analysis.get("analysis_created", False)
 
                 errors = []
-                for r in [prices, financials, news, disclosures]:
+                for r in [prices, financials, news, disclosures, analysis]:
                     if "error" in r:
                         errors.append(r["error"])
                 results["errors"] = errors
@@ -80,6 +89,17 @@ async def _sync_single_stock(stock: Stock) -> dict:
                 results = {"ticker": stock.ticker, "errors": [str(e)]}
 
             return results
+
+
+async def _stocks_for_tickers(tickers: list[str]) -> list[Stock]:
+    if not tickers:
+        return []
+    async with async_session() as db:
+        rows = (
+            await db.execute(select(Stock).where(Stock.ticker.in_(tickers)))
+        ).scalars().all()
+    by_ticker = {stock.ticker: stock for stock in rows}
+    return [by_ticker[ticker] for ticker in tickers if ticker in by_ticker]
 
 
 async def _sync_single_price(stock: Stock) -> dict:
@@ -217,14 +237,17 @@ async def run_kr_analysis_batch() -> None:
         return
     tickers = await unique_favorite_tickers(markets=list(KR_MARKETS))
     logger.info("kr v2 batch: %d unique tickers", len(tickers))
-    for t in tickers:
+    stocks = await _stocks_for_tickers(tickers)
+    for stock in stocks:
         if not can_proceed():
-            logger.warning("kr v2 batch halted at %s: budget exceeded", t)
+            logger.warning("kr v2 batch halted at %s: budget exceeded", stock.ticker)
             break
         try:
-            await analyze(t)
+            result = await _sync_single_stock(stock)
+            if result.get("errors"):
+                logger.warning("kr v2 batch sync/analyze issues for %s: %s", stock.ticker, result["errors"])
         except Exception:
-            logger.exception("kr v2 batch analyze failed for %s", t)
+            logger.exception("kr v2 batch sync/analyze failed for %s", stock.ticker)
 
 
 async def run_sec_8k_extraction() -> None:
@@ -364,14 +387,17 @@ async def run_us_analysis_batch() -> None:
         return
     tickers = await unique_favorite_tickers(markets=list(US_MARKETS))
     logger.info("us v2 batch: %d unique tickers", len(tickers))
-    for t in tickers:
+    stocks = await _stocks_for_tickers(tickers)
+    for stock in stocks:
         if not can_proceed():
-            logger.warning("us v2 batch halted at %s: budget exceeded", t)
+            logger.warning("us v2 batch halted at %s: budget exceeded", stock.ticker)
             break
         try:
-            await analyze(t)
+            result = await _sync_single_stock(stock)
+            if result.get("errors"):
+                logger.warning("us v2 batch sync/analyze issues for %s: %s", stock.ticker, result["errors"])
         except Exception:
-            logger.exception("us v2 batch analyze failed for %s", t)
+            logger.exception("us v2 batch sync/analyze failed for %s", stock.ticker)
 
 
 def init_scheduler():
@@ -382,7 +408,7 @@ def init_scheduler():
 
     tz = ZoneInfo(settings.scheduler_timezone)
 
-    # Phase A keyword sync (legacy, still active)
+    # Favorite sync: collectors first, then current v2 card analysis.
     morning_h, morning_m = map(int, settings.scheduler_morning.split(":"))
     evening_h, evening_m = map(int, settings.scheduler_evening.split(":"))
 
