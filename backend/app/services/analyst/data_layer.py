@@ -475,8 +475,6 @@ def _simplify_company_name(name: str | None) -> str:
 def _news_relevance_score(stock: Stock, row: News) -> int:
     title = row.title or ""
     content = row.content or ""
-    if len(content.strip()) < 120:
-        return -20
     title_norm = _compact_text(title)
     body_norm = _compact_text(content)
     aliases = [_compact_text(a) for a in _stock_news_aliases(stock)]
@@ -495,6 +493,9 @@ def _news_relevance_score(stock: Stock, row: News) -> int:
             body_mentions = max(body_mentions, mentions)
             score += min(mentions, 3)
 
+    if len(content.strip()) < 120 and not _has_strong_title_match(stock, title_norm):
+        score -= 8
+
     # A single body-only mention in a market wrap/list is not a company news item.
     if not title_matched and body_mentions < 2:
         return -10
@@ -507,6 +508,16 @@ def _news_relevance_score(stock: Stock, row: News) -> int:
         score -= 10
     # If the article never names the stock, it is not a stock-specific card item.
     return score
+
+
+def _has_strong_title_match(stock: Stock, title_norm: str) -> bool:
+    candidates = set()
+    name = _compact_text(stock.name)
+    simplified = _compact_text(_simplify_company_name(stock.name))
+    for alias in (name, simplified):
+        if len(alias) >= 4:
+            candidates.add(alias)
+    return any(alias and alias in title_norm for alias in candidates)
 
 
 def _is_low_information_news(title: str, body: str) -> bool:

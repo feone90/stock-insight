@@ -311,6 +311,78 @@ async def test_fetch_recent_news_filters_older_than_14_days(db_for_data_layer):
 
 
 @pytest.mark.asyncio
+async def test_fetch_recent_news_keeps_short_title_match(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="242040T", name="나무기술", market="KOSDAQ", sector="소프트웨어", current_price=10)
+    db.add(s)
+    await db.flush()
+    db.add(
+        News(
+            stock_id=s.id,
+            title="나무기술, AI 인프라 확장 올라탔다",
+            source="Google News",
+            url="https://news.google.com/rss/articles/example",
+            published_at=datetime.utcnow(),
+            content="나무기술 AI 인프라 관련 짧은 RSS 요약",
+        )
+    )
+    await db.commit()
+
+    res = await _fetch_recent_news("242040T")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == ["나무기술, AI 인프라 확장 올라탔다"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_news_drops_short_generic_name_title_match(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="001680T", name="대상", market="KOSPI", sector="식품", current_price=10)
+    db.add(s)
+    await db.flush()
+    db.add(
+        News(
+            stock_id=s.id,
+            title="대상 수상자 발표",
+            source="Google News",
+            url="https://news.google.com/rss/articles/generic",
+            published_at=datetime.utcnow(),
+            content="대상 수상자 명단 공개",
+        )
+    )
+    await db.commit()
+
+    res = await _fetch_recent_news("001680T")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_news_drops_short_numeric_ticker_title_without_company_name(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="242041", name="나무기술", market="KOSDAQ", sector="소프트웨어", current_price=10)
+    db.add(s)
+    await db.flush()
+    db.add(
+        News(
+            stock_id=s.id,
+            title="242041, AI 인프라 확장 기대",
+            source="Google News",
+            url="https://news.google.com/rss/articles/ticker-only",
+            published_at=datetime.utcnow(),
+            content="AI 인프라 관련 짧은 RSS 요약",
+        )
+    )
+    await db.commit()
+
+    res = await _fetch_recent_news("242041")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == []
+
+
+@pytest.mark.asyncio
 async def test_fetch_recent_news_prioritizes_stock_specific_items(db_for_data_layer):
     db = db_for_data_layer
     s = Stock(ticker="660TEST", name="SK하이닉스", market="KRX", sector="반도체", current_price=10)
