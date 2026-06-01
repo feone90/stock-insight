@@ -513,7 +513,44 @@ async def test_build_news_never_surfaces_english_summary_for_us_news(monkeypatch
     )
 
     assert "Microsoft shares rose" not in items[0].summary
-    assert "영문 기사 본문" in items[0].summary
+    assert "영문 기사 본문" not in items[0].summary
+    assert items[0].summary == ""
+    assert items[0].key_quote is None
+
+
+@pytest.mark.asyncio
+async def test_build_news_uses_korean_title_fallback_for_english_body(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer.llm_classify_news",
+        AsyncMock(return_value={"items": [{"index": 0, "impact": "positive"}]}),
+    )
+    monkeypatch.setattr(
+        "app.services.analyst.data_layer._analyze_news_items",
+        AsyncMock(return_value={}),
+    )
+    pool = _CitationPool()
+
+    items = await _build_news(
+        {
+            "items": [
+                {
+                    "title": "나무기술 주가 18% 급등...관광 데이터 MCP 사업 추진 - gukjenews.com",
+                    "source": "gukjenews.com",
+                    "url": "https://www.gukjenews.com/news/articleView.html?idxno=123",
+                    "published_at": datetime.utcnow(),
+                    "summary": (
+                        "The article page metadata was collected in English boilerplate. "
+                        "The Korean summary generation did not return usable Korean output."
+                    ),
+                }
+            ]
+        },
+        pool,
+    )
+
+    assert "영문 기사 본문" not in items[0].summary
+    assert "gukjenews.com" not in items[0].summary
+    assert items[0].summary == "제목 기준으로 나무기술 주가 18% 급등...관광 데이터 MCP 사업 추진 소식이 전해졌습니다."
     assert items[0].key_quote is None
 
 
@@ -554,6 +591,8 @@ async def test_build_news_rejects_non_korean_llm_output_for_us_news(monkeypatch)
     )
 
     assert "Microsoft shares rose" not in items[0].summary
+    assert "영문 기사 본문" not in items[0].summary
+    assert items[0].summary == ""
     assert items[0].key_quote is None
     assert items[0].why_it_matters is None
 

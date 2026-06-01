@@ -544,8 +544,9 @@ def _news_summary(raw_summary: str, title: str) -> str:
 def _fallback_news_analysis(raw_summary: str, title: str) -> dict[str, str | None]:
     body = (raw_summary or "").strip()
     if _is_mostly_english(body):
+        title_summary = _title_based_korean_summary(title)
         return {
-            "summary": "영문 기사 본문은 확보했지만 한국어 요약 생성에 실패했습니다. 뉴스/공시 새로고침 또는 AI 의견 다시로 재생성해 주세요.",
+            "summary": title_summary,
             "key_quote": None,
             "why_it_matters": None,
         }
@@ -565,6 +566,18 @@ def _fallback_news_analysis(raw_summary: str, title: str) -> dict[str, str | Non
         "key_quote": None,
         "why_it_matters": None,
     }
+
+
+def _title_based_korean_summary(title: str) -> str:
+    clean_title = re.sub(r"\s+", " ", (title or "").strip())
+    clean_title = re.sub(
+        r"\s+[-|]\s+[A-Za-z0-9_.-]+\.[A-Za-z]{2,}.*$",
+        "",
+        clean_title,
+    ).strip()
+    if not clean_title or not _contains_hangul(clean_title):
+        return ""
+    return f"제목 기준으로 {clean_title} 소식이 전해졌습니다."
 
 
 def _first_sentences(text: str, max_chars: int = NEWS_SUMMARY_MAX) -> str:
