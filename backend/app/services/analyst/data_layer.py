@@ -79,6 +79,9 @@ _LOW_INFORMATION_NEWS_TERMS = (
     "향하는", "입장하는", "퇴장하는", "발언하는", "답하는", "악수하는",
     "기념촬영", "포즈", "회의장", "협상장",
 )
+_SPECIAL_NEWS_ALIASES_BY_TICKER = {
+    "950160": {"TG-C", "TGC", "인보사", "티지씨"},
+}
 
 
 class _CitationPool:
@@ -456,7 +459,12 @@ def _stock_news_aliases(stock: Stock) -> set[str]:
     simplified = _simplify_company_name(stock.name)
     if simplified:
         aliases.add(simplified)
+    aliases.update(_special_news_aliases(stock))
     return {a for a in aliases if a}
+
+
+def _special_news_aliases(stock: Stock) -> set[str]:
+    return set(_SPECIAL_NEWS_ALIASES_BY_TICKER.get((stock.ticker or "").upper(), set()))
 
 
 def _simplify_company_name(name: str | None) -> str:
@@ -511,7 +519,7 @@ def _news_relevance_score(stock: Stock, row: News) -> int:
 
 
 def _has_strong_title_match(stock: Stock, title_norm: str) -> bool:
-    candidates = set()
+    candidates = {_compact_text(alias) for alias in _special_news_aliases(stock)}
     name = _compact_text(stock.name)
     simplified = _compact_text(_simplify_company_name(stock.name))
     for alias in (name, simplified):

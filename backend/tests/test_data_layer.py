@@ -383,6 +383,54 @@ async def test_fetch_recent_news_drops_short_numeric_ticker_title_without_compan
 
 
 @pytest.mark.asyncio
+async def test_fetch_recent_news_keeps_kolon_tissuegene_product_alias_title(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="950160", name="코오롱티슈진", market="KOSDAQ", sector="바이오", current_price=10)
+    db.add(s)
+    await db.flush()
+    db.add(
+        News(
+            stock_id=s.id,
+            title="코오롱, 계열사 출자·이사회 재편…'TG-C' 상업화 총력",
+            source="딜사이트",
+            url="https://news.google.com/rss/articles/kolon-tgc",
+            published_at=datetime.utcnow(),
+            content="코오롱 계열사의 TG-C 상업화 관련 짧은 RSS 요약",
+        )
+    )
+    await db.commit()
+
+    res = await _fetch_recent_news("950160")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == ["코오롱, 계열사 출자·이사회 재편…'TG-C' 상업화 총력"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_news_drops_kolon_group_news_without_product_alias(db_for_data_layer):
+    db = db_for_data_layer
+    s = Stock(ticker="950161", name="코오롱티슈진", market="KOSDAQ", sector="바이오", current_price=10)
+    db.add(s)
+    await db.flush()
+    db.add(
+        News(
+            stock_id=s.id,
+            title="코오롱, 패션 계열사 실적 개선 기대",
+            source="Google News",
+            url="https://news.google.com/rss/articles/kolon-group",
+            published_at=datetime.utcnow(),
+            content="코오롱 그룹 패션 사업 관련 짧은 RSS 요약",
+        )
+    )
+    await db.commit()
+
+    res = await _fetch_recent_news("950161")
+    titles = [it["title"] for it in res["items"]]
+
+    assert titles == []
+
+
+@pytest.mark.asyncio
 async def test_fetch_recent_news_prioritizes_stock_specific_items(db_for_data_layer):
     db = db_for_data_layer
     s = Stock(ticker="660TEST", name="SK하이닉스", market="KRX", sector="반도체", current_price=10)
